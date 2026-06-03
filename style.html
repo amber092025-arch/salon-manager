@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Amber Style Gallery</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --cream: #faf8f5;
+    --charcoal: #1a1a1a;
+    --warm: #c8a97e;
+    --warm-light: #f0e8dc;
+    --muted: #8a8278;
+    --border: #e8e2da;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--cream);
+    color: var(--charcoal);
+    font-family: 'Noto Sans JP', sans-serif;
+    font-weight: 300;
+    min-height: 100vh;
+  }
+
+  /* Header */
+  .header {
+    background: var(--charcoal);
+    padding: 28px 24px 24px;
+    text-align: center;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .header-salon {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 28px;
+    font-weight: 300;
+    color: #fff;
+    letter-spacing: 6px;
+    text-transform: uppercase;
+  }
+  .header-sub {
+    font-size: 10px;
+    color: var(--warm);
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    margin-top: 4px;
+  }
+
+  /* Filter bar */
+  .filter-wrap {
+    background: #fff;
+    border-bottom: 1px solid var(--border);
+    padding: 16px;
+    position: sticky;
+    top: 93px;
+    z-index: 90;
+  }
+  .filter-scroll {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+  .filter-scroll::-webkit-scrollbar { display: none; }
+  .filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .filter-group-label {
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: var(--muted);
+    text-transform: uppercase;
+    padding-left: 2px;
+  }
+  .filter-tags {
+    display: flex;
+    gap: 6px;
+  }
+  .filter-btn {
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--charcoal);
+    font-size: 12px;
+    font-family: 'Noto Sans JP', sans-serif;
+    font-weight: 300;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s;
+    flex-shrink: 0;
+  }
+  .filter-btn.active {
+    background: var(--charcoal);
+    border-color: var(--charcoal);
+    color: #fff;
+  }
+  .filter-clear {
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: 1px solid var(--warm);
+    background: #fff;
+    color: var(--warm);
+    font-size: 12px;
+    font-family: 'Noto Sans JP', sans-serif;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* Gallery */
+  .gallery-header {
+    padding: 24px 20px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .gallery-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 20px;
+    font-weight: 300;
+    font-style: italic;
+    color: var(--charcoal);
+  }
+  .gallery-count {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 1px;
+  }
+  .gallery {
+    padding: 0 12px 80px;
+    columns: 2;
+    column-gap: 10px;
+  }
+  .card {
+    break-inside: avoid;
+    margin-bottom: 10px;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #fff;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    animation: fadeUp 0.4s ease both;
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .card-photos {
+    position: relative;
+    width: 100%;
+  }
+  .card-img {
+    width: 100%;
+    aspect-ratio: 4/5;
+    object-fit: cover;
+    display: block;
+  }
+  .card-img-placeholder {
+    width: 100%;
+    aspect-ratio: 4/5;
+    background: linear-gradient(135deg, var(--warm-light), var(--border));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    opacity: 0.5;
+  }
+  .ba-toggle {
+    position: absolute;
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 4px;
+    background: rgba(0,0,0,0.5);
+    border-radius: 20px;
+    padding: 3px;
+  }
+  .ba-btn {
+    padding: 3px 10px;
+    border-radius: 16px;
+    border: none;
+    font-size: 10px;
+    cursor: pointer;
+    font-family: 'Noto Sans JP', sans-serif;
+    transition: all 0.2s;
+  }
+  .ba-btn.active { background: #fff; color: var(--charcoal); }
+  .ba-btn:not(.active) { background: transparent; color: rgba(255,255,255,0.7); }
+  .card-body {
+    padding: 10px 12px 12px;
+  }
+  .card-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 6px;
+  }
+  .card-tag {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--warm-light);
+    color: var(--warm);
+    font-weight: 400;
+  }
+  .card-tag.cat {
+    background: var(--charcoal);
+    color: #fff;
+  }
+  .card-date {
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 1px;
+  }
+
+  /* Empty */
+  .empty {
+    text-align: center;
+    padding: 80px 20px;
+    color: var(--muted);
+  }
+  .empty-icon { font-size: 48px; margin-bottom: 16px; opacity: 0.4; }
+  .empty-text { font-size: 14px; }
+
+  /* Loading */
+  .loading {
+    text-align: center;
+    padding: 80px 20px;
+  }
+  .loading-spinner {
+    width: 32px;
+    height: 32px;
+    border: 2px solid var(--border);
+    border-top-color: var(--warm);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 0 auto 16px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text { font-size: 13px; color: var(--muted); }
+
+  /* Footer */
+  .footer {
+    text-align: center;
+    padding: 20px;
+    font-size: 11px;
+    color: var(--muted);
+    background: #fff;
+    border-top: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-salon">Amber</div>
+  <div class="header-sub">Style Gallery</div>
+</div>
+
+<div class="filter-wrap" id="filterWrap" style="display:none">
+  <div class="filter-scroll" id="filterScroll"></div>
+</div>
+
+<div id="app">
+  <div class="loading">
+    <div class="loading-spinner"></div>
+    <div class="loading-text">スタイルを読み込み中...</div>
+  </div>
+</div>
+
+<div class="footer">
+  大阪府茨木市春日1－4－14 春日ビル4階　072－665－4644
+</div>
+
+<script>
+const SUPABASE_URL = "https://yvsavbxijdggzihvoram.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2c2F2YnhpamRnZ3ppaHZvcmFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NTkyNTEsImV4cCI6MjA5NTUzNTI1MX0.v_5yFWKizgOSUHifx10vSm7OEafy6fZhjy5cff-QHQw";
+
+const headers = {
+  "apikey": SUPABASE_KEY,
+  "Authorization": "Bearer " + SUPABASE_KEY
+};
+
+let allStyles = [];
+let tagCategories = [];
+let activeFilters = new Set();
+
+async function fetchData() {
+  const [visitsRes, catRes, itemRes] = await Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/visits?select=id,date,photo_data,tags&order=date.desc`, { headers }),
+    fetch(`${SUPABASE_URL}/rest/v1/tag_categories?select=*&order=sort_order`, { headers }),
+    fetch(`${SUPABASE_URL}/rest/v1/tag_items?select=*&order=sort_order`, { headers }),
+  ]);
+
+  const visits = await visitsRes.json();
+  const cats = await catRes.json();
+  const items = await itemRes.json();
+
+  tagCategories = (cats || []).map(c => ({
+    id: c.id, name: c.name,
+    items: (items || []).filter(i => i.category_id === c.id).map(i => i.name)
+  }));
+
+  // 写真があってタグがついているvisitのみ
+  allStyles = (visits || []).map(v => {
+    let pd = {};
+    try { pd = v.photo_data ? JSON.parse(v.photo_data) : {}; } catch(e) {}
+    const after = pd.after || [];
+    const before = pd.before || [];
+    return { id: v.id, date: v.date, after, before, tags: v.tags || [] };
+  }).filter(s => s.after.length > 0 || s.before.length > 0);
+
+  buildFilters();
+  renderGallery();
+}
+
+function buildFilters() {
+  const wrap = document.getElementById("filterWrap");
+  const scroll = document.getElementById("filterScroll");
+
+  if (tagCategories.length === 0) return;
+
+  scroll.innerHTML = "";
+
+  // 全解除ボタン
+  const clearBtn = document.createElement("button");
+  clearBtn.className = "filter-clear";
+  clearBtn.textContent = "すべて";
+  clearBtn.onclick = () => { activeFilters.clear(); updateFilterUI(); renderGallery(); };
+  scroll.appendChild(clearBtn);
+
+  // カテゴリ・サブタグ
+  tagCategories.forEach(cat => {
+    const allTags = [cat.name, ...cat.items];
+    const group = document.createElement("div");
+    group.className = "filter-group";
+    const label = document.createElement("div");
+    label.className = "filter-group-label";
+    label.textContent = cat.name;
+    const tagsDiv = document.createElement("div");
+    tagsDiv.className = "filter-tags";
+    allTags.forEach(tag => {
+      const btn = document.createElement("button");
+      btn.className = "filter-btn";
+      btn.textContent = tag;
+      btn.dataset.tag = tag;
+      btn.onclick = () => {
+        if (activeFilters.has(tag)) activeFilters.delete(tag);
+        else activeFilters.add(tag);
+        updateFilterUI();
+        renderGallery();
+      };
+      tagsDiv.appendChild(btn);
+    });
+    group.appendChild(label);
+    group.appendChild(tagsDiv);
+    scroll.appendChild(group);
+  });
+
+  wrap.style.display = "block";
+}
+
+function updateFilterUI() {
+  document.querySelectorAll(".filter-btn").forEach(btn => {
+    btn.classList.toggle("active", activeFilters.has(btn.dataset.tag));
+  });
+}
+
+function renderGallery() {
+  const app = document.getElementById("app");
+
+  let filtered = allStyles;
+  if (activeFilters.size > 0) {
+    filtered = allStyles.filter(s =>
+      [...activeFilters].every(f => s.tags.includes(f))
+    );
+  }
+
+  if (filtered.length === 0) {
+    app.innerHTML = `
+      <div class="empty">
+        <div class="empty-icon">✂️</div>
+        <div class="empty-text">スタイルがまだありません</div>
+      </div>`;
+    return;
+  }
+
+  // カテゴリ名のセット（判定用）
+  const catNames = new Set(tagCategories.map(c => c.name));
+
+  let html = `
+    <div class="gallery-header">
+      <div class="gallery-title">Latest Styles</div>
+      <div class="gallery-count">${filtered.length} styles</div>
+    </div>
+    <div class="gallery" id="gallery">`;
+
+  filtered.forEach((s, idx) => {
+    const hasBA = s.before.length > 0 && s.after.length > 0;
+    const afterUrl = s.after[0]?.url || "";
+    const beforeUrl = s.before[0]?.url || "";
+    const dt = new Date(s.date + "T00:00:00");
+    const dateStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,"0")}.${String(dt.getDate()).padStart(2,"0")}`;
+    const catTags = s.tags.filter(t => catNames.has(t));
+    const subTags = s.tags.filter(t => !catNames.has(t));
+
+    const baToggle = hasBA ? `
+      <div class="ba-toggle">
+        <button class="ba-btn active" onclick="showAfter(${s.id})" id="ab-${s.id}">After</button>
+        <button class="ba-btn" onclick="showBefore(${s.id})" id="bb-${s.id}">Before</button>
+      </div>` : "";
+
+    html += `
+      <div class="card" style="animation-delay:${idx * 0.04}s">
+        <div class="card-photos">
+          ${afterUrl
+            ? `<img class="card-img" id="img-${s.id}" src="${afterUrl}" alt="After" loading="lazy">`
+            : `<div class="card-img-placeholder">📷</div>`}
+          ${baToggle}
+        </div>
+        <div class="card-body">
+          <div class="card-tags">
+            ${catTags.map(t => `<span class="card-tag cat">${t}</span>`).join("")}
+            ${subTags.map(t => `<span class="card-tag">${t}</span>`).join("")}
+          </div>
+          <div class="card-date">${dateStr}</div>
+        </div>
+      </div>`;
+  });
+
+  html += `</div>`;
+  app.innerHTML = html;
+}
+
+window.showAfter = (id) => {
+  const s = allStyles.find(x => x.id === id);
+  if (!s || !s.after[0]) return;
+  document.getElementById("img-" + id).src = s.after[0].url;
+  document.getElementById("ab-" + id).classList.add("active");
+  document.getElementById("bb-" + id).classList.remove("active");
+};
+window.showBefore = (id) => {
+  const s = allStyles.find(x => x.id === id);
+  if (!s || !s.before[0]) return;
+  document.getElementById("img-" + id).src = s.before[0].url;
+  document.getElementById("bb-" + id).classList.add("active");
+  document.getElementById("ab-" + id).classList.remove("active");
+};
+
+fetchData().catch(e => {
+  document.getElementById("app").innerHTML = `
+    <div class="empty">
+      <div class="empty-icon">⚠️</div>
+      <div class="empty-text">読み込みに失敗しました</div>
+    </div>`;
+});
+</script>
+</body>
+</html>
