@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Amber Style Gallery</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --cream: #faf8f5;
+    --charcoal: #1a1a1a;
+    --warm: #c8a97e;
+    --warm-light: #f0e8dc;
+    --muted: #8a8278;
+    --border: #e8e2da;
+    --hp-red: #e8001b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--cream); color: var(--charcoal); font-family: 'Noto Sans JP', sans-serif; font-weight: 300; min-height: 100vh; }
+
+  .header { background: var(--charcoal); padding: 28px 24px 24px; text-align: center; position: sticky; top: 0; z-index: 100; }
+  .header-salon { font-family: 'Cormorant Garamond', serif; font-size: 28px; font-weight: 300; color: #fff; letter-spacing: 6px; text-transform: uppercase; }
+  .header-sub { font-size: 10px; color: var(--warm); letter-spacing: 4px; text-transform: uppercase; margin-top: 4px; }
+
+  .filter-wrap { background: #fff; border-bottom: 1px solid var(--border); padding: 14px 16px; position: sticky; top: 93px; z-index: 90; display: none; }
+  .filter-scroll { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+  .filter-scroll::-webkit-scrollbar { display: none; }
+  .filter-group { display: flex; flex-direction: column; gap: 5px; flex-shrink: 0; }
+  .filter-group-label { font-size: 9px; letter-spacing: 2px; color: var(--muted); text-transform: uppercase; padding-left: 2px; }
+  .filter-tags { display: flex; gap: 5px; }
+  .filter-btn { padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border); background: #fff; color: var(--charcoal); font-size: 11px; font-family: 'Noto Sans JP', sans-serif; font-weight: 300; cursor: pointer; white-space: nowrap; transition: all 0.2s; flex-shrink: 0; }
+  .filter-btn.active { background: var(--charcoal); border-color: var(--charcoal); color: #fff; }
+  .filter-clear { padding: 5px 12px; border-radius: 20px; border: 1px solid var(--warm); background: #fff; color: var(--warm); font-size: 11px; font-family: 'Noto Sans JP', sans-serif; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+
+  .gallery-header { padding: 20px 20px 10px; display: flex; justify-content: space-between; align-items: baseline; }
+  .gallery-title { font-family: 'Cormorant Garamond', serif; font-size: 20px; font-weight: 300; font-style: italic; }
+  .gallery-count { font-size: 11px; color: var(--muted); letter-spacing: 1px; }
+  .gallery { padding: 0 12px 100px; columns: 2; column-gap: 10px; }
+  .card { break-inside: avoid; margin-bottom: 10px; border-radius: 12px; overflow: hidden; background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,0.06); animation: fadeUp 0.4s ease both; cursor: pointer; }
+  .card:active { opacity: 0.85; transform: scale(0.98); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+  .card-photos { position: relative; width: 100%; }
+  .card-img { width: 100%; aspect-ratio: 4/5; object-fit: cover; display: block; }
+  .card-img-placeholder { width: 100%; aspect-ratio: 4/5; background: linear-gradient(135deg, var(--warm-light), var(--border)); display: flex; align-items: center; justify-content: center; font-size: 32px; opacity: 0.5; }
+  .card-body { padding: 8px 10px 10px; }
+  .card-tags { display: flex; flex-wrap: wrap; gap: 3px; }
+  .card-tag { font-size: 9px; padding: 2px 7px; border-radius: 10px; background: var(--warm-light); color: var(--warm); font-weight: 400; }
+  .card-tag.cat { background: var(--charcoal); color: #fff; }
+
+  /* Modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 1000; display: flex; flex-direction: column; opacity: 0; transition: opacity 0.25s; pointer-events: none; }
+  .modal-overlay.open { opacity: 1; pointer-events: all; }
+  .modal-inner { background: var(--cream); border-radius: 20px 20px 0 0; margin-top: auto; max-height: 92vh; overflow-y: auto; transform: translateY(40px); transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1); }
+  .modal-overlay.open .modal-inner { transform: translateY(0); }
+  .modal-handle { width: 36px; height: 4px; background: var(--border); border-radius: 2px; margin: 12px auto 0; }
+  .modal-close { position: absolute; top: 16px; right: 16px; width: 32px; height: 32px; border-radius: 50%; background: rgba(0,0,0,0.3); border: none; color: #fff; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 10; }
+
+  /* Modal photo */
+  .modal-photo-wrap { position: relative; width: 100%; background: #000; }
+  .modal-main-img { width: 100%; max-height: 80vw; object-fit: contain; display: block; background: #000; }
+  .modal-ba-row { display: flex; gap: 6px; padding: 10px 14px 0; }
+  .modal-thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; cursor: pointer; opacity: 0.6; border: 2px solid transparent; transition: all 0.2s; flex-shrink: 0; }
+  .modal-thumb.active { opacity: 1; border-color: var(--warm); }
+  .modal-thumb-label { font-size: 9px; color: var(--muted); text-align: center; margin-top: 3px; }
+
+  /* Modal body */
+  .modal-body { padding: 16px 20px 24px; }
+  .modal-style-name { font-size: 17px; font-weight: 700; color: var(--charcoal); margin-bottom: 8px; line-height: 1.4; }
+  .modal-style-comment { font-size: 13px; color: var(--muted); line-height: 1.7; margin-bottom: 14px; }
+  .modal-menus { margin-bottom: 14px; }
+  .modal-menu-item { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+  .modal-menu-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warm); flex-shrink: 0; }
+  .modal-menu-name { font-size: 14px; color: var(--charcoal); }
+  .modal-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 20px; }
+  .modal-tag { font-size: 11px; padding: 4px 12px; border-radius: 20px; background: var(--warm-light); color: var(--warm); }
+  .modal-tag.cat { background: var(--charcoal); color: #fff; }
+  .modal-btn-reserve { display: block; width: 100%; padding: 15px; border-radius: 12px; background: var(--hp-red); color: #fff; font-size: 15px; font-weight: 500; font-family: 'Noto Sans JP', sans-serif; text-decoration: none; text-align: center; letter-spacing: 1px; margin-bottom: 10px; }
+  .modal-btn-close { display: block; width: 100%; padding: 13px; border-radius: 12px; background: #fff; color: var(--muted); font-size: 14px; font-family: 'Noto Sans JP', sans-serif; border: 1px solid var(--border); cursor: pointer; text-align: center; }
+
+  .empty { text-align: center; padding: 80px 20px; color: var(--muted); }
+  .empty-icon { font-size: 48px; margin-bottom: 16px; opacity: 0.4; }
+  .empty-text { font-size: 14px; }
+  .loading { text-align: center; padding: 80px 20px; }
+  .loading-spinner { width: 32px; height: 32px; border: 2px solid var(--border); border-top-color: var(--warm); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text { font-size: 13px; color: var(--muted); }
+  .footer { text-align: center; padding: 20px; font-size: 11px; color: var(--muted); background: #fff; border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-salon">Amber</div>
+  <div class="header-sub">Style Gallery</div>
+</div>
+
+<div class="filter-wrap" id="filterWrap">
+  <div class="filter-scroll" id="filterScroll"></div>
+</div>
+
+<div id="app">
+  <div class="loading">
+    <div class="loading-spinner"></div>
+    <div class="loading-text">スタイルを読み込み中...</div>
+  </div>
+</div>
+
+<!-- Detail Modal -->
+<div class="modal-overlay" id="modal" onclick="handleOverlayClick(event)">
+  <div class="modal-inner" id="modalInner">
+    <div class="modal-handle"></div>
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div id="modalContent"></div>
+  </div>
+</div>
+
+<div class="footer">
+  大阪府茨木市春日1－4－14 春日ビル4階　072－665－4644
+</div>
+
+<script>
+const SUPABASE_URL = "https://yvsavbxijdggzihvoram.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2c2F2YnhpamRnZ3ppaHZvcmFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NTkyNTEsImV4cCI6MjA5NTUzNTI1MX0.v_5yFWKizgOSUHifx10vSm7OEafy6fZhjy5cff-QHQw";
+const HP_URL = "https://beauty.hotpepper.jp/slnH000767692/";
+const MENU_COLORS = ["#00b4a6","#ff9500","#ff4d88","#5856d6","#34c759","#ff6b6b","#007aff","#c8a97e"];
+const headers = { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY };
+
+let allStyles = [];
+let tagCategories = [];
+let activeFilters = new Set();
+let currentModalId = null;
+let currentModalPhotoType = "after";
+
+async function fetchData() {
+  const [visitsRes, catRes, itemRes] = await Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/visits?select=id,date,photo_data,tags,menus,style_name,style_comment,is_public&order=date.desc`, { headers }),
+    fetch(`${SUPABASE_URL}/rest/v1/tag_categories?select=*&order=sort_order`, { headers }),
+    fetch(`${SUPABASE_URL}/rest/v1/tag_items?select=*&order=sort_order`, { headers }),
+  ]);
+  const visits = await visitsRes.json();
+  const cats = await catRes.json();
+  const items = await itemRes.json();
+
+  tagCategories = (cats || []).map(c => ({
+    id: c.id, name: c.name,
+    items: (items || []).filter(i => i.category_id === c.id).map(i => i.name)
+  }));
+
+  allStyles = (visits || []).map(v => {
+    let pd = {};
+    try { pd = v.photo_data ? JSON.parse(v.photo_data) : {}; } catch(e) {}
+    return {
+      id: v.id, date: v.date,
+      isPublic: v.is_public || false,
+      after: pd.after || [], before: pd.before || [],
+      tags: v.tags || [],
+      menus: v.menus || [],
+      styleName: v.style_name || "",
+      styleComment: v.style_comment || ""
+    };
+  }).filter(s => (s.after.length > 0 || s.before.length > 0) && s.isPublic);
+
+  buildFilters();
+  renderGallery();
+}
+
+function buildFilters() {
+  const scroll = document.getElementById("filterScroll");
+  const wrap = document.getElementById("filterWrap");
+  if (!tagCategories.length) return;
+  scroll.innerHTML = "";
+
+  const clearBtn = document.createElement("button");
+  clearBtn.className = "filter-clear";
+  clearBtn.textContent = "すべて";
+  clearBtn.onclick = () => { activeFilters.clear(); updateFilterUI(); renderGallery(); };
+  scroll.appendChild(clearBtn);
+
+  tagCategories.forEach(cat => {
+    const group = document.createElement("div");
+    group.className = "filter-group";
+    const label = document.createElement("div");
+    label.className = "filter-group-label";
+    label.textContent = cat.name;
+    const tagsDiv = document.createElement("div");
+    tagsDiv.className = "filter-tags";
+    [cat.name, ...cat.items].forEach(tag => {
+      const btn = document.createElement("button");
+      btn.className = "filter-btn";
+      btn.textContent = tag;
+      btn.dataset.tag = tag;
+      btn.onclick = () => {
+        activeFilters.has(tag) ? activeFilters.delete(tag) : activeFilters.add(tag);
+        updateFilterUI(); renderGallery();
+      };
+      tagsDiv.appendChild(btn);
+    });
+    group.appendChild(label);
+    group.appendChild(tagsDiv);
+    scroll.appendChild(group);
+  });
+  wrap.style.display = "block";
+}
+
+function updateFilterUI() {
+  document.querySelectorAll(".filter-btn").forEach(btn => {
+    btn.classList.toggle("active", activeFilters.has(btn.dataset.tag));
+  });
+}
+
+function renderGallery() {
+  const app = document.getElementById("app");
+  const catNames = new Set(tagCategories.map(c => c.name));
+  let filtered = allStyles;
+  if (activeFilters.size > 0) {
+    filtered = allStyles.filter(s => [...activeFilters].every(f => s.tags.includes(f)));
+  }
+  if (!filtered.length) {
+    app.innerHTML = `<div class="empty"><div class="empty-icon">✂️</div><div class="empty-text">スタイルがまだありません</div></div>`;
+    return;
+  }
+
+  let html = `
+    <div class="gallery-header">
+      <div class="gallery-title">Latest Styles</div>
+      <div class="gallery-count">${filtered.length} styles</div>
+    </div>
+    <div class="gallery">`;
+
+  filtered.forEach((s, idx) => {
+    const imgUrl = (s.after[0] || s.before[0])?.url || "";
+    const catTags = s.tags.filter(t => catNames.has(t));
+    const subTags = s.tags.filter(t => !catNames.has(t));
+    html += `
+      <div class="card" style="animation-delay:${idx * 0.04}s" onclick="openModal(${s.id})">
+        <div class="card-photos">
+          ${imgUrl ? `<img class="card-img" src="${imgUrl}" alt="style" loading="lazy">` : `<div class="card-img-placeholder">📷</div>`}
+        </div>
+        <div class="card-body">
+          <div class="card-tags">
+            ${catTags.map(t => `<span class="card-tag cat">${t}</span>`).join("")}
+            ${subTags.map(t => `<span class="card-tag">${t}</span>`).join("")}
+          </div>
+        </div>
+      </div>`;
+  });
+  html += `</div>`;
+  app.innerHTML = html;
+}
+
+function openModal(id) {
+  const s = allStyles.find(x => x.id === id);
+  if (!s) return;
+  currentModalId = id;
+  currentModalPhotoType = s.after.length > 0 ? "after" : "before";
+  const catNames = new Set(tagCategories.map(c => c.name));
+  const catTags = s.tags.filter(t => catNames.has(t));
+  const subTags = s.tags.filter(t => !catNames.has(t));
+  const hasBA = s.after.length > 0 && s.before.length > 0;
+  const mainImg = (currentModalPhotoType === "after" ? s.after[0] : s.before[0])?.url || "";
+
+  // サムネイル行（Before/After）
+  let thumbsHtml = "";
+  if (hasBA) {
+    thumbsHtml = `<div class="modal-ba-row">`;
+    s.after.forEach((img, i) => {
+      thumbsHtml += `
+        <div>
+          <img class="modal-thumb ${i === 0 && currentModalPhotoType === 'after' ? 'active' : ''}"
+            src="${img.url}" onclick="switchModalPhoto('after', ${i})" loading="lazy">
+          ${i === 0 ? `<div class="modal-thumb-label">After</div>` : ""}
+        </div>`;
+    });
+    s.before.forEach((img, i) => {
+      thumbsHtml += `
+        <div>
+          <img class="modal-thumb ${i === 0 && currentModalPhotoType === 'before' ? 'active' : ''}"
+            src="${img.url}" onclick="switchModalPhoto('before', ${i})" loading="lazy">
+          ${i === 0 ? `<div class="modal-thumb-label">Before</div>` : ""}
+        </div>`;
+    });
+    thumbsHtml += `</div>`;
+  }
+
+  // メニュー
+  const menusHtml = s.menus.length > 0
+    ? `<div class="modal-menus">${s.menus.map((m, i) => `
+        <div class="modal-menu-item">
+          <div class="modal-menu-dot" style="background:${MENU_COLORS[i % MENU_COLORS.length]}"></div>
+          <div class="modal-menu-name">${m.name}</div>
+        </div>`).join("")}</div>`
+    : "";
+
+  document.getElementById("modalContent").innerHTML = `
+    <div class="modal-photo-wrap">
+      <img id="modalMainImg" class="modal-main-img" src="${mainImg}" alt="style">
+    </div>
+    ${thumbsHtml}
+    <div class="modal-body">
+      ${s.styleName ? `<div class="modal-style-name">${s.styleName}</div>` : ""}
+      ${s.styleComment ? `<div class="modal-style-comment">${s.styleComment}</div>` : ""}
+      ${menusHtml}
+      ${s.tags.length > 0 ? `<div class="modal-tags">
+        ${catTags.map(t => `<span class="modal-tag cat">${t}</span>`).join("")}
+        ${subTags.map(t => `<span class="modal-tag">${t}</span>`).join("")}
+      </div>` : ""}
+      <a href="${HP_URL}" target="_blank" class="modal-btn-reserve">ホットペッパーで予約する</a>
+      <button class="modal-btn-close" onclick="closeModal()">閉じる</button>
+    </div>`;
+
+  document.getElementById("modal").classList.add("open");
+  document.body.style.overflow = "hidden";
+}
+
+window.switchModalPhoto = (type, idx) => {
+  const s = allStyles.find(x => x.id === currentModalId);
+  if (!s) return;
+  currentModalPhotoType = type;
+  const imgs = type === "after" ? s.after : s.before;
+  if (!imgs[idx]) return;
+  document.getElementById("modalMainImg").src = imgs[idx].url;
+  document.querySelectorAll(".modal-thumb").forEach(el => el.classList.remove("active"));
+  const allImgs = [...s.after, ...s.before];
+  const globalIdx = type === "after" ? idx : s.after.length + idx;
+  document.querySelectorAll(".modal-thumb")[globalIdx]?.classList.add("active");
+};
+
+function closeModal() {
+  document.getElementById("modal").classList.remove("open");
+  document.body.style.overflow = "";
+  currentModalId = null;
+}
+
+function handleOverlayClick(e) {
+  if (e.target === document.getElementById("modal")) closeModal();
+}
+
+fetchData().catch(() => {
+  document.getElementById("app").innerHTML = `
+    <div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">読み込みに失敗しました</div></div>`;
+});
+</script>
+</body>
+</html>
