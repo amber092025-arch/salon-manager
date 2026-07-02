@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="経費管理" />
+  <title>経費管理 | Amber</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { font-family: -apple-system, 'Hiragino Sans', sans-serif; background: #faf8f4; }
+    #root { max-width: 480px; margin: 0 auto; }
+    input[type="date"] { -webkit-appearance: none; appearance: none; }
+    input[type="date"]::-webkit-date-and-time-value { text-align: left; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useMemo } = React;
+
+// ═══════════════════════════════════════════════
+// 初期パスコード（アプリ本体の「その他 > 経費ページ パスコード」で
+// 変更すると、そちらが優先されます）
+// ═══════════════════════════════════════════════
+const EXPENSE_PIN = "0000";
+
+const SUPABASE_URL = "https://yvsavbxijdggzihvoram.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2c2F2YnhpamRnZ3ppaHZvcmFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NTkyNTEsImV4cCI6MjA5NTUzNTI1MX0.v_5yFWKizgOSUHifx10vSm7OEafy6fZhjy5cff-QHQw";
+const HDRS = { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY, "Content-Type": "application/json", "Prefer": "return=representation" };
+
+const C = { bg:"#faf8f4", card:"#ffffff", border:"#ece7df", text:"#2a2218", sub:"#9a9088", accent:"#7a6848", gold:"#E8DCC3", red:"#ff3b30" };
+
+const DEFAULT_CATS = [
+  { key:"material", label:"材料費（カラー剤など）", fixed:true },
+  { key:"retail", label:"店販仕入れ", fixed:true },
+  { key:"supplies", label:"備品・消耗品" },
+];
+const DEFAULT_MAKERS = [{ id:1, name:"フユヒロ" },{ id:2, name:"WHELM" }];
+const DEFAULT_PAYS = [{ id:1, name:"現金" },{ id:2, name:"預金" },{ id:3, name:"クレジットカード" }];
+
+const todayStr = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); };
+const yen = n => "¥" + (n||0).toLocaleString();
+
+// ── settings 読み込み（4キー一括） ──
+async function loadSettings() {
+  const url = SUPABASE_URL + "/rest/v1/settings?select=key,value&key=in.(purchaseCosts,purchaseMakers,purchasePayMethods,purchaseCategories)";
+  const res = await fetch(url, { headers: HDRS });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json();
+  const map = {};
+  rows.forEach(r => { map[r.key] = r.value; });
+  return map;
+}
+
+// ── purchaseCosts の read-modify-write 保存 ──
+// 保存直前に必ず最新を取得してから mutator を適用（他デバイスの上書き事故防止）
+async function saveCostsRMW(mutator) {
+  const res = await fetch(SUPABASE_URL + "/rest/v1/settings?select=value&key=eq.purchaseCosts", { headers: HDRS });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json();
+  let base = {}, exists = false;
+  if (rows.length) { exists = true; try { base = JSON.parse(rows[0].value) || {}; } catch(e) {} }
+  const next = mutator(base);
+  const valueStr = JSON.stringify(next);
+  let saveRes;
+  if (exists) {
+    saveRes = await fetch(SUPABASE_URL + "/rest/v1/settings?key=eq.purchaseCosts", { method:"PATCH", headers: HDRS, body: JSON.stringify({ value: valueStr }) });
+  } else {
+    saveRes = await fetch(SUPABASE_URL + "/rest/v1/settings", { method:"POST", headers: HDRS, body: JSON.stringify({ key:"purchaseCosts", value: valueStr }) });
+  }
+  if (!saveRes.ok) throw new Error(await saveRes.text());
+  return next;
+}
+
+// ── 共通スタイル ──
+const css = {
+  card: { background:C.card, borderRadius:14, padding:16, marginBottom:12, boxShadow:"0 1px 3px rgba(0,0,0,0.08)" },
+  input: { width:"100%", boxSizing:"border-box", border:"1px solid "+C.border, borderRadius:10, padding:"12px 14px", fontSize:16, background:"#fff", color:C.text, outline:"none", fontFamily:"inherit" },
+  label: { fontSize:12, color:C.sub, fontWeight:700, marginBottom:8 },
+};
+
+// ── 仕入れ入力フォーム（追加・編集共通） ──
+function PurchaseForm({ form, setForm, cats, makers, pays }) {
+  const chip = (active) => ({ padding:"8px 14px", borderRadius:20, border:"1.5px solid "+(active?C.accent:C.border), background:active?C.accent:"#fff", color:active?"#fff":C.text, fontWeight:700, fontSize:13, cursor:"pointer" });
+  return (
+    <div>
+      <div style={{ marginBottom:14 }}>
+        <div style={css.label}>科目</div>
+        {cats.map(cat => (
+          <button key={cat.key} onClick={() => setForm(p=>({...p,category:cat.key}))}
+            style={{ display:"block", width:"100%", padding:"10px 14px", marginBottom:6, borderRadius:10, border:"1.5px solid "+(form.category===cat.key?C.accent:C.border), background:form.category===cat.key?"#f5f0e8":"#fff", color:form.category===cat.key?C.accent:C.text, fontWeight:form.category===cat.key?800:400, fontSize:14, cursor:"pointer", textAlign:"left" }}>
+            {cat.label}
+          </button>
+        ))}
+      </div>
+      <div style={{ marginBottom:14 }}>
+        <div style={css.label}>取引日</div>
+        <input type="date" value={form.date} onChange={e=>setForm(p=>({...p,date:e.target.value}))}
+          style={{ ...css.input, padding:"0 14px", height:46, lineHeight:"46px", display:"block" }} />
+      </div>
+      <div style={{ marginBottom:14 }}>
+        <div style={css.label}>取引手段</div>
+        <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+          {pays.map(pm => (
+            <button key={pm.id} onClick={() => setForm(p=>({...p,payMethod:pm.name}))} style={chip(form.payMethod===pm.name)}>{pm.name}</button>
+          ))}
+        </div>
+      </div>
+      <div style={{ marginBottom:14 }}>
+        <div style={css.label}>取引先</div>
+        <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+          {makers.map(m => (
+            <button key={m.id} onClick={() => setForm(p=>({...p,maker:m.name}))} style={chip(form.maker===m.name)}>{m.name}</button>
+          ))}
+        </div>
+      </div>
+      <div style={{ marginBottom:14 }}>
+        <div style={css.label}>金額</div>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <input type="number" inputMode="numeric" value={form.amount} onChange={e=>setForm(p=>({...p,amount:e.target.value}))}
+            placeholder="0" style={{ ...css.input, flex:1, width:"auto", textAlign:"right" }} />
+          <span style={{ fontSize:14, color:C.sub }}>円</span>
+        </div>
+      </div>
+      <div style={{ marginBottom:6 }}>
+        <div style={css.label}>摘要（任意）</div>
+        <input type="text" value={form.memo} onChange={e=>setForm(p=>({...p,memo:e.target.value}))}
+          placeholder="例：カラー剤まとめ買い" style={{ ...css.input, fontSize:14 }} />
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [authed, setAuthed] = useState(localStorage.getItem("expense_auth") === "1");
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState("");
+  const [checking, setChecking] = useState(false);
+
+  const [tab, setTab] = useState("input");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  const [costs, setCosts] = useState({});
+  const [cats, setCats] = useState(DEFAULT_CATS);
+  const [makers, setMakers] = useState(DEFAULT_MAKERS);
+  const [pays, setPays] = useState(DEFAULT_PAYS);
+
+  const emptyForm = () => ({ category:(cats[0]&&cats[0].key)||"material", date:todayStr(), payMethod:"", maker:"", amount:"", memo:"" });
+  const [form, setForm] = useState({ category:"material", date:todayStr(), payMethod:"", maker:"", amount:"", memo:"" });
+
+  const [viewMonth, setViewMonth] = useState(todayStr().slice(0,7));
+  const [viewYear, setViewYear] = useState(new Date().getFullYear());
+  const [editTarget, setEditTarget] = useState(null); // { monthKey, item }
+  const [editForm, setEditForm] = useState(null);
+
+  const notify = (msg, type) => { setToast({ msg, type }); setTimeout(() => setToast(null), 2000); };
+
+  const reload = async () => {
+    try {
+      setLoadError(false);
+      const map = await loadSettings();
+      if (map.purchaseCosts) { try { setCosts(JSON.parse(map.purchaseCosts)||{}); } catch(e) { setCosts({}); } }
+      else setCosts({});
+      if (map.purchaseCategories) { try { setCats(JSON.parse(map.purchaseCategories)); } catch(e) {} }
+      if (map.purchaseMakers) { try { setMakers(JSON.parse(map.purchaseMakers)); } catch(e) {} }
+      if (map.purchasePayMethods) { try { setPays(JSON.parse(map.purchasePayMethods)); } catch(e) {} }
+    } catch(e) {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { if (authed) { setLoading(true); reload(); } }, [authed]);
+
+  // ── PIN ──
+  const tryUnlock = async (v) => {
+    setChecking(true);
+    try {
+      const res = await fetch(SUPABASE_URL + "/rest/v1/settings?select=value&key=eq.expensePin", { headers: HDRS });
+      if (!res.ok) throw new Error();
+      const rows = await res.json();
+      let pin = EXPENSE_PIN;
+      if (rows.length && rows[0].value) { try { pin = JSON.parse(rows[0].value); } catch(e) { pin = rows[0].value; } }
+      if (String(v) === String(pin)) {
+        localStorage.setItem("expense_auth", "1");
+        setAuthed(true); setPinInput(""); setPinError("");
+      } else {
+        setPinError("パスコードが違います"); setPinInput("");
+      }
+    } catch(e) {
+      setPinError("通信エラー。電波状況を確認して再入力してください"); setPinInput("");
+    }
+    setChecking(false);
+  };
+  const lock = () => { localStorage.removeItem("expense_auth"); setAuthed(false); };
+
+  // ── 保存操作（すべて read-modify-write） ──
+  const addItem = async () => {
+    const dt = form.date;
+    if (!dt || !/^\d{4}-\d{2}-\d{2}$/.test(dt)) return notify("取引日を選択してください","error");
+    if (!form.payMethod) return notify("取引手段を選択してください","error");
+    if (!form.maker) return notify("取引先を選択してください","error");
+    const amt = parseInt(form.amount);
+    if (!amt || amt <= 0) return notify("金額を入力してください","error");
+    const mKey = dt.slice(0,7);
+    const item = { id:Date.now(), category:form.category, maker:form.maker, amount:amt, date:dt, payMethod:form.payMethod, memo:(form.memo||"").trim() };
+    setSaving(true);
+    try {
+      const next = await saveCostsRMW(base => {
+        const arr = Array.isArray(base[mKey]) ? base[mKey] : [];
+        return { ...base, [mKey]: [...arr, item] };
+      });
+      setCosts(next);
+      setForm(p => ({ ...p, amount:"", memo:"" })); // 日付・科目・手段・取引先は保持（連続入力用）
+      notify("追加しました ✓");
+    } catch(e) { notify("保存に失敗しました","error"); }
+    setSaving(false);
+  };
+
+  const updateItem = async () => {
+    if (!editTarget || !editForm) return;
+    const dt = editForm.date;
+    if (!dt || !/^\d{4}-\d{2}-\d{2}$/.test(dt)) return notify("取引日を選択してください","error");
+    if (!editForm.payMethod) return notify("取引手段を選択してください","error");
+    if (!editForm.maker) return notify("取引先を選択してください","error");
+    const amt = parseInt(editForm.amount);
+    if (!amt || amt <= 0) return notify("金額を入力してください","error");
+    const oldKey = editTarget.monthKey;
+    const newKey = dt.slice(0,7);
+    const upd = { ...editTarget.item, category:editForm.category, maker:editForm.maker, amount:amt, date:dt, payMethod:editForm.payMethod, memo:(editForm.memo||"").trim() };
+    setSaving(true);
+    try {
+      const next = await saveCostsRMW(base => {
+        const src = (Array.isArray(base[oldKey]) ? base[oldKey] : []).filter(i => i.id !== editTarget.item.id);
+        if (oldKey === newKey) {
+          return { ...base, [oldKey]: [...src, upd] };
+        }
+        const dst = Array.isArray(base[newKey]) ? base[newKey] : [];
+        return { ...base, [oldKey]: src, [newKey]: [...dst, upd] };
+      });
+      setCosts(next);
+      if (newKey !== viewMonth) setViewMonth(newKey);
+      setEditTarget(null); setEditForm(null);
+      notify("更新しました ✓");
+    } catch(e) { notify("保存に失敗しました","error"); }
+    setSaving(false);
+  };
+
+  const deleteItem = async (monthKey, item) => {
+    if (!window.confirm("この明細を削除しますか？")) return;
+    setSaving(true);
+    try {
+      const next = await saveCostsRMW(base => {
+        const arr = (Array.isArray(base[monthKey]) ? base[monthKey] : []).filter(i => i.id !== item.id);
+        return { ...base, [monthKey]: arr };
+      });
+      setCosts(next);
+      notify("削除しました");
+    } catch(e) { notify("保存に失敗しました","error"); }
+    setSaving(false);
+  };
+
+  // ── 集計 ──
+  const catLabel = k => { const c = cats.find(x => x.key === k); return c ? c.label : k; };
+  const monthItems = useMemo(() => {
+    const v = costs[viewMonth];
+    const arr = Array.isArray(v) ? [...v] : [];
+    arr.sort((a,b) => ((a.date||"9999").localeCompare(b.date||"9999")) || ((a.id||0)-(b.id||0)));
+    return arr;
+  }, [costs, viewMonth]);
+
+  const monthTotals = useMemo(() => {
+    const t = {};
+    cats.forEach(c => { t[c.key] = monthItems.filter(i=>i.category===c.key).reduce((s,i)=>s+(i.amount||0),0); });
+    t._total = monthItems.reduce((s,i)=>s+(i.amount||0),0);
+    return t;
+  }, [monthItems, cats]);
+
+  const yearData = useMemo(() => {
+    const byCat = {}; cats.forEach(c => { byCat[c.key] = 0; });
+    let total = 0;
+    const months = [];
+    for (let m = 1; m <= 12; m++) {
+      const key = viewYear + "-" + String(m).padStart(2,"0");
+      const v = costs[key];
+      const mc = {}; cats.forEach(c => { mc[c.key] = 0; });
+      let mt = 0;
+      if (Array.isArray(v)) {
+        v.forEach(i => { mt += (i.amount||0); if (mc[i.category] !== undefined) mc[i.category] += (i.amount||0); else mc[i.category] = (i.amount||0); });
+      } else if (v && typeof v === "object") {
+        // 旧オブジェクト形式のフォールバック
+        ["material","retail","supplies"].forEach(k => { const a = v[k]||0; mt += a; if (mc[k] !== undefined) mc[k] += a; else mc[k] = a; });
+      }
+      Object.keys(mc).forEach(k => { if (byCat[k] !== undefined) byCat[k] += mc[k]; else byCat[k] = mc[k]; });
+      total += mt;
+      months.push({ m, key, total: mt, byCat: mc });
+    }
+    return { byCat, total, months };
+  }, [costs, viewYear, cats]);
+
+  const navBtn = { padding:"8px 14px", borderRadius:10, border:"1px solid "+C.border, background:"#fff", cursor:"pointer", fontWeight:700, fontSize:14 };
+
+  // ── ロック画面 ──
+  if (!authed) {
+    return (
+      <div style={{ minHeight:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:24 }}>
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke={C.accent} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom:16 }}>
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+        <div style={{ fontWeight:800, fontSize:18, marginBottom:4, color:C.text }}>経費管理</div>
+        <div style={{ fontSize:13, color:C.sub, marginBottom:20 }}>パスコードを入力してください</div>
+        <input type="tel" inputMode="numeric" maxLength={4} value={pinInput} autoFocus disabled={checking}
+          onChange={e => {
+            const v = e.target.value.replace(/[^0-9]/g,"").slice(0,4);
+            setPinInput(v); setPinError("");
+            if (v.length === 4) tryUnlock(v);
+          }}
+          style={{ width:160, textAlign:"center", fontSize:28, letterSpacing:12, padding:"12px 0", border:"1.5px solid "+(pinError?C.red:C.border), borderRadius:12, background:checking?"#f5f2ec":"#fff", outline:"none" }} />
+        {checking && <div style={{ fontSize:13, color:C.sub, marginTop:12 }}>確認中...</div>}
+        {!checking && pinError && <div style={{ fontSize:13, color:C.red, marginTop:12, textAlign:"center", padding:"0 20px" }}>{pinError}</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight:"100vh", paddingBottom:80 }}>
+      {/* ヘッダー */}
+      <div style={{ position:"sticky", top:0, zIndex:100, background:C.bg, padding:"14px 16px 10px", display:"flex", alignItems:"center", justifyContent:"space-between", borderBottom:"1px solid "+C.border }}>
+        <div style={{ fontWeight:800, fontSize:17, color:C.text }}>経費管理</div>
+        <div style={{ display:"flex", gap:8 }}>
+          <button onClick={() => { setLoading(true); reload(); }} title="再読み込み"
+            style={{ background:"none", border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px", cursor:"pointer" }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.sub} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          </button>
+          <button onClick={lock} title="ロック"
+            style={{ background:"none", border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px", cursor:"pointer" }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.sub} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div style={{ padding:16 }}>
+        {loading && <div style={{ textAlign:"center", color:C.sub, fontSize:14, padding:"40px 0" }}>読み込み中...</div>}
+        {!loading && loadError && (
+          <div style={{ ...css.card, textAlign:"center" }}>
+            <div style={{ fontSize:14, color:C.red, marginBottom:10 }}>データの読み込みに失敗しました</div>
+            <button onClick={() => { setLoading(true); reload(); }} style={{ ...navBtn }}>再読み込み</button>
+          </div>
+        )}
+
+        {/* ── 入力タブ ── */}
+        {!loading && !loadError && tab === "input" && (
+          <div style={css.card}>
+            <div style={{ fontWeight:800, fontSize:15, marginBottom:14 }}>仕入れを追加</div>
+            <PurchaseForm form={form} setForm={setForm} cats={cats} makers={makers} pays={pays} />
+            <button onClick={addItem} disabled={saving}
+              style={{ width:"100%", marginTop:14, padding:14, borderRadius:12, border:"none", background:saving?C.sub:C.accent, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer" }}>
+              {saving ? "保存中..." : "追加する"}
+            </button>
+          </div>
+        )}
+
+        {/* ── 明細タブ ── */}
+        {!loading && !loadError && tab === "list" && (
+          <div>
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14 }}>
+              <button style={navBtn} onClick={() => { const d = new Date(viewMonth+"-01T00:00:00"); d.setMonth(d.getMonth()-1); setViewMonth(d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")); }}>{"<"}</button>
+              <div style={{ flex:1, textAlign:"center", fontWeight:800, fontSize:16 }}>{viewMonth.replace("-","年")}月</div>
+              <button style={navBtn} onClick={() => { const d = new Date(viewMonth+"-01T00:00:00"); d.setMonth(d.getMonth()+1); setViewMonth(d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")); }}>{">"}</button>
+            </div>
+
+            <div style={{ ...css.card, background:"#fdfcf9" }}>
+              {cats.map(c => (
+                <div key={c.key} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:"1px solid "+C.border, fontSize:13 }}>
+                  <span style={{ color:C.sub }}>{c.label}</span>
+                  <span style={{ fontWeight:700 }}>{yen(monthTotals[c.key])}</span>
+                </div>
+              ))}
+              <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0 0", fontSize:14, fontWeight:800 }}>
+                <span>合計</span><span style={{ color:C.accent }}>{yen(monthTotals._total)}</span>
+              </div>
+            </div>
+
+            <div style={css.card}>
+              {monthItems.length === 0 && <div style={{ textAlign:"center", color:C.sub, fontSize:13, padding:"16px 0" }}>この月の明細はありません</div>}
+              {monthItems.map(item => (
+                <div key={item.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 0", borderBottom:"1px solid "+C.border }}>
+                  <div style={{ minWidth:0, flex:1, paddingRight:8 }}>
+                    <div style={{ fontSize:14, fontWeight:700 }}>
+                      {item.date && <span style={{ color:C.accent, marginRight:6 }}>{parseInt(item.date.slice(5,7))+"/"+parseInt(item.date.slice(8,10))}</span>}
+                      {item.maker}
+                    </div>
+                    <div style={{ fontSize:12, color:C.sub }}>{catLabel(item.category)+(item.payMethod?"・"+item.payMethod:"")}</div>
+                    {item.memo && <div style={{ fontSize:11, color:C.sub, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.memo}</div>}
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
+                    <span style={{ fontSize:14, fontWeight:800 }}>{yen(item.amount)}</span>
+                    <button onClick={() => { setEditTarget({ monthKey:viewMonth, item }); setEditForm({ category:item.category, date:item.date||"", payMethod:item.payMethod||"", maker:item.maker, amount:String(item.amount), memo:item.memo||"" }); }}
+                      style={{ fontSize:12, color:C.accent, background:"none", border:"1px solid "+C.accent, borderRadius:8, padding:"4px 10px", cursor:"pointer" }}>編集</button>
+                    <button onClick={() => deleteItem(viewMonth, item)}
+                      style={{ fontSize:12, color:C.red, background:"none", border:"1px solid "+C.red, borderRadius:8, padding:"4px 10px", cursor:"pointer" }}>削除</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── 年間タブ ── */}
+        {!loading && !loadError && tab === "year" && (
+          <div>
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14 }}>
+              <button style={navBtn} onClick={() => setViewYear(y => y-1)}>{"<"}</button>
+              <div style={{ flex:1, textAlign:"center", fontWeight:800, fontSize:16 }}>{viewYear}年</div>
+              <button style={navBtn} onClick={() => setViewYear(y => y+1)}>{">"}</button>
+            </div>
+
+            <div style={css.card}>
+              <div style={{ fontWeight:800, fontSize:15, marginBottom:10 }}>科目別 年間合計</div>
+              {cats.map(c => (
+                <div key={c.key} style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:"1px solid "+C.border, fontSize:14 }}>
+                  <span style={{ color:C.sub }}>{c.label}</span>
+                  <span style={{ fontWeight:700 }}>{yen(yearData.byCat[c.key])}</span>
+                </div>
+              ))}
+              <div style={{ display:"flex", justifyContent:"space-between", padding:"10px 0 0", fontSize:15, fontWeight:800 }}>
+                <span>総合計</span><span style={{ color:C.accent }}>{yen(yearData.total)}</span>
+              </div>
+            </div>
+
+            <div style={css.card}>
+              <div style={{ fontWeight:800, fontSize:15, marginBottom:10 }}>月別内訳</div>
+              {yearData.months.map(mo => (
+                <div key={mo.m} style={{ padding:"9px 0", borderBottom:"1px solid "+C.border, opacity:mo.total===0?0.45:1 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", fontSize:14 }}>
+                    <span style={{ fontWeight:700, cursor:"pointer", color:C.accent }}
+                      onClick={() => { setViewMonth(mo.key); setTab("list"); }}>{mo.m}月</span>
+                    <span style={{ fontWeight:800 }}>{yen(mo.total)}</span>
+                  </div>
+                  {mo.total > 0 && (
+                    <div style={{ fontSize:11, color:C.sub, marginTop:3, lineHeight:1.6 }}>
+                      {cats.filter(c => (mo.byCat[c.key]||0) > 0).map(c => c.label + " " + yen(mo.byCat[c.key])).join("・")}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── 編集モーダル ── */}
+      {editTarget && editForm && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:900, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px 16px" }}
+          onClick={e => { if (e.target === e.currentTarget) { setEditTarget(null); setEditForm(null); } }}>
+          <div style={{ background:C.card, borderRadius:20, width:"100%", maxWidth:440, maxHeight:"85vh", overflowY:"auto", padding:20, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+              <div style={{ fontWeight:800, fontSize:16 }}>仕入れを編集</div>
+              <button onClick={() => { setEditTarget(null); setEditForm(null); }}
+                style={{ background:"none", border:"none", fontSize:22, color:C.sub, cursor:"pointer", padding:"0 4px" }}>✕</button>
+            </div>
+            <PurchaseForm form={editForm} setForm={setEditForm} cats={cats} makers={makers} pays={pays} />
+            <button onClick={updateItem} disabled={saving}
+              style={{ width:"100%", marginTop:14, padding:14, borderRadius:12, border:"none", background:saving?C.sub:C.accent, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer" }}>
+              {saving ? "保存中..." : "更新する"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── トースト ── */}
+      {toast && (
+        <div style={{ position:"fixed", bottom:90, left:"50%", transform:"translateX(-50%)", background:toast.type==="error"?C.red:"#2a2218", color:"#fff", padding:"10px 20px", borderRadius:12, fontSize:14, fontWeight:700, zIndex:1000, whiteSpace:"nowrap", boxShadow:"0 4px 12px rgba(0,0,0,0.25)" }}>
+          {toast.msg}
+        </div>
+      )}
+
+      {/* ── 下部ナビ ── */}
+      <div style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:100 }}>
+        <div style={{ maxWidth:480, margin:"0 auto", display:"flex", background:"#fff", borderTop:"1px solid "+C.border, paddingBottom:"env(safe-area-inset-bottom)" }}>
+          {[
+            { key:"input", label:"入力", icon:<path d="M12 5v14M5 12h14"/> },
+            { key:"list", label:"明細", icon:<><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></> },
+            { key:"year", label:"年間", icon:<><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></> },
+          ].map(t => (
+            <button key={t.key} onClick={() => { setTab(t.key); if (t.key !== "input") reload(); }}
+              style={{ flex:1, padding:"10px 0 8px", background:"none", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={tab===t.key?C.accent:C.sub} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{t.icon}</svg>
+              <span style={{ fontSize:10, fontWeight:700, color:tab===t.key?C.accent:C.sub }}>{t.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
