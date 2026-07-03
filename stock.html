@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="在庫管理" />
+  <title>在庫管理 | Amber</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { font-family: -apple-system, 'Hiragino Sans', sans-serif; background: #faf8f4; }
+    #root { max-width: 480px; margin: 0 auto; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useMemo } = React;
+
+// 初期パスコード（アプリ本体の「その他 > 経費ページ パスコード」と共通）
+const DEFAULT_PIN = "0000";
+
+const SUPABASE_URL = "https://yvsavbxijdggzihvoram.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2c2F2YnhpamRnZ3ppaHZvcmFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NTkyNTEsImV4cCI6MjA5NTUzNTI1MX0.v_5yFWKizgOSUHifx10vSm7OEafy6fZhjy5cff-QHQw";
+const HDRS = { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY, "Content-Type": "application/json", "Prefer": "return=representation" };
+
+const C = { bg:"#faf8f4", card:"#ffffff", border:"#ece7df", text:"#2a2218", sub:"#9a9088", accent:"#7a6848", red:"#ff3b30", orange:"#e8924a", green:"#6aaa7a" };
+const yen = n => "¥" + (n||0).toLocaleString();
+
+const fromDb = r => ({ id:r.id, name:r.name, price:r.price||0, cost:r.cost||0, stock:r.stock||0, minStock:r.min_stock||3, category:r.category||"", subCategory:r.sub_category||"", placeholder:r.placeholder||false, sortOrder:r.sort_order||0 });
+
+const css = {
+  card: { background:C.card, borderRadius:14, padding:14, marginBottom:12, boxShadow:"0 1px 3px rgba(0,0,0,0.08)" },
+  input: { width:"100%", boxSizing:"border-box", border:"1px solid "+C.border, borderRadius:10, padding:"11px 13px", fontSize:16, background:"#fff", color:C.text, outline:"none", fontFamily:"inherit" },
+  label: { fontSize:12, color:C.sub, fontWeight:700, marginBottom:6 },
+};
+
+function App() {
+  const [authed, setAuthed] = useState(localStorage.getItem("stock_auth") === "1");
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState("");
+  const [checking, setChecking] = useState(false);
+
+  const [view, setView] = useState("gyomu"); // gyomu | hanbai
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  const [products, setProducts] = useState([]);
+  const [shopCats, setShopCats] = useState([]);
+
+  const emptyForm = { name:"", category:"", subCategory:"", price:"", cost:"", stock:"", minStock:"3" };
+  const [modal, setModal] = useState(null); // { mode:"add"|"edit", id? }
+  const [form, setForm] = useState(emptyForm);
+
+  const notify = (msg, type) => { setToast({ msg, type }); setTimeout(() => setToast(null), 2000); };
+
+  const reload = async () => {
+    try {
+      setLoadError(false);
+      const [pRes, sRes] = await Promise.all([
+        fetch(SUPABASE_URL + "/rest/v1/products?select=id,name,price,cost,stock,min_stock,category,sub_category,placeholder,sort_order&order=sort_order", { headers: HDRS }),
+        fetch(SUPABASE_URL + "/rest/v1/settings?select=value&key=eq.shopCategoryList", { headers: HDRS }),
+      ]);
+      if (!pRes.ok || !sRes.ok) throw new Error();
+      const pRows = await pRes.json();
+      setProducts(pRows.map(fromDb));
+      const sRows = await sRes.json();
+      if (sRows.length && sRows[0].value) { try { setShopCats(JSON.parse(sRows[0].value)||[]); } catch(e) { setShopCats([]); } }
+      else setShopCats([]);
+    } catch(e) { setLoadError(true); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { if (authed) { setLoading(true); reload(); } }, [authed]);
+
+  // ── PIN（経費ページと共通：settings.expensePin） ──
+  const tryUnlock = async (v) => {
+    setChecking(true);
+    try {
+      const res = await fetch(SUPABASE_URL + "/rest/v1/settings?select=value&key=eq.expensePin", { headers: HDRS });
+      if (!res.ok) throw new Error();
+      const rows = await res.json();
+      let pin = DEFAULT_PIN;
+      if (rows.length && rows[0].value) { try { pin = JSON.parse(rows[0].value); } catch(e) { pin = rows[0].value; } }
+      if (String(v) === String(pin)) {
+        localStorage.setItem("stock_auth", "1");
+        setAuthed(true); setPinInput(""); setPinError("");
+      } else { setPinError("パスコードが違います"); setPinInput(""); }
+    } catch(e) { setPinError("通信エラー。電波状況を確認して再入力してください"); setPinInput(""); }
+    setChecking(false);
+  };
+  const lock = () => { localStorage.removeItem("stock_auth"); setAuthed(false); };
+
+  // ── グルーピング（業務/店販） ──
+  const grouped = useMemo(() => {
+    const isShop = c => shopCats.includes(c);
+    const filtered = products.filter(p => {
+      const cat = p.category || "未分類";
+      return view === "hanbai" ? isShop(cat) : !isShop(cat);
+    });
+    const map = {};
+    filtered.forEach(p => {
+      const cat = p.category || "未分類"; const sub = p.subCategory || "一般";
+      if (!map[cat]) map[cat] = {};
+      if (!map[cat][sub]) map[cat][sub] = [];
+      map[cat][sub].push(p);
+    });
+    return map;
+  }, [products, view, shopCats]);
+
+  const existingCats = useMemo(() => {
+    const isShop = c => shopCats.includes(c);
+    const set = [];
+    products.forEach(p => {
+      const cat = p.category || "未分類";
+      if ((view === "hanbai" ? isShop(cat) : !isShop(cat)) && !set.includes(cat)) set.push(cat);
+    });
+    return set;
+  }, [products, view, shopCats]);
+  const existingSubs = useMemo(() => {
+    const set = [];
+    products.forEach(p => { if ((p.category||"未分類") === form.category && p.subCategory && !set.includes(p.subCategory)) set.push(p.subCategory); });
+    return set;
+  }, [products, form.category]);
+
+  // ── 店販タブで新カテゴリを作った場合、shopCategoryListにも追加（read-modify-write） ──
+  const ensureShopCategory = async (cat) => {
+    if (view !== "hanbai" || !cat) return;
+    const res = await fetch(SUPABASE_URL + "/rest/v1/settings?select=value&key=eq.shopCategoryList", { headers: HDRS });
+    if (!res.ok) throw new Error();
+    const rows = await res.json();
+    let list = [], exists = false;
+    if (rows.length) { exists = true; try { list = JSON.parse(rows[0].value)||[]; } catch(e) {} }
+    if (list.includes(cat)) { setShopCats(list); return; }
+    const next = [...list, cat];
+    const body = JSON.stringify({ value: JSON.stringify(next) });
+    if (exists) await fetch(SUPABASE_URL + "/rest/v1/settings?key=eq.shopCategoryList", { method:"PATCH", headers:HDRS, body });
+    else await fetch(SUPABASE_URL + "/rest/v1/settings", { method:"POST", headers:HDRS, body: JSON.stringify({ key:"shopCategoryList", value: JSON.stringify(next) }) });
+    setShopCats(next);
+  };
+
+  // ── 追加・編集・削除・在庫増減 ──
+  const openAdd = () => { setForm(emptyForm); setModal({ mode:"add" }); };
+  const openEdit = (p) => { setForm({ name:p.name, category:p.category||"", subCategory:p.subCategory||"", price:String(p.price||0), cost:String(p.cost||0), stock:String(p.stock||0), minStock:String(p.minStock||3) }); setModal({ mode:"edit", id:p.id }); };
+
+  const saveProduct = async () => {
+    if (!form.name.trim()) return notify("商品名を入力してください","error");
+    if (!form.category.trim()) return notify("カテゴリを入力してください","error");
+    const body = {
+      name: form.name.trim(),
+      category: form.category.trim(),
+      sub_category: (form.subCategory||"").trim() || null,
+      price: parseInt(form.price)||0,
+      cost: parseInt(form.cost)||0,
+      stock: parseInt(form.stock)||0,
+      min_stock: parseInt(form.minStock)||3,
+    };
+    setSaving(true);
+    try {
+      await ensureShopCategory(body.category);
+      if (modal.mode === "add") {
+        const res = await fetch(SUPABASE_URL + "/rest/v1/products", { method:"POST", headers:HDRS,
+          body: JSON.stringify({ ...body, placeholder:false, photos:[], is_public:false, description:null, sort_order: Date.now() }) });
+        if (!res.ok) throw new Error(await res.text());
+        const rows = await res.json();
+        if (rows.length) setProducts(p => [...p, fromDb(rows[0])]);
+        notify("追加しました ✓");
+      } else {
+        const res = await fetch(SUPABASE_URL + "/rest/v1/products?id=eq." + modal.id, { method:"PATCH", headers:HDRS, body: JSON.stringify(body) });
+        if (!res.ok) throw new Error(await res.text());
+        setProducts(p => p.map(x => x.id===modal.id ? { ...x, name:body.name, category:body.category, subCategory:body.sub_category||"", price:body.price, cost:body.cost, stock:body.stock, minStock:body.min_stock } : x));
+        notify("更新しました ✓");
+      }
+      setModal(null);
+    } catch(e) { notify("保存に失敗しました","error"); }
+    setSaving(false);
+  };
+
+  const deleteProduct = async (p) => {
+    if (!window.confirm(`「${p.name}」を削除しますか？`)) return;
+    setSaving(true);
+    try {
+      const res = await fetch(SUPABASE_URL + "/rest/v1/products?id=eq." + p.id, { method:"DELETE", headers:HDRS });
+      if (!res.ok) throw new Error();
+      setProducts(prev => prev.filter(x => x.id !== p.id));
+      notify("削除しました");
+    } catch(e) { notify("削除に失敗しました","error"); }
+    setSaving(false);
+  };
+
+  const changeStock = async (p, delta) => {
+    const ns = Math.max(0, (p.stock||0) + delta);
+    setProducts(prev => prev.map(x => x.id===p.id ? { ...x, stock: ns } : x));
+    try {
+      const res = await fetch(SUPABASE_URL + "/rest/v1/products?id=eq." + p.id, { method:"PATCH", headers:HDRS, body: JSON.stringify({ stock: ns }) });
+      if (!res.ok) throw new Error();
+    } catch(e) { notify("保存に失敗しました","error"); }
+  };
+
+  const stockColor = p => (p.stock||0) < (p.minStock||3) ? C.red : (p.stock||0) < (p.minStock||3)*2 ? C.orange : C.green;
+
+  // ── ロック画面 ──
+  if (!authed) {
+    return (
+      <div style={{ minHeight:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:24 }}>
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke={C.accent} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom:16 }}>
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+        </svg>
+        <div style={{ fontWeight:800, fontSize:18, marginBottom:4, color:C.text }}>在庫管理</div>
+        <div style={{ fontSize:13, color:C.sub, marginBottom:20 }}>パスコードを入力してください</div>
+        <input type="tel" inputMode="numeric" maxLength={4} value={pinInput} autoFocus disabled={checking}
+          onChange={e => {
+            const v = e.target.value.replace(/[^0-9]/g,"").slice(0,4);
+            setPinInput(v); setPinError("");
+            if (v.length === 4) tryUnlock(v);
+          }}
+          style={{ width:160, textAlign:"center", fontSize:28, letterSpacing:12, padding:"12px 0", border:"1.5px solid "+(pinError?C.red:C.border), borderRadius:12, background:checking?"#f5f2ec":"#fff", outline:"none" }} />
+        {checking && <div style={{ fontSize:13, color:C.sub, marginTop:12 }}>確認中...</div>}
+        {!checking && pinError && <div style={{ fontSize:13, color:C.red, marginTop:12, textAlign:"center", padding:"0 20px" }}>{pinError}</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight:"100vh", paddingBottom:90 }}>
+      {/* ヘッダー */}
+      <div style={{ position:"sticky", top:0, zIndex:100, background:C.bg, padding:"14px 16px 10px", borderBottom:"1px solid "+C.border }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+          <div style={{ fontWeight:800, fontSize:17, color:C.text }}>在庫管理</div>
+          <div style={{ display:"flex", gap:8 }}>
+            <button onClick={() => { setLoading(true); reload(); }} style={{ background:"none", border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px", cursor:"pointer" }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.sub} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            </button>
+            <button onClick={lock} style={{ background:"none", border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px", cursor:"pointer" }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.sub} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </button>
+          </div>
+        </div>
+        <div style={{ display:"flex", gap:8 }}>
+          {[["gyomu","業務"],["hanbai","店販"]].map(([k,l]) => (
+            <button key={k} onClick={() => setView(k)}
+              style={{ flex:1, padding:"9px 0", borderRadius:20, border:"1.5px solid "+(view===k?C.accent:C.border), background:view===k?C.accent:"#fff", color:view===k?"#fff":C.text, fontWeight:700, fontSize:13, cursor:"pointer" }}>
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ padding:16 }}>
+        {loading && <div style={{ textAlign:"center", color:C.sub, fontSize:14, padding:"40px 0" }}>読み込み中...</div>}
+        {!loading && loadError && (
+          <div style={{ ...css.card, textAlign:"center" }}>
+            <div style={{ fontSize:14, color:C.red, marginBottom:10 }}>データの読み込みに失敗しました</div>
+            <button onClick={() => { setLoading(true); reload(); }} style={{ padding:"8px 14px", borderRadius:10, border:"1px solid "+C.border, background:"#fff", cursor:"pointer", fontWeight:700, fontSize:14 }}>再読み込み</button>
+          </div>
+        )}
+
+        {!loading && !loadError && Object.keys(grouped).length === 0 && (
+          <div style={{ textAlign:"center", color:C.sub, fontSize:13, padding:"30px 0" }}>商品がありません。「＋商品を追加」から登録してください</div>
+        )}
+
+        {!loading && !loadError && Object.entries(grouped).map(([cat, subs]) => (
+          <div key={cat} style={css.card}>
+            <div style={{ fontWeight:800, fontSize:15, marginBottom:6, color:C.accent }}>{cat}</div>
+            {Object.entries(subs).map(([sub, items]) => {
+              const realItems = items.filter(p => !p.placeholder);
+              if (realItems.length === 0) return (
+                <div key={sub} style={{ padding:"8px 0", borderBottom:"1px solid "+C.border }}>
+                  <div style={{ fontSize:12, color:C.sub, fontWeight:700 }}>{sub}</div>
+                  <div style={{ fontSize:12, color:C.sub, padding:"6px 0" }}>（商品なし）</div>
+                </div>
+              );
+              return (
+                <div key={sub} style={{ padding:"8px 0", borderBottom:"1px solid "+C.border }}>
+                  <div style={{ fontSize:12, color:C.sub, fontWeight:700, marginBottom:4 }}>{sub}</div>
+                  {realItems.map(p => (
+                    <div key={p.id} style={{ padding:"9px 0", borderBottom:"1px dashed "+C.border }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+                        <div style={{ minWidth:0, flex:1 }}>
+                          <div style={{ fontWeight:700, fontSize:14 }}>{p.name}</div>
+                          <div style={{ fontSize:11, color:C.sub, marginTop:1 }}>売価{yen(p.price)}・原価{yen(p.cost)}・最小{p.minStock}個</div>
+                        </div>
+                        <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+                          <button onClick={() => changeStock(p, -1)}
+                            style={{ width:34, height:34, borderRadius:10, border:"1px solid "+C.border, background:"#fff", fontSize:18, fontWeight:700, color:C.text, cursor:"pointer" }}>−</button>
+                          <span style={{ fontSize:20, fontWeight:800, minWidth:30, textAlign:"center", color:stockColor(p) }}>{p.stock||0}</span>
+                          <button onClick={() => changeStock(p, 1)}
+                            style={{ width:34, height:34, borderRadius:10, border:"1px solid "+C.border, background:"#fff", fontSize:18, fontWeight:700, color:C.text, cursor:"pointer" }}>＋</button>
+                        </div>
+                      </div>
+                      <div style={{ display:"flex", gap:6, justifyContent:"flex-end", marginTop:6 }}>
+                        <button onClick={() => openEdit(p)}
+                          style={{ fontSize:12, color:C.accent, background:"none", border:"1px solid "+C.accent, borderRadius:8, padding:"4px 12px", cursor:"pointer" }}>編集</button>
+                        <button onClick={() => deleteProduct(p)}
+                          style={{ fontSize:12, color:C.red, background:"none", border:"1px solid "+C.red, borderRadius:8, padding:"4px 12px", cursor:"pointer" }}>削除</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      {/* 追加/編集モーダル */}
+      {modal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:900, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px 16px" }}
+          onClick={e => { if (e.target === e.currentTarget) setModal(null); }}>
+          <div style={{ background:C.card, borderRadius:20, width:"100%", maxWidth:440, maxHeight:"85vh", overflowY:"auto", padding:20, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+              <div style={{ fontWeight:800, fontSize:16 }}>{modal.mode==="add" ? "商品を追加" : "商品を編集"}<span style={{ fontSize:12, color:C.sub, fontWeight:600, marginLeft:8 }}>{view==="hanbai"?"店販":"業務"}</span></div>
+              <button onClick={() => setModal(null)} style={{ background:"none", border:"none", fontSize:22, color:C.sub, cursor:"pointer", padding:"0 4px" }}>✕</button>
+            </div>
+            <div style={{ marginBottom:12 }}>
+              <div style={css.label}>商品名 *</div>
+              <input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} style={css.input} />
+            </div>
+            <div style={{ marginBottom:12 }}>
+              <div style={css.label}>カテゴリ *</div>
+              <input value={form.category} onChange={e=>setForm(p=>({...p,category:e.target.value}))} placeholder="例：カラー剤" style={css.input} />
+              {existingCats.length > 0 && (
+                <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:6 }}>
+                  {existingCats.map(c => (
+                    <button key={c} onClick={() => setForm(p=>({...p,category:c}))}
+                      style={{ padding:"5px 10px", borderRadius:14, border:"1px solid "+(form.category===c?C.accent:C.border), background:form.category===c?"#f5f0e8":"#fff", color:form.category===c?C.accent:C.sub, fontSize:12, fontWeight:700, cursor:"pointer" }}>{c}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div style={{ marginBottom:12 }}>
+              <div style={css.label}>サブカテゴリ（メーカー等）</div>
+              <input value={form.subCategory} onChange={e=>setForm(p=>({...p,subCategory:e.target.value}))} placeholder="例：フユヒロ" style={css.input} />
+              {existingSubs.length > 0 && (
+                <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:6 }}>
+                  {existingSubs.map(s => (
+                    <button key={s} onClick={() => setForm(p=>({...p,subCategory:s}))}
+                      style={{ padding:"5px 10px", borderRadius:14, border:"1px solid "+(form.subCategory===s?C.accent:C.border), background:form.subCategory===s?"#f5f0e8":"#fff", color:form.subCategory===s?C.accent:C.sub, fontSize:12, fontWeight:700, cursor:"pointer" }}>{s}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
+              {[["price","売価"],["cost","原価"],["stock","在庫数"],["minStock","最小在庫"]].map(([k,l]) => (
+                <div key={k}>
+                  <div style={css.label}>{l}</div>
+                  <input type="number" inputMode="numeric" value={form[k]} onChange={e=>setForm(p=>({...p,[k]:e.target.value}))} style={{ ...css.input, textAlign:"right" }} />
+                </div>
+              ))}
+            </div>
+            <button onClick={saveProduct} disabled={saving}
+              style={{ width:"100%", marginTop:4, padding:14, borderRadius:12, border:"none", background:saving?C.sub:C.accent, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer" }}>
+              {saving ? "保存中..." : (modal.mode==="add" ? "追加する" : "更新する")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* トースト */}
+      {toast && (
+        <div style={{ position:"fixed", bottom:96, left:"50%", transform:"translateX(-50%)", background:toast.type==="error"?C.red:"#2a2218", color:"#fff", padding:"10px 20px", borderRadius:12, fontSize:14, fontWeight:700, zIndex:1000, whiteSpace:"nowrap", boxShadow:"0 4px 12px rgba(0,0,0,0.25)" }}>
+          {toast.msg}
+        </div>
+      )}
+
+      {/* 下部固定：商品追加 */}
+      <div style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:100 }}>
+        <div style={{ maxWidth:480, margin:"0 auto", padding:"10px 16px calc(10px + env(safe-area-inset-bottom))", background:"rgba(250,248,244,0.95)", borderTop:"1px solid "+C.border }}>
+          <button onClick={openAdd}
+            style={{ width:"100%", padding:14, borderRadius:12, border:"none", background:C.accent, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer" }}>
+            ＋ 商品を追加
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
