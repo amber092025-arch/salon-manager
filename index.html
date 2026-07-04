@@ -4666,6 +4666,9 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
   const [addForm, setAddForm] = useState({ name:"", price:"", cost:"", stock:"", minStock:"3", category:"", subCategory:"", photos:[], description:"", isPublic:false });
   const [editingProd, setEditingProd] = useState(null);
   const [addIsShop, setAddIsShop] = useState(true);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkEditModal, setBulkEditModal] = useState(null);
   const [editProdForm, setEditProdForm] = useState({});
   const [editingSubKey, setEditingSubKey] = useState(null);
   const [editSubName, setEditSubName] = useState("");
@@ -4855,6 +4858,42 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
   const soldMap  = {};
   visits.forEach(v => v.products.forEach(p => { soldMap[p.productId] = (soldMap[p.productId]||0) + p.qty; }));
 
+  const toggleSelect = (id) => setSelectedIds(prev => {
+    const n = new Set(prev);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    return n;
+  });
+  const exitSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()); };
+
+  const applyBulkEdit = async (fields) => {
+    if (Object.keys(fields).length === 0) return notify("変更する項目を選んでください","error");
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    const body = {};
+    if ("category" in fields) body.category = fields.category.trim();
+    if ("subCategory" in fields) body.sub_category = fields.subCategory.trim() || null;
+    if ("price" in fields) body.price = parseInt(fields.price)||0;
+    if ("cost" in fields) body.cost = parseInt(fields.cost)||0;
+    if ("minStock" in fields) body.min_stock = parseInt(fields.minStock)||3;
+    try {
+      const { error } = await sb.from("products").update(body).in("id", ids);
+      if (error) throw error;
+      setProducts(prev => prev.map(p => {
+        if (!selectedIds.has(p.id)) return p;
+        return {
+          ...p,
+          ...(body.category !== undefined ? { category: body.category } : {}),
+          ...(body.sub_category !== undefined ? { subCategory: body.sub_category||"" } : {}),
+          ...(body.price !== undefined ? { price: body.price } : {}),
+          ...(body.cost !== undefined ? { cost: body.cost } : {}),
+          ...(body.min_stock !== undefined ? { minStock: body.min_stock } : {}),
+        };
+      }));
+      notify(ids.length + "品を更新しました ✓");
+      setBulkEditModal(null); exitSelectMode();
+    } catch(e) { notify("保存に失敗しました","error"); }
+  };
+
   const catMap = {};
   [...products].sort((a,b)=>(a.sortOrder||0)-(b.sortOrder||0)).forEach(p => {
     const cat = p.category || "未分類";
@@ -4958,6 +4997,8 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                 <input list="sub-list2" value={addForm.subCategory} onChange={e => setAddForm(p=>({...p,subCategory:e.target.value}))} placeholder="例：Milbon" style={{ flex:1, border:"none", fontSize:15, outline:"none", background:"transparent" }} />
                 <datalist id="sub-list2">{addForm.category && allSubs(addForm.category).map(s => <option key={s} value={s}/>)}</datalist>
               </div>
+              {addIsShop && (
+              <>
               <div style={{ padding:"13px 16px", borderBottom:`1px solid ${C.border}` }}>
                 <div style={{ fontSize:14, color:C.sub, marginBottom:8 }}>商品説明</div>
                 <textarea value={addForm.description} onChange={e => setAddForm(p=>({...p,description:e.target.value}))} placeholder="商品の特徴・使い方など" rows={3} style={{ width:"100%", border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 10px", fontSize:14, outline:"none", resize:"none", boxSizing:"border-box" }} />
@@ -4987,6 +5028,8 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                   <div style={{ width:22, height:22, borderRadius:"50%", background:"#fff", position:"absolute", top:3, left:addForm.isPublic?23:3, transition:"left 0.2s", boxShadow:"0 1px 4px rgba(0,0,0,0.2)" }} />
                 </button>
               </div>
+              </>
+              )}
             </div>
             <div style={{ fontSize:12, color:C.sub, textAlign:"center" }}>カテゴリ・メーカーは自由入力。既存のものはサジェストされます。</div>
           </div>
@@ -5039,7 +5082,20 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                     style={{ padding:"10px 10px", borderRadius:10, border:`1.5px solid ${prodSortMode ? "#7a6848" : C.border}`, background: prodSortMode ? "#f5f0e8" : "#fff", color: prodSortMode ? "#7a6848" : C.sub, fontWeight:700, fontSize:12, cursor:"pointer", whiteSpace:"nowrap" }}>
                     {prodSortMode ? "完了" : "並び替え"}
                   </button>
+                  <button onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
+                    style={{ padding:"10px 10px", borderRadius:10, border:`1.5px solid ${selectMode ? C.red : C.border}`, background: selectMode ? "#fff" : "#fff", color: selectMode ? C.red : C.sub, fontWeight:700, fontSize:12, cursor:"pointer", whiteSpace:"nowrap" }}>
+                    {selectMode ? "選択解除" : "選択"}
+                  </button>
                 </div>
+                {selectMode && (
+                  <div style={{ display:"flex", alignItems:"center", gap:10, background:"#f5f0e8", border:"1.5px solid #7a6848", borderRadius:12, padding:"10px 12px", marginBottom:8 }}>
+                    <div style={{ fontSize:13, fontWeight:700, color:"#2a2218", whiteSpace:"nowrap" }}>{selectedIds.size}件選択中</div>
+                    <button onClick={() => setBulkEditModal({ category:"", subCategory:"", price:"", cost:"", minStock:"", use:{} })} disabled={selectedIds.size===0}
+                      style={{ flex:1, padding:"9px 0", borderRadius:10, border:"none", background:selectedIds.size===0?C.sub:"#7a6848", color:"#fff", fontWeight:800, fontSize:13, cursor:"pointer" }}>
+                      一括編集
+                    </button>
+                  </div>
+                )}
                 {showAddCat && (
                   <div style={{ ...css.card, marginBottom:8, border:`1.5px solid #7a6848` }}>
                     <div style={{ fontSize:13, fontWeight:700, marginBottom:8 }}>新しいカテゴリを追加</div>
@@ -5168,13 +5224,21 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                               </div>
                             )}
                             {subOpen && items.map(p => (
-                              <div key={p.id} style={{ padding:"12px 16px", borderBottom:`1px solid ${C.border}` }}>
+                              <div key={p.id} onClick={() => selectMode && !p.placeholder && toggleSelect(p.id)}
+                                style={{ padding:"12px 16px", borderBottom:`1px solid ${C.border}`, cursor:(selectMode&&!p.placeholder)?"pointer":"default", background:(selectMode&&selectedIds.has(p.id))?"#f5f0e8":"transparent" }}>
                                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
-                                  <div style={{ flex:1 }}>
-                                    <div style={{ fontWeight:p.placeholder?400:700, fontSize:14, color:p.placeholder?C.sub:C.text }}>{p.name}</div>
-                                    {!p.placeholder && <div style={{ fontSize:11, color:C.sub, marginTop:2 }}>{shopCategoryList.includes(p.category)?`売価${yen(p.price)} · `:""}原価{yen(p.cost||0)} · 最小{p.minStock||3}個</div>}
+                                  <div style={{ flex:1, display:"flex", alignItems:"flex-start", gap:10 }}>
+                                    {selectMode && !p.placeholder && (
+                                      <div style={{ width:22, height:22, borderRadius:6, border:`2px solid ${selectedIds.has(p.id)?"#7a6848":C.border}`, background:selectedIds.has(p.id)?"#7a6848":"#fff", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, marginTop:1 }}>
+                                        {selectedIds.has(p.id) && <span style={{ color:"#fff", fontSize:13, fontWeight:800 }}>✓</span>}
+                                      </div>
+                                    )}
+                                    <div style={{ flex:1 }}>
+                                      <div style={{ fontWeight:p.placeholder?400:700, fontSize:14, color:p.placeholder?C.sub:C.text }}>{p.name}</div>
+                                      {!p.placeholder && <div style={{ fontSize:11, color:C.sub, marginTop:2 }}>{shopCategoryList.includes(p.category)?`売価${yen(p.price)} · `:""}原価{yen(p.cost||0)} · 最小{p.minStock||3}個</div>}
+                                    </div>
                                   </div>
-                                  {prodSortMode ? (
+                                  {!selectMode && (prodSortMode ? (
                                     <div style={{ display:"flex", gap:6, marginLeft:12 }}>
                                       <button onClick={() => moveProduct(p, -1)} disabled={items[0] && items[0].id===p.id}
                                         style={{ width:34,height:34,borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:items[0]&&items[0].id===p.id?"#d0c8be":"#7a6848",fontSize:14,fontWeight:700,cursor:"pointer" }}>▲</button>
@@ -5186,9 +5250,9 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                                       <div style={{ fontSize:22, fontWeight:800, color:(p.stock||0)<(p.minStock||3)?C.red:(p.stock||0)<(p.minStock||3)*2?C.orange:C.green }}>{p.stock||0}</div>
                                       <div style={{ fontSize:10, color:C.sub }}>個</div>
                                     </div>
-                                  ))}
+                                  )))}
                                 </div>
-                                {!p.placeholder && (
+                                {!selectMode && !p.placeholder && (
                                   <>
                                     {minEdit[p.id] ? (
                                       <div style={{ display:"flex", gap:8, marginBottom:8, alignItems:"center" }}>
@@ -5277,6 +5341,8 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
               <label style={css.label}>メーカー</label>
               <input value={editProdForm.subCategory||""} onChange={e=>setEditProdForm(f=>({...f,subCategory:e.target.value}))} style={css.input} />
             </div>
+            {shopCategoryList.includes(editProdForm.category) && (
+            <>
             <div style={{ marginBottom:12 }}>
               <label style={css.label}>商品説明</label>
               <textarea value={editProdForm.description||""} onChange={e=>setEditProdForm(f=>({...f,description:e.target.value}))} rows={3} style={{ ...css.input, resize:"none", lineHeight:1.7 }} />
@@ -5305,6 +5371,8 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                 <div style={{ width:22, height:22, borderRadius:"50%", background:"#fff", position:"absolute", top:3, left:(editProdForm.isPublic)?23:3, transition:"left 0.2s", boxShadow:"0 1px 4px rgba(0,0,0,0.2)" }} />
               </button>
             </div>
+            </>
+            )}
             <div style={{ display:"flex", gap:8 }}>
               <button onClick={saveEditProduct} style={{...css.btn("#7a6848"),flex:1}}>保存する</button>
               <button onClick={()=>{deleteProduct(editingProd);setEditingProd(null);}} style={css.btn(C.red,false)}>削除</button>
@@ -5630,6 +5698,81 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                 </button>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 一括編集モーダル */}
+      {bulkEditModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px 16px" }}
+          onClick={e => { if (e.target === e.currentTarget) setBulkEditModal(null); }}>
+          <div style={{ background:C.card, borderRadius:20, width:"100%", maxWidth:440, maxHeight:"80vh", overflowY:"auto", WebkitOverflowScrolling:"touch", padding:20, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+              <div style={{ fontWeight:800, fontSize:16 }}>一括編集<span style={{ fontSize:12, color:C.sub, fontWeight:600, marginLeft:8 }}>{selectedIds.size}件</span></div>
+              <button onClick={() => setBulkEditModal(null)} style={{ background:"none", border:"none", fontSize:22, color:C.sub, cursor:"pointer", padding:"0 4px" }}>✕</button>
+            </div>
+            <div style={{ fontSize:12, color:C.sub, lineHeight:1.6, marginBottom:14 }}>
+              チェックを入れた項目だけ、選択した商品すべてに反映されます。
+            </div>
+
+            {[
+              { key:"category", label:"カテゴリ", type:"cats" },
+              { key:"subCategory", label:"サブカテゴリ（メーカー等）", type:"subs" },
+              { key:"price", label:"売価", type:"num" },
+              { key:"cost", label:"原価", type:"num" },
+              { key:"minStock", label:"最小在庫", type:"num" },
+            ].map(f => (
+              <div key={f.key} style={{ marginBottom:14, opacity:bulkEditModal.use[f.key]?1:0.5 }}>
+                <label style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6, cursor:"pointer" }}>
+                  <input type="checkbox" checked={!!bulkEditModal.use[f.key]}
+                    onChange={e => setBulkEditModal(p => ({ ...p, use:{ ...p.use, [f.key]: e.target.checked } }))} />
+                  <span style={{ fontSize:12, color:C.sub, fontWeight:700 }}>{f.label}を変更する</span>
+                </label>
+                {f.type === "cats" ? (
+                  <div>
+                    <input value={bulkEditModal.category} disabled={!bulkEditModal.use.category}
+                      onChange={e=>setBulkEditModal(p=>({...p,category:e.target.value}))} placeholder="例：カラー剤" style={css.input} />
+                    {allCats.length > 0 && bulkEditModal.use.category && (
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:6 }}>
+                        {allCats.map(c => (
+                          <button key={c} onClick={() => setBulkEditModal(p=>({...p,category:c}))}
+                            style={{ padding:"5px 10px", borderRadius:14, border:`1px solid ${bulkEditModal.category===c?"#7a6848":C.border}`, background:bulkEditModal.category===c?"#f5f0e8":"#fff", color:bulkEditModal.category===c?"#7a6848":C.sub, fontSize:12, fontWeight:700, cursor:"pointer" }}>{c}</button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : f.type === "subs" ? (
+                  <div>
+                    <input value={bulkEditModal.subCategory} disabled={!bulkEditModal.use.subCategory}
+                      onChange={e=>setBulkEditModal(p=>({...p,subCategory:e.target.value}))} placeholder="例：フユヒロ" style={css.input} />
+                    {bulkEditModal.use.subCategory && allSubs(bulkEditModal.category || allCats[0] || "").length > 0 && (
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:6 }}>
+                        {allSubs(bulkEditModal.category || allCats[0] || "").map(s => (
+                          <button key={s} onClick={() => setBulkEditModal(p=>({...p,subCategory:s}))}
+                            style={{ padding:"5px 10px", borderRadius:14, border:`1px solid ${bulkEditModal.subCategory===s?"#7a6848":C.border}`, background:bulkEditModal.subCategory===s?"#f5f0e8":"#fff", color:bulkEditModal.subCategory===s?"#7a6848":C.sub, fontSize:12, fontWeight:700, cursor:"pointer" }}>{s}</button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <input type="number" inputMode="numeric" disabled={!bulkEditModal.use[f.key]} value={bulkEditModal[f.key]}
+                    onChange={e=>setBulkEditModal(p=>({...p,[f.key]:e.target.value}))} style={{ ...css.input, textAlign:"right" }} />
+                )}
+              </div>
+            ))}
+
+            <button onClick={() => {
+              const fields = {};
+              if (bulkEditModal.use.category) fields.category = bulkEditModal.category;
+              if (bulkEditModal.use.subCategory) fields.subCategory = bulkEditModal.subCategory;
+              if (bulkEditModal.use.price) fields.price = bulkEditModal.price;
+              if (bulkEditModal.use.cost) fields.cost = bulkEditModal.cost;
+              if (bulkEditModal.use.minStock) fields.minStock = bulkEditModal.minStock;
+              applyBulkEdit(fields);
+            }}
+              style={{ width:"100%", marginTop:4, padding:14, borderRadius:12, border:"none", background:"#7a6848", color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer" }}>
+              {selectedIds.size}件に反映する
+            </button>
           </div>
         </div>
       )}
