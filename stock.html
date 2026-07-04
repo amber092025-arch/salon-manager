@@ -11,6 +11,7 @@
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+  <script src="https://unpkg.com/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { font-family: -apple-system, 'Hiragino Sans', sans-serif; background: #faf8f4; }
@@ -20,7 +21,7 @@
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useEffect, useMemo } = React;
+const { useState, useEffect, useMemo, useRef } = React;
 
 // 初期パスコード（アプリ本体の「その他 > 経費ページ パスコード」と共通）
 const DEFAULT_PIN = "0000";
@@ -94,6 +95,39 @@ function App() {
 
   // 納品書/カラータグ読み取り
   const [scanModal, setScanModal] = useState(null); // { text, result, dir:"in"|"out" }
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState(0);
+  const cameraInputRef = useRef(null);
+  const libInputRef = useRef(null);
+
+  // 画像→テキスト（Tesseract.js、ブラウザ内で完結・API不要）
+  const ocrImage = async (file) => {
+    if (!file) return;
+    setOcrBusy(true); setOcrProgress(0);
+    try {
+      // 大きい写真は縮小してから認識（速度改善）
+      const bmp = await createImageBitmap(file);
+      const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(bmp.width * scale);
+      canvas.height = Math.round(bmp.height * scale);
+      canvas.getContext("2d").drawImage(bmp, 0, 0, canvas.width, canvas.height);
+      const worker = await Tesseract.createWorker("jpn+eng", 1, {
+        logger: m => { if (m.status === "recognizing text") setOcrProgress(Math.round((m.progress||0)*100)); }
+      });
+      const { data } = await worker.recognize(canvas);
+      await worker.terminate();
+      const text = (data.text || "").trim();
+      if (!text) { notify("文字を読み取れませんでした","error"); }
+      else {
+        setScanModal(p => p ? ({ ...p, text: (p.text ? p.text + "\n" : "") + text }) : p);
+        notify("読み取りました ✓ 内容を確認して照合してください");
+      }
+    } catch(e) {
+      notify("読み取りに失敗しました。電波状況を確認してください","error");
+    }
+    setOcrBusy(false); setOcrProgress(0);
+  };
 
   const applyScan = async () => {
     const targets = (scanModal.result?.matches || []).filter(m => m.qty > 0);
@@ -428,11 +462,36 @@ function App() {
 
             {!scanModal.result ? (
               <div>
+                <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+                  <button onClick={() => cameraInputRef.current && cameraInputRef.current.click()} disabled={ocrBusy}
+                    style={{ flex:1, padding:"12px 0", borderRadius:12, border:"none", background:ocrBusy?C.sub:C.accent, color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer" }}>
+                    📷 カメラで撮影
+                  </button>
+                  <button onClick={() => libInputRef.current && libInputRef.current.click()} disabled={ocrBusy}
+                    style={{ flex:1, padding:"12px 0", borderRadius:12, border:"1.5px solid "+C.accent, background:"#fff", color:ocrBusy?C.sub:C.accent, fontWeight:800, fontSize:14, cursor:"pointer" }}>
+                    写真から選択
+                  </button>
+                </div>
+                <input type="file" accept="image/*" capture="environment" ref={cameraInputRef} style={{ display:"none" }}
+                  onChange={e => { const f = e.target.files && e.target.files[0]; if (f) ocrImage(f); e.target.value = ""; }} />
+                <input type="file" accept="image/*" ref={libInputRef} style={{ display:"none" }}
+                  onChange={e => { const f = e.target.files && e.target.files[0]; if (f) ocrImage(f); e.target.value = ""; }} />
+                {ocrBusy && (
+                  <div style={{ marginBottom:10 }}>
+                    <div style={{ fontSize:13, color:C.accent, fontWeight:700, textAlign:"center", marginBottom:6 }}>
+                      読み取り中... {ocrProgress}%
+                    </div>
+                    <div style={{ height:6, background:C.border, borderRadius:4, overflow:"hidden" }}>
+                      <div style={{ height:"100%", width:ocrProgress+"%", background:C.accent, borderRadius:4, transition:"width 0.3s" }} />
+                    </div>
+                    <div style={{ fontSize:11, color:C.sub, textAlign:"center", marginTop:4 }}>初回は日本語辞書のダウンロードで1〜2分かかることがあります</div>
+                  </div>
+                )}
                 <div style={{ fontSize:12, color:C.sub, lineHeight:1.7, marginBottom:8 }}>
-                  下の欄を<b>長押し→「テキストをスキャン」</b>で納品書やカラー剤のタグをカメラ読み取りしてください。商品名を自動で照合します。
+                  読み取った文字は下の欄に入ります（手直しもできます）。文字欄を<b>長押し→「テキストをスキャン」</b>でも読み取れます。
                 </div>
                 <textarea value={scanModal.text} onChange={e=>setScanModal(p=>({...p,text:e.target.value}))} rows={6}
-                  placeholder="ここを長押し→「テキストをスキャン」"
+                  placeholder="カメラ・写真から読み取るか、ここを長押し→「テキストをスキャン」"
                   style={{ width:"100%", boxSizing:"border-box", border:"1px solid "+C.border, borderRadius:10, padding:"10px 12px", fontSize:13, fontFamily:"inherit", resize:"vertical" }} />
                 <button onClick={() => {
                   const r = matchReceiptLines(scanModal.text, products);
