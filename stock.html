@@ -150,7 +150,7 @@ function App() {
         notify("読み取りました(PaddleOCR) ✓ 内容を確認して照合してください");
       }
     } catch(e) {
-      notify("失敗: " + String((e && e.message) || e).slice(0, 150), "error");
+      notify("v2-jsdelivr 失敗: " + String((e && e.message) || e).slice(0, 150), "error");
     }
     setOcrBusy(false); setOcrProgress(0);
   };
