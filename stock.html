@@ -488,7 +488,7 @@ function App() {
                         )}
                         <div style={{ minWidth:0, flex:1 }}>
                           <div style={{ fontWeight:700, fontSize:14 }}>{p.name}</div>
-                          <div style={{ fontSize:11, color:C.sub, marginTop:1 }}>売価{yen(p.price)}・原価{yen(p.cost)}・最小{p.minStock}個{p.subCategory?"・"+p.subCategory:""}</div>
+                          <div style={{ fontSize:11, color:C.sub, marginTop:1 }}>{view!=="gyomu"?`売価${yen(p.price)}・`:""}原価{yen(p.cost)}・最小{p.minStock}個{p.subCategory?"・"+p.subCategory:""}</div>
                         </div>
                         {!selectMode && (
                           <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
@@ -521,7 +521,7 @@ function App() {
       {modal && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:900, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px 16px" }}
           onClick={e => { if (e.target === e.currentTarget) setModal(null); }}>
-          <div style={{ background:C.card, borderRadius:20, width:"100%", maxWidth:440, maxHeight:"85vh", overflowY:"auto", padding:20, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+          <div style={{ background:C.card, borderRadius:20, width:"100%", maxWidth:440, maxHeight:"80vh", overflowY:"auto", WebkitOverflowScrolling:"touch", padding:20, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
               <div style={{ fontWeight:800, fontSize:16 }}>{modal.mode==="add" ? "商品を追加" : "商品を編集"}<span style={{ fontSize:12, color:C.sub, fontWeight:600, marginLeft:8 }}>{view==="hanbai"?"店販":"業務"}</span></div>
               <button onClick={() => setModal(null)} style={{ background:"none", border:"none", fontSize:22, color:C.sub, cursor:"pointer", padding:"0 4px" }}>✕</button>
@@ -559,7 +559,7 @@ function App() {
               )}
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
-              {[["price","売価"],["cost","原価"],["stock","在庫数"],["minStock","最小在庫"]].map(([k,l]) => (
+              {[["price","売価"],["cost","原価"],["stock","在庫数"],["minStock","最小在庫"]].filter(([k]) => k !== "price" || view !== "gyomu").map(([k,l]) => (
                 <div key={k}>
                   <div style={css.label}>{l}</div>
                   <input type="number" inputMode="numeric" value={form[k]} onChange={e=>setForm(p=>({...p,[k]:e.target.value}))} style={{ ...css.input, textAlign:"right" }} />
@@ -578,7 +578,7 @@ function App() {
       {bulkEditModal && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:900, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px 16px" }}
           onClick={e => { if (e.target === e.currentTarget) setBulkEditModal(null); }}>
-          <div style={{ background:C.card, borderRadius:20, width:"100%", maxWidth:440, maxHeight:"85vh", overflowY:"auto", padding:20, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+          <div style={{ background:C.card, borderRadius:20, width:"100%", maxWidth:440, maxHeight:"80vh", overflowY:"auto", WebkitOverflowScrolling:"touch", padding:20, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
               <div style={{ fontWeight:800, fontSize:16 }}>一括編集<span style={{ fontSize:12, color:C.sub, fontWeight:600, marginLeft:8 }}>{selectedIds.size}件</span></div>
               <button onClick={() => setBulkEditModal(null)} style={{ background:"none", border:"none", fontSize:22, color:C.sub, cursor:"pointer", padding:"0 4px" }}>✕</button>
@@ -593,7 +593,7 @@ function App() {
               { key:"price", label:"売価", type:"num" },
               { key:"cost", label:"原価", type:"num" },
               { key:"minStock", label:"最小在庫", type:"num" },
-            ].map(f => (
+            ].filter(f => f.key !== "price" || view !== "gyomu").map(f => (
               <div key={f.key} style={{ marginBottom:14, opacity:bulkEditModal.use[f.key]?1:0.5 }}>
                 <label style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6, cursor:"pointer" }}>
                   <input type="checkbox" checked={!!bulkEditModal.use[f.key]}
@@ -653,7 +653,7 @@ function App() {
       {scanModal && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:900, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px 16px" }}
           onClick={e => { if (e.target === e.currentTarget) setScanModal(null); }}>
-          <div style={{ background:C.card, borderRadius:20, width:"100%", maxWidth:440, maxHeight:"85vh", overflowY:"auto", padding:20, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+          <div style={{ background:C.card, borderRadius:20, width:"100%", maxWidth:440, maxHeight:"80vh", overflowY:"auto", WebkitOverflowScrolling:"touch", padding:20, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
               <div style={{ fontWeight:800, fontSize:16 }}>納品書・タグ読み取り</div>
               <button onClick={() => setScanModal(null)} style={{ background:"none", border:"none", fontSize:22, color:C.sub, cursor:"pointer", padding:"0 4px" }}>✕</button>
@@ -768,9 +768,11 @@ function App() {
                       )}
                       <input value={scanModal.bulkSub||""} onChange={e=>setScanModal(p=>({...p,bulkSub:e.target.value}))}
                         placeholder="サブカテゴリ・メーカー（任意）" style={{ ...css.input, marginBottom:8 }} />
-                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
-                        <input type="number" inputMode="numeric" value={scanModal.bulkPrice||""} onChange={e=>setScanModal(p=>({...p,bulkPrice:e.target.value}))}
-                          placeholder="売価" style={{ ...css.input, textAlign:"right", fontSize:14 }} />
+                      <div style={{ display:"grid", gridTemplateColumns:view==="gyomu"?"1fr 1fr":"1fr 1fr 1fr", gap:8 }}>
+                        {view !== "gyomu" && (
+                          <input type="number" inputMode="numeric" value={scanModal.bulkPrice||""} onChange={e=>setScanModal(p=>({...p,bulkPrice:e.target.value}))}
+                            placeholder="売価" style={{ ...css.input, textAlign:"right", fontSize:14 }} />
+                        )}
                         <input type="number" inputMode="numeric" value={scanModal.bulkCost||""} onChange={e=>setScanModal(p=>({...p,bulkCost:e.target.value}))}
                           placeholder="原価" style={{ ...css.input, textAlign:"right", fontSize:14 }} />
                         <input type="number" inputMode="numeric" value={scanModal.bulkMin||""} onChange={e=>setScanModal(p=>({...p,bulkMin:e.target.value}))}

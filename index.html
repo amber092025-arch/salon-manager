@@ -4665,6 +4665,7 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
   const [minEdit, setMinEdit] = useState({});
   const [addForm, setAddForm] = useState({ name:"", price:"", cost:"", stock:"", minStock:"3", category:"", subCategory:"", photos:[], description:"", isPublic:false });
   const [editingProd, setEditingProd] = useState(null);
+  const [addIsShop, setAddIsShop] = useState(true);
   const [editProdForm, setEditProdForm] = useState({});
   const [editingSubKey, setEditingSubKey] = useState(null);
   const [editSubName, setEditSubName] = useState("");
@@ -4869,7 +4870,7 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
 
 
   const saveAddProduct = async () => {
-    if (!addForm.name || !addForm.price) return notify("商品名と価格を入力してください", "error");
+    if (!addForm.name || (addIsShop && !addForm.price)) return notify("商品名と価格を入力してください", "error");
     const newP = { name: addForm.name, price: parseInt(addForm.price)||0, cost: parseInt(addForm.cost)||0, stock: parseInt(addForm.stock)||0, minStock: parseInt(addForm.minStock)||3, category: addForm.category || "未分類", subCategory: addForm.subCategory || "一般", photos: addForm.photos||[], description: addForm.description||"", isPublic: addForm.isPublic||false };
     await addProduct(newP);
     setAddForm({ name:"", price:"", cost:"", stock:"", minStock:"3", category:"", subCategory:"", photos:[], description:"", isPublic:false });
@@ -4939,7 +4940,7 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
           </div>
           <div style={{ padding:"16px" }}>
             <div style={{ background:"#fff", borderRadius:12, overflow:"hidden", marginBottom:12 }}>
-              {[["name","商品名 *","text"],["price","売価（円）*","number"],["cost","原価（円）","number"],["stock","現在の在庫数","number"],["minStock","最小在庫数（発注アラート）","number"]].map(([k,l,t]) => (
+              {[["name","商品名 *","text"],["price","売価（円）*","number"],["cost","原価（円）","number"],["stock","現在の在庫数","number"],["minStock","最小在庫数（発注アラート）","number"]].filter(([k]) => addIsShop || k !== "price").map(([k,l,t]) => (
                 <div key={k} style={{ display:"flex", alignItems:"center", padding:"13px 16px", borderBottom:`1px solid ${C.border}` }}>
                   <span style={{ fontSize:14, color:C.sub, width:160, flexShrink:0 }}>{l}</span>
                   <input type={t} value={addForm[k]} onChange={e => setAddForm(p=>({...p,[k]:e.target.value}))}
@@ -5028,7 +5029,7 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
             {(view === "gyomu" || view === "hanbahin") && (
               <div style={{ marginBottom:12 }}>
                 <div style={{ display:"flex", gap:8, marginBottom:8 }}>
-                  <button onClick={() => setView("addProduct")} style={{ flex:1, padding:"10px 8px", borderRadius:10, border:"none", background:"#E8DCC3", color:"#2a2218", fontWeight:700, fontSize:13, cursor:"pointer" }}>＋ 商品を追加</button>
+                  <button onClick={() => { setAddIsShop(view === "hanbahin"); setView("addProduct"); }} style={{ flex:1, padding:"10px 8px", borderRadius:10, border:"none", background:"#E8DCC3", color:"#2a2218", fontWeight:700, fontSize:13, cursor:"pointer" }}>＋ 商品を追加</button>
                   <button onClick={() => { setShowAddCat(!showAddCat); setNewCatType("gyomu"); setNewCatName(""); }} style={{ flex:1, padding:"10px 8px", borderRadius:10, border:`1.5px solid #E8DCC3`, background:"#fff", color:"#7a6848", fontWeight:700, fontSize:13, cursor:"pointer" }}>＋ カテゴリ追加</button>
                   <button onClick={() => { setDeleteProdCatMode(p => !p); setEditingCatKey(null); }}
                     style={{ padding:"10px 10px", borderRadius:10, border:`1.5px solid ${deleteProdCatMode ? C.red : C.border}`, background:"#fff", color: deleteProdCatMode ? C.red : C.sub, fontWeight:700, fontSize:12, cursor:"pointer", whiteSpace:"nowrap" }}>
@@ -5171,7 +5172,7 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
                                   <div style={{ flex:1 }}>
                                     <div style={{ fontWeight:p.placeholder?400:700, fontSize:14, color:p.placeholder?C.sub:C.text }}>{p.name}</div>
-                                    {!p.placeholder && <div style={{ fontSize:11, color:C.sub, marginTop:2 }}>売価{yen(p.price)} · 原価{yen(p.cost||0)} · 最小{p.minStock||3}個</div>}
+                                    {!p.placeholder && <div style={{ fontSize:11, color:C.sub, marginTop:2 }}>{shopCategoryList.includes(p.category)?`売価${yen(p.price)} · `:""}原価{yen(p.cost||0)} · 最小{p.minStock||3}個</div>}
                                   </div>
                                   {prodSortMode ? (
                                     <div style={{ display:"flex", gap:6, marginLeft:12 }}>
@@ -5220,7 +5221,7 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                                   </>
                                 )}
                                 {p.placeholder && (
-                                  <button onClick={()=>{setAddForm(f=>({...f,category:p.category,subCategory:p.subCategory}));setView("addProduct");}} style={{...css.btn("#7a6848",false),width:"100%",fontSize:13}}>＋ 商品を追加する</button>
+                                  <button onClick={()=>{setAddForm(f=>({...f,category:p.category,subCategory:p.subCategory}));setAddIsShop(shopCategoryList.includes(p.category));setView("addProduct");}} style={{...css.btn("#7a6848",false),width:"100%",fontSize:13}}>＋ 商品を追加する</button>
                                 )}
                               </div>
                             ))}
@@ -5261,7 +5262,7 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
               <div style={{ fontWeight:800, fontSize:17 }}>商品を編集</div>
               <button onClick={()=>setEditingProd(null)} style={{ background:"none", border:"none", fontSize:22, color:C.sub, cursor:"pointer" }}>✕</button>
             </div>
-            {[["name","商品名","text"],["price","売価（円）","number"],["cost","原価（円）","number"],["stock","在庫数","number"],["minStock","最小在庫数","number"]].map(([k,l,t]) => (
+            {[["name","商品名","text"],["price","売価（円）","number"],["cost","原価（円）","number"],["stock","在庫数","number"],["minStock","最小在庫数","number"]].filter(([k]) => k !== "price" || shopCategoryList.includes(editProdForm.category)).map(([k,l,t]) => (
               <div key={k} style={{ marginBottom:10 }}>
                 <label style={css.label}>{l}</label>
                 <input type={t} value={editProdForm[k]||""} onChange={e=>setEditProdForm(f=>({...f,[k]:e.target.value}))} style={css.input} />
