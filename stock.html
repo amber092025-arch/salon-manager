@@ -125,7 +125,7 @@ function App() {
   const cameraInputRef = useRef(null);
   const libInputRef = useRef(null);
 
-  // 画像→テキスト（Tesseract.js、ブラウザ内で完結・API不要）
+  // 画像→テキスト（PaddleOCR.js／PP-OCRv5、ブラウザ内で完結・API不要）
   const ocrImage = async (file) => {
     if (!file) return;
     setOcrBusy(true); setOcrProgress(0);
@@ -139,12 +139,11 @@ function App() {
       const ctx = canvas.getContext("2d");
       ctx.filter = "grayscale(1) contrast(1.5)";
       ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-      const worker = await Tesseract.createWorker("jpn+eng", 1, {
-        logger: m => { if (m.status === "recognizing text") setOcrProgress(Math.round((m.progress||0)*100)); }
-      });
-      const { data } = await worker.recognize(canvas);
-      await worker.terminate();
-      const text = (data.text || "").trim();
+      const { PaddleOCR } = await import("https://esm.sh/@paddleocr/paddleocr-js");
+      const ocr = await PaddleOCR.create({ lang: "ch", ocrVersion: "PP-OCRv5", ortOptions: { backend: "auto" } });
+      const [result] = await ocr.predict(canvas);
+      ocr.dispose();
+      const text = (result.items || []).map(it => it.text).join("\n").trim();
       if (!text) { notify("文字を読み取れませんでした","error"); }
       else {
         setScanModal(p => p ? ({ ...p, text: (p.text ? p.text + "\n" : "") + text }) : p);
@@ -678,12 +677,9 @@ function App() {
                 {ocrBusy && (
                   <div style={{ marginBottom:10 }}>
                     <div style={{ fontSize:13, color:C.accent, fontWeight:700, textAlign:"center", marginBottom:6 }}>
-                      読み取り中... {ocrProgress}%
+                      読み取り中...
                     </div>
-                    <div style={{ height:6, background:C.border, borderRadius:4, overflow:"hidden" }}>
-                      <div style={{ height:"100%", width:ocrProgress+"%", background:C.accent, borderRadius:4, transition:"width 0.3s" }} />
-                    </div>
-                    <div style={{ fontSize:11, color:C.sub, textAlign:"center", marginTop:4 }}>初回は日本語辞書のダウンロードで1〜2分かかることがあります</div>
+                    <div style={{ fontSize:11, color:C.sub, textAlign:"center", marginTop:4 }}>初回はモデルファイルのダウンロードで時間がかかることがあります</div>
                   </div>
                 )}
                 <div style={{ fontSize:12, color:C.sub, lineHeight:1.7, marginBottom:8 }}>
