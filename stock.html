@@ -139,7 +139,7 @@ function App() {
       const ctx = canvas.getContext("2d");
       ctx.filter = "grayscale(1) contrast(1.5)";
       ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-      const { PaddleOCR } = await import("https://esm.sh/@paddleocr/paddleocr-js");
+      const { PaddleOCR } = await import("https://cdn.jsdelivr.net/npm/@paddleocr/paddleocr-js/+esm");
       const ocr = await PaddleOCR.create({ lang: "ch", ocrVersion: "PP-OCRv5", ortOptions: { backend: "auto" } });
       const [result] = await ocr.predict(canvas);
       ocr.dispose();
