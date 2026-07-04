@@ -113,6 +113,9 @@ function App() {
 
   const emptyForm = { name:"", code:"", category:"", subCategory:"", price:"", cost:"", stock:"", minStock:"3" };
   const [modal, setModal] = useState(null); // { mode:"add"|"edit", id? }
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkEditModal, setBulkEditModal] = useState(null);
   const [form, setForm] = useState(emptyForm);
 
   // 納品書/カラータグ読み取り
@@ -240,6 +243,11 @@ function App() {
     products.forEach(p => { if ((p.category||"未分類") === form.category && p.subCategory && !set.includes(p.subCategory)) set.push(p.subCategory); });
     return set;
   }, [products, form.category]);
+  const getSubsForCat = (cat) => {
+    const set = [];
+    products.forEach(p => { if ((p.category||"未分類") === cat && p.subCategory && !set.includes(p.subCategory)) set.push(p.subCategory); });
+    return set;
+  };
 
   // ── 店販タブで新カテゴリを作った場合、shopCategoryListにも追加（read-modify-write） ──
   const ensureShopCategory = async (cat) => {
@@ -318,6 +326,77 @@ function App() {
 
   const stockColor = p => (p.stock||0) < (p.minStock||3) ? C.red : (p.stock||0) < (p.minStock||3)*2 ? C.orange : C.green;
 
+  const toggleSelect = (id) => setSelectedIds(prev => {
+    const n = new Set(prev);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    return n;
+  });
+  const exitSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()); };
+
+  const applyBulkEdit = async (fields) => {
+    // fields: { category?, subCategory?, price?, cost?, minStock? } チェックされた項目のみ含む
+    if (Object.keys(fields).length === 0) return notify("変更する項目を選んでください","error");
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    const body = {};
+    if ("category" in fields) body.category = fields.category.trim();
+    if ("subCategory" in fields) body.sub_category = fields.subCategory.trim() || null;
+    if ("price" in fields) body.price = parseInt(fields.price)||0;
+    if ("cost" in fields) body.cost = parseInt(fields.cost)||0;
+    if ("minStock" in fields) body.min_stock = parseInt(fields.minStock)||3;
+    setSaving(true);
+    try {
+      if (body.category) await ensureShopCategory(body.category);
+      const res = await fetch(SUPABASE_URL + "/rest/v1/products?id=in.(" + ids.join(",") + ")", { method:"PATCH", headers:HDRS, body: JSON.stringify(body) });
+      if (!res.ok) throw new Error(await res.text());
+      setProducts(prev => prev.map(p => {
+        if (!selectedIds.has(p.id)) return p;
+        return {
+          ...p,
+          ...(body.category !== undefined ? { category: body.category } : {}),
+          ...(body.sub_category !== undefined ? { subCategory: body.sub_category||"" } : {}),
+          ...(body.price !== undefined ? { price: body.price } : {}),
+          ...(body.cost !== undefined ? { cost: body.cost } : {}),
+          ...(body.min_stock !== undefined ? { minStock: body.min_stock } : {}),
+        };
+      }));
+      notify(ids.length + "品を更新しました ✓");
+      setBulkEditModal(null); exitSelectMode();
+    } catch(e) { notify("保存に失敗しました","error"); }
+    setSaving(false);
+  };
+
+  const bulkRegister = async (lines, common) => {
+    if (!lines.length) return notify("登録する行を選んでください","error");
+    if (!common.category.trim()) return notify("カテゴリを入力してください","error");
+    setSaving(true);
+    try {
+      await ensureShopCategory(common.category.trim());
+      const rows = lines.map((ln, i) => {
+        const cm = ln.match(/\d{4,7}/);
+        return {
+          name: ln.replace(/\d{4,7}/, "").replace(/\s+/g," ").trim() || ln,
+          product_code: cm ? cm[0] : null,
+          category: common.category.trim(),
+          sub_category: common.subCategory.trim() || null,
+          price: parseInt(common.price)||0,
+          cost: parseInt(common.cost)||0,
+          stock: 0,
+          min_stock: parseInt(common.minStock)||3,
+          placeholder: false, photos: [], is_public: false, description: null,
+          sort_order: Date.now() + i,
+        };
+      });
+      const res = await fetch(SUPABASE_URL + "/rest/v1/products", { method:"POST", headers:HDRS, body: JSON.stringify(rows) });
+      if (!res.ok) throw new Error(await res.text());
+      const inserted = await res.json();
+      setProducts(prev => [...prev, ...inserted.map(fromDb)]);
+      notify(inserted.length + "品を登録しました ✓");
+      return true;
+    } catch(e) { notify("登録に失敗しました","error"); return false; }
+    finally { setSaving(false); }
+  };
+
   // ── ロック画面 ──
   if (!authed) {
     return (
@@ -363,6 +442,12 @@ function App() {
             </button>
           ))}
         </div>
+        <div style={{ display:"flex", justifyContent:"flex-end", marginTop:8 }}>
+          <button onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
+            style={{ background:"none", border:"none", color:selectMode?C.red:C.accent, fontSize:13, fontWeight:700, cursor:"pointer", padding:"4px 2px" }}>
+            {selectMode ? "選択をやめる" : "商品を選択して一括編集"}
+          </button>
+        </div>
       </div>
 
       <div style={{ padding:16 }}>
@@ -393,26 +478,36 @@ function App() {
                 <div key={sub} style={{ padding:"8px 0", borderBottom:"1px solid "+C.border }}>
                   <div style={{ fontSize:12, color:C.sub, fontWeight:700, marginBottom:4 }}>{sub}</div>
                   {realItems.map(p => (
-                    <div key={p.id} style={{ padding:"9px 0", borderBottom:"1px dashed "+C.border }}>
+                    <div key={p.id} onClick={() => selectMode && toggleSelect(p.id)}
+                      style={{ padding:"9px 0", borderBottom:"1px dashed "+C.border, cursor:selectMode?"pointer":"default", background:selectMode&&selectedIds.has(p.id)?"#f5f0e8":"transparent", borderRadius:selectMode?8:0 }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+                        {selectMode && (
+                          <div style={{ width:24, height:24, borderRadius:7, border:"2px solid "+(selectedIds.has(p.id)?C.accent:C.border), background:selectedIds.has(p.id)?C.accent:"#fff", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                            {selectedIds.has(p.id) && <span style={{ color:"#fff", fontSize:14, fontWeight:800 }}>✓</span>}
+                          </div>
+                        )}
                         <div style={{ minWidth:0, flex:1 }}>
                           <div style={{ fontWeight:700, fontSize:14 }}>{p.name}</div>
-                          <div style={{ fontSize:11, color:C.sub, marginTop:1 }}>売価{yen(p.price)}・原価{yen(p.cost)}・最小{p.minStock}個</div>
+                          <div style={{ fontSize:11, color:C.sub, marginTop:1 }}>売価{yen(p.price)}・原価{yen(p.cost)}・最小{p.minStock}個{p.subCategory?"・"+p.subCategory:""}</div>
                         </div>
-                        <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
-                          <button onClick={() => changeStock(p, -1)}
-                            style={{ width:34, height:34, borderRadius:10, border:"1px solid "+C.border, background:"#fff", fontSize:18, fontWeight:700, color:C.text, cursor:"pointer" }}>−</button>
-                          <span style={{ fontSize:20, fontWeight:800, minWidth:30, textAlign:"center", color:stockColor(p) }}>{p.stock||0}</span>
-                          <button onClick={() => changeStock(p, 1)}
-                            style={{ width:34, height:34, borderRadius:10, border:"1px solid "+C.border, background:"#fff", fontSize:18, fontWeight:700, color:C.text, cursor:"pointer" }}>＋</button>
+                        {!selectMode && (
+                          <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+                            <button onClick={() => changeStock(p, -1)}
+                              style={{ width:34, height:34, borderRadius:10, border:"1px solid "+C.border, background:"#fff", fontSize:18, fontWeight:700, color:C.text, cursor:"pointer" }}>−</button>
+                            <span style={{ fontSize:20, fontWeight:800, minWidth:30, textAlign:"center", color:stockColor(p) }}>{p.stock||0}</span>
+                            <button onClick={() => changeStock(p, 1)}
+                              style={{ width:34, height:34, borderRadius:10, border:"1px solid "+C.border, background:"#fff", fontSize:18, fontWeight:700, color:C.text, cursor:"pointer" }}>＋</button>
+                          </div>
+                        )}
+                      </div>
+                      {!selectMode && (
+                        <div style={{ display:"flex", gap:6, justifyContent:"flex-end", marginTop:6 }}>
+                          <button onClick={() => openEdit(p)}
+                            style={{ fontSize:12, color:C.accent, background:"none", border:"1px solid "+C.accent, borderRadius:8, padding:"4px 12px", cursor:"pointer" }}>編集</button>
+                          <button onClick={() => deleteProduct(p)}
+                            style={{ fontSize:12, color:C.red, background:"none", border:"1px solid "+C.red, borderRadius:8, padding:"4px 12px", cursor:"pointer" }}>削除</button>
                         </div>
-                      </div>
-                      <div style={{ display:"flex", gap:6, justifyContent:"flex-end", marginTop:6 }}>
-                        <button onClick={() => openEdit(p)}
-                          style={{ fontSize:12, color:C.accent, background:"none", border:"1px solid "+C.accent, borderRadius:8, padding:"4px 12px", cursor:"pointer" }}>編集</button>
-                        <button onClick={() => deleteProduct(p)}
-                          style={{ fontSize:12, color:C.red, background:"none", border:"1px solid "+C.red, borderRadius:8, padding:"4px 12px", cursor:"pointer" }}>削除</button>
-                      </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -474,6 +569,81 @@ function App() {
             <button onClick={saveProduct} disabled={saving}
               style={{ width:"100%", marginTop:4, padding:14, borderRadius:12, border:"none", background:saving?C.sub:C.accent, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer" }}>
               {saving ? "保存中..." : (modal.mode==="add" ? "追加する" : "更新する")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 一括編集モーダル */}
+      {bulkEditModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:900, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px 16px" }}
+          onClick={e => { if (e.target === e.currentTarget) setBulkEditModal(null); }}>
+          <div style={{ background:C.card, borderRadius:20, width:"100%", maxWidth:440, maxHeight:"85vh", overflowY:"auto", padding:20, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+              <div style={{ fontWeight:800, fontSize:16 }}>一括編集<span style={{ fontSize:12, color:C.sub, fontWeight:600, marginLeft:8 }}>{selectedIds.size}件</span></div>
+              <button onClick={() => setBulkEditModal(null)} style={{ background:"none", border:"none", fontSize:22, color:C.sub, cursor:"pointer", padding:"0 4px" }}>✕</button>
+            </div>
+            <div style={{ fontSize:12, color:C.sub, lineHeight:1.6, marginBottom:14 }}>
+              チェックを入れた項目だけ、選択した商品すべてに反映されます。
+            </div>
+
+            {[
+              { key:"category", label:"カテゴリ", type:"cats" },
+              { key:"subCategory", label:"サブカテゴリ（メーカー等）", type:"subs" },
+              { key:"price", label:"売価", type:"num" },
+              { key:"cost", label:"原価", type:"num" },
+              { key:"minStock", label:"最小在庫", type:"num" },
+            ].map(f => (
+              <div key={f.key} style={{ marginBottom:14, opacity:bulkEditModal.use[f.key]?1:0.5 }}>
+                <label style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6, cursor:"pointer" }}>
+                  <input type="checkbox" checked={!!bulkEditModal.use[f.key]}
+                    onChange={e => setBulkEditModal(p => ({ ...p, use:{ ...p.use, [f.key]: e.target.checked } }))} />
+                  <span style={{ fontSize:12, color:C.sub, fontWeight:700 }}>{f.label}を変更する</span>
+                </label>
+                {f.type === "cats" ? (
+                  <div>
+                    <input value={bulkEditModal.category} disabled={!bulkEditModal.use.category}
+                      onChange={e=>setBulkEditModal(p=>({...p,category:e.target.value}))} placeholder="例：カラー剤" style={css.input} />
+                    {existingCats.length > 0 && bulkEditModal.use.category && (
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:6 }}>
+                        {existingCats.map(c => (
+                          <button key={c} onClick={() => setBulkEditModal(p=>({...p,category:c}))}
+                            style={{ padding:"5px 10px", borderRadius:14, border:"1px solid "+(bulkEditModal.category===c?C.accent:C.border), background:bulkEditModal.category===c?"#f5f0e8":"#fff", color:bulkEditModal.category===c?C.accent:C.sub, fontSize:12, fontWeight:700, cursor:"pointer" }}>{c}</button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : f.type === "subs" ? (
+                  <div>
+                    <input value={bulkEditModal.subCategory} disabled={!bulkEditModal.use.subCategory}
+                      onChange={e=>setBulkEditModal(p=>({...p,subCategory:e.target.value}))} placeholder="例：フユヒロ" style={css.input} />
+                    {bulkEditModal.use.subCategory && getSubsForCat(bulkEditModal.category || (existingCats[0]||"")).length > 0 && (
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:6 }}>
+                        {getSubsForCat(bulkEditModal.category || (existingCats[0]||"")).map(s => (
+                          <button key={s} onClick={() => setBulkEditModal(p=>({...p,subCategory:s}))}
+                            style={{ padding:"5px 10px", borderRadius:14, border:"1px solid "+(bulkEditModal.subCategory===s?C.accent:C.border), background:bulkEditModal.subCategory===s?"#f5f0e8":"#fff", color:bulkEditModal.subCategory===s?C.accent:C.sub, fontSize:12, fontWeight:700, cursor:"pointer" }}>{s}</button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <input type="number" inputMode="numeric" disabled={!bulkEditModal.use[f.key]} value={bulkEditModal[f.key]}
+                    onChange={e=>setBulkEditModal(p=>({...p,[f.key]:e.target.value}))} style={{ ...css.input, textAlign:"right" }} />
+                )}
+              </div>
+            ))}
+
+            <button onClick={() => {
+              const fields = {};
+              if (bulkEditModal.use.category) fields.category = bulkEditModal.category;
+              if (bulkEditModal.use.subCategory) fields.subCategory = bulkEditModal.subCategory;
+              if (bulkEditModal.use.price) fields.price = bulkEditModal.price;
+              if (bulkEditModal.use.cost) fields.cost = bulkEditModal.cost;
+              if (bulkEditModal.use.minStock) fields.minStock = bulkEditModal.minStock;
+              applyBulkEdit(fields);
+            }} disabled={saving}
+              style={{ width:"100%", marginTop:4, padding:14, borderRadius:12, border:"none", background:saving?C.sub:C.accent, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer" }}>
+              {saving ? "保存中..." : selectedIds.size + "件に反映する"}
             </button>
           </div>
         </div>
@@ -566,14 +736,59 @@ function App() {
                 )}
 
                 {scanModal.result.unmatched.length > 0 && (
-                  <div style={{ marginTop:16 }}>
-                    <div style={{ fontSize:12, color:C.sub, fontWeight:700, marginBottom:6 }}>未登録の可能性がある行（タップで新規追加）</div>
-                    {scanModal.result.unmatched.slice(0,8).map((ln, i) => (
-                      <button key={i} onClick={() => { const cm = ln.match(/\d{4,7}/); setForm({ ...emptyForm, name: ln, code: cm?cm[0]:"" }); setScanModal(null); setModal({ mode:"add" }); }}
-                        style={{ display:"block", width:"100%", textAlign:"left", padding:"9px 12px", marginBottom:6, borderRadius:10, border:"1px dashed "+C.border, background:"#faf8f4", fontSize:13, color:C.text, cursor:"pointer" }}>
-                        ＋ {ln}
+                  <div style={{ marginTop:16, background:"#f9f6f0", border:"1px solid "+C.border, borderRadius:12, padding:12 }}>
+                    <div style={{ fontSize:12, color:C.sub, fontWeight:700, marginBottom:8 }}>未登録の可能性がある行（チェックしたものを一括登録）</div>
+                    {scanModal.result.unmatched.slice(0,15).map((ln, i) => {
+                      const checkedSet = scanModal.bulkChecked || new Set(scanModal.result.unmatched.map((_,idx)=>idx));
+                      const checked = checkedSet.has(i);
+                      return (
+                        <label key={i} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", cursor:"pointer" }}>
+                          <input type="checkbox" checked={checked}
+                            onChange={e => setScanModal(p => {
+                              const cs = new Set(p.bulkChecked || p.result.unmatched.map((_,idx)=>idx));
+                              if (e.target.checked) cs.add(i); else cs.delete(i);
+                              return { ...p, bulkChecked: cs };
+                            })} />
+                          <span style={{ fontSize:13, color:C.text }}>{ln}</span>
+                        </label>
+                      );
+                    })}
+
+                    <div style={{ marginTop:12, paddingTop:12, borderTop:"1px dashed "+C.border }}>
+                      <div style={{ fontSize:12, color:C.sub, fontWeight:700, marginBottom:8 }}>登録する内容（全て共通で設定）</div>
+                      <input value={scanModal.bulkCat||""} onChange={e=>setScanModal(p=>({...p,bulkCat:e.target.value}))}
+                        placeholder="カテゴリ（例：カラー剤）* 必須" style={{ ...css.input, marginBottom:6 }} />
+                      {existingCats.length > 0 && (
+                        <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:8 }}>
+                          {existingCats.map(c => (
+                            <button key={c} onClick={() => setScanModal(p=>({...p,bulkCat:c}))}
+                              style={{ padding:"5px 10px", borderRadius:14, border:"1px solid "+(scanModal.bulkCat===c?C.accent:C.border), background:scanModal.bulkCat===c?"#eee6d8":"#fff", color:scanModal.bulkCat===c?C.accent:C.sub, fontSize:12, fontWeight:700, cursor:"pointer" }}>{c}</button>
+                          ))}
+                        </div>
+                      )}
+                      <input value={scanModal.bulkSub||""} onChange={e=>setScanModal(p=>({...p,bulkSub:e.target.value}))}
+                        placeholder="サブカテゴリ・メーカー（任意）" style={{ ...css.input, marginBottom:8 }} />
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
+                        <input type="number" inputMode="numeric" value={scanModal.bulkPrice||""} onChange={e=>setScanModal(p=>({...p,bulkPrice:e.target.value}))}
+                          placeholder="売価" style={{ ...css.input, textAlign:"right", fontSize:14 }} />
+                        <input type="number" inputMode="numeric" value={scanModal.bulkCost||""} onChange={e=>setScanModal(p=>({...p,bulkCost:e.target.value}))}
+                          placeholder="原価" style={{ ...css.input, textAlign:"right", fontSize:14 }} />
+                        <input type="number" inputMode="numeric" value={scanModal.bulkMin||""} onChange={e=>setScanModal(p=>({...p,bulkMin:e.target.value}))}
+                          placeholder="最小" style={{ ...css.input, textAlign:"right", fontSize:14 }} />
+                      </div>
+                      <button onClick={async () => {
+                        const checkedSet = scanModal.bulkChecked || new Set(scanModal.result.unmatched.map((_,idx)=>idx));
+                        const lines = scanModal.result.unmatched.filter((_,idx) => checkedSet.has(idx));
+                        const ok = await bulkRegister(lines, { category:scanModal.bulkCat||"", subCategory:scanModal.bulkSub||"", price:scanModal.bulkPrice||"", cost:scanModal.bulkCost||"", minStock:scanModal.bulkMin||"3" });
+                        if (ok) setScanModal(null);
+                      }} disabled={saving}
+                        style={{ width:"100%", marginTop:10, padding:13, borderRadius:12, border:"none", background:saving?C.sub:C.accent, color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer" }}>
+                        {saving ? "登録中..." : "チェックした行を一括登録"}
                       </button>
-                    ))}
+                      <div style={{ fontSize:11, color:C.sub, marginTop:6, lineHeight:1.6 }}>
+                        登録後、在庫数は0から始まります。個別の商品名やカテゴリの微調整は一覧の「編集」、複数まとめて直す場合は「商品を選択して一括編集」をご利用ください。
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -594,18 +809,32 @@ function App() {
         </div>
       )}
 
-      {/* 下部固定：商品追加 */}
+      {/* 下部固定：商品追加 / 選択モード時は一括編集バー */}
       <div style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:100 }}>
-        <div style={{ maxWidth:480, margin:"0 auto", padding:"10px 16px calc(10px + env(safe-area-inset-bottom))", background:"rgba(250,248,244,0.95)", borderTop:"1px solid "+C.border, display:"flex", gap:8 }}>
-          <button onClick={() => setScanModal({ text:"", result:null, dir:"in" })}
-            style={{ flex:1, padding:14, borderRadius:12, border:"1.5px solid "+C.accent, background:"#fff", color:C.accent, fontWeight:800, fontSize:15, cursor:"pointer" }}>
-            読み取り
-          </button>
-          <button onClick={openAdd}
-            style={{ flex:1, padding:14, borderRadius:12, border:"none", background:C.accent, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer" }}>
-            ＋ 商品を追加
-          </button>
-        </div>
+        {selectMode ? (
+          <div style={{ maxWidth:480, margin:"0 auto", padding:"10px 16px calc(10px + env(safe-area-inset-bottom))", background:"rgba(250,248,244,0.97)", borderTop:"1px solid "+C.border, display:"flex", alignItems:"center", gap:10 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:C.text, whiteSpace:"nowrap" }}>{selectedIds.size}件選択中</div>
+            <button onClick={exitSelectMode}
+              style={{ padding:"12px 14px", borderRadius:12, border:"1px solid "+C.border, background:"#fff", color:C.sub, fontWeight:700, fontSize:14, cursor:"pointer" }}>
+              キャンセル
+            </button>
+            <button onClick={() => setBulkEditModal({ category:"", subCategory:"", price:"", cost:"", minStock:"", use:{} })} disabled={selectedIds.size===0}
+              style={{ flex:1, padding:14, borderRadius:12, border:"none", background:selectedIds.size===0?C.sub:C.accent, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer" }}>
+              一括編集
+            </button>
+          </div>
+        ) : (
+          <div style={{ maxWidth:480, margin:"0 auto", padding:"10px 16px calc(10px + env(safe-area-inset-bottom))", background:"rgba(250,248,244,0.95)", borderTop:"1px solid "+C.border, display:"flex", gap:8 }}>
+            <button onClick={() => setScanModal({ text:"", result:null, dir:"in" })}
+              style={{ flex:1, padding:14, borderRadius:12, border:"1.5px solid "+C.accent, background:"#fff", color:C.accent, fontWeight:800, fontSize:15, cursor:"pointer" }}>
+              読み取り
+            </button>
+            <button onClick={openAdd}
+              style={{ flex:1, padding:14, borderRadius:12, border:"none", background:C.accent, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer" }}>
+              ＋ 商品を追加
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
