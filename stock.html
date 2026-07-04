@@ -33,7 +33,7 @@ const HDRS = { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY
 const C = { bg:"#faf8f4", card:"#ffffff", border:"#ece7df", text:"#2a2218", sub:"#9a9088", accent:"#7a6848", red:"#ff3b30", orange:"#e8924a", green:"#6aaa7a" };
 const yen = n => "¥" + (n||0).toLocaleString();
 
-const fromDb = r => ({ id:r.id, name:r.name, price:r.price||0, cost:r.cost||0, stock:r.stock||0, minStock:r.min_stock||3, category:r.category||"", subCategory:r.sub_category||"", placeholder:r.placeholder||false, sortOrder:r.sort_order||0 });
+const fromDb = r => ({ id:r.id, name:r.name, price:r.price||0, cost:r.cost||0, stock:r.stock||0, minStock:r.min_stock||3, category:r.category||"", subCategory:r.sub_category||"", placeholder:r.placeholder||false, sortOrder:r.sort_order||0, productCode:(r.product_code||"").trim() });
 
 // あいまい照合用の正規化：空白除去・小文字化・カタカナ→ひらがな・全角英数→半角
 const normalize = s => (s||"").toLowerCase()
@@ -41,27 +41,49 @@ const normalize = s => (s||"").toLowerCase()
   .replace(/[\u30A1-\u30F6]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0x60))
   .replace(/[Ａ-Ｚａ-ｚ０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0xFEE0));
 
-// OCRテキストの各行を商品名と照合。マッチ：{product, qty}、未マッチ：商品名らしい行
+// OCRテキストの各行を商品と照合。①商品コード（数字）優先 → ②商品名あいまい照合
 const matchReceiptLines = (text, products) => {
   const lines = (text||"").split(/\n/).map(l=>l.trim()).filter(Boolean);
   const real = products.filter(p => !p.placeholder && p.name);
   const matches = []; const unmatched = [];
+  const addMatch = (p, qty) => {
+    const ex = matches.find(m => m.product.id === p.id);
+    if (ex) ex.qty += qty; else matches.push({ product: p, qty });
+  };
   lines.forEach(line => {
-    const nl = normalize(line);
-    if (nl.length < 2) return;
-    let best = null;
-    real.forEach(p => {
-      const np = normalize(p.name);
-      if (np.length >= 2 && (nl.includes(np) || np.includes(nl))) {
-        if (!best || np.length > normalize(best.name).length) best = p;
+    // 数量推定：納品書は「…80g 数量 単価」の並びのため末尾から走査。
+    // g付き=容量、3桁以上=単価/金額/コード として除外し、1〜99を数量とみなす
+    let qty = 1;
+    const toks = line.match(/\d[\d,]*g?/g) || [];
+    for (let i = toks.length - 1; i >= 0; i--) {
+      const t = toks[i];
+      if (t.endsWith("g")) continue;
+      const plain = t.replace(/,/g,"");
+      if (plain.length >= 3) continue;
+      const n = parseInt(plain);
+      if (n >= 1 && n <= 99) { qty = n; break; }
+    }
+    // ①商品コード照合（最優先・完全一致）
+    const codes = line.match(/\d{4,7}/g) || [];
+    let hit = null;
+    for (const c of codes) {
+      hit = real.find(p => p.productCode && p.productCode === c) || null;
+      if (hit) break;
+    }
+    // ②商品名あいまい照合（フォールバック）
+    if (!hit) {
+      const nl = normalize(line);
+      if (nl.length >= 2) {
+        real.forEach(p => {
+          const np = normalize(p.name);
+          if (np.length >= 2 && (nl.includes(np) || np.includes(nl))) {
+            if (!hit || np.length > normalize(hit.name).length) hit = p;
+          }
+        });
       }
-    });
-    if (best) {
-      const qm = line.match(/[x×]\s*(\d{1,3})|(\d{1,3})\s*(個|本|箱|袋|点)/);
-      const qty = qm ? (parseInt(qm[1]||qm[2])||1) : 1;
-      const ex = matches.find(m => m.product.id === best.id);
-      if (ex) ex.qty += qty; else matches.push({ product: best, qty });
-    } else {
+    }
+    if (hit) addMatch(hit, qty);
+    else {
       if (/[ぁ-んァ-ヶ一-龠a-zA-Zａ-ｚＡ-Ｚ]{2,}/.test(line) && !/合計|小計|消費税|税込|税抜|請求|納品|御中|様|TEL|FAX|〒|株式会社|有限会社|振込|銀行|支店/.test(line)) unmatched.push(line);
     }
   });
@@ -89,7 +111,7 @@ function App() {
   const [products, setProducts] = useState([]);
   const [shopCats, setShopCats] = useState([]);
 
-  const emptyForm = { name:"", category:"", subCategory:"", price:"", cost:"", stock:"", minStock:"3" };
+  const emptyForm = { name:"", code:"", category:"", subCategory:"", price:"", cost:"", stock:"", minStock:"3" };
   const [modal, setModal] = useState(null); // { mode:"add"|"edit", id? }
   const [form, setForm] = useState(emptyForm);
 
@@ -111,7 +133,9 @@ function App() {
       const canvas = document.createElement("canvas");
       canvas.width = Math.round(bmp.width * scale);
       canvas.height = Math.round(bmp.height * scale);
-      canvas.getContext("2d").drawImage(bmp, 0, 0, canvas.width, canvas.height);
+      const ctx = canvas.getContext("2d");
+      ctx.filter = "grayscale(1) contrast(1.5)";
+      ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
       const worker = await Tesseract.createWorker("jpn+eng", 1, {
         logger: m => { if (m.status === "recognizing text") setOcrProgress(Math.round((m.progress||0)*100)); }
       });
@@ -153,7 +177,7 @@ function App() {
     try {
       setLoadError(false);
       const [pRes, sRes] = await Promise.all([
-        fetch(SUPABASE_URL + "/rest/v1/products?select=id,name,price,cost,stock,min_stock,category,sub_category,placeholder,sort_order&order=sort_order", { headers: HDRS }),
+        fetch(SUPABASE_URL + "/rest/v1/products?select=id,name,price,cost,stock,min_stock,category,sub_category,placeholder,sort_order,product_code&order=sort_order", { headers: HDRS }),
         fetch(SUPABASE_URL + "/rest/v1/settings?select=value&key=eq.shopCategoryList", { headers: HDRS }),
       ]);
       if (!pRes.ok || !sRes.ok) throw new Error();
@@ -235,13 +259,14 @@ function App() {
 
   // ── 追加・編集・削除・在庫増減 ──
   const openAdd = () => { setForm(emptyForm); setModal({ mode:"add" }); };
-  const openEdit = (p) => { setForm({ name:p.name, category:p.category||"", subCategory:p.subCategory||"", price:String(p.price||0), cost:String(p.cost||0), stock:String(p.stock||0), minStock:String(p.minStock||3) }); setModal({ mode:"edit", id:p.id }); };
+  const openEdit = (p) => { setForm({ name:p.name, code:p.productCode||"", category:p.category||"", subCategory:p.subCategory||"", price:String(p.price||0), cost:String(p.cost||0), stock:String(p.stock||0), minStock:String(p.minStock||3) }); setModal({ mode:"edit", id:p.id }); };
 
   const saveProduct = async () => {
     if (!form.name.trim()) return notify("商品名を入力してください","error");
     if (!form.category.trim()) return notify("カテゴリを入力してください","error");
     const body = {
       name: form.name.trim(),
+      product_code: (form.code||"").trim() || null,
       category: form.category.trim(),
       sub_category: (form.subCategory||"").trim() || null,
       price: parseInt(form.price)||0,
@@ -262,7 +287,7 @@ function App() {
       } else {
         const res = await fetch(SUPABASE_URL + "/rest/v1/products?id=eq." + modal.id, { method:"PATCH", headers:HDRS, body: JSON.stringify(body) });
         if (!res.ok) throw new Error(await res.text());
-        setProducts(p => p.map(x => x.id===modal.id ? { ...x, name:body.name, category:body.category, subCategory:body.sub_category||"", price:body.price, cost:body.cost, stock:body.stock, minStock:body.min_stock } : x));
+        setProducts(p => p.map(x => x.id===modal.id ? { ...x, name:body.name, productCode:body.product_code||"", category:body.category, subCategory:body.sub_category||"", price:body.price, cost:body.cost, stock:body.stock, minStock:body.min_stock } : x));
         notify("更新しました ✓");
       }
       setModal(null);
@@ -411,6 +436,10 @@ function App() {
               <input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} style={css.input} />
             </div>
             <div style={{ marginBottom:12 }}>
+              <div style={css.label}>商品コード（納品書の番号・読み取り照合用）</div>
+              <input inputMode="numeric" value={form.code} onChange={e=>setForm(p=>({...p,code:e.target.value.replace(/[^0-9]/g,"")}))} placeholder="例：902786" style={css.input} />
+            </div>
+            <div style={{ marginBottom:12 }}>
               <div style={css.label}>カテゴリ *</div>
               <input value={form.category} onChange={e=>setForm(p=>({...p,category:e.target.value}))} placeholder="例：カラー剤" style={css.input} />
               {existingCats.length > 0 && (
@@ -540,7 +569,7 @@ function App() {
                   <div style={{ marginTop:16 }}>
                     <div style={{ fontSize:12, color:C.sub, fontWeight:700, marginBottom:6 }}>未登録の可能性がある行（タップで新規追加）</div>
                     {scanModal.result.unmatched.slice(0,8).map((ln, i) => (
-                      <button key={i} onClick={() => { setForm({ ...emptyForm, name: ln }); setScanModal(null); setModal({ mode:"add" }); }}
+                      <button key={i} onClick={() => { const cm = ln.match(/\d{4,7}/); setForm({ ...emptyForm, name: ln, code: cm?cm[0]:"" }); setScanModal(null); setModal({ mode:"add" }); }}
                         style={{ display:"block", width:"100%", textAlign:"left", padding:"9px 12px", marginBottom:6, borderRadius:10, border:"1px dashed "+C.border, background:"#faf8f4", fontSize:13, color:C.text, cursor:"pointer" }}>
                         ＋ {ln}
                       </button>
