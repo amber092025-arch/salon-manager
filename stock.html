@@ -147,10 +147,10 @@ function App() {
       if (!text) { notify("文字を読み取れませんでした","error"); }
       else {
         setScanModal(p => p ? ({ ...p, text: (p.text ? p.text + "\n" : "") + text }) : p);
-        notify("読み取りました ✓ 内容を確認して照合してください");
+        notify("読み取りました(PaddleOCR) ✓ 内容を確認して照合してください");
       }
     } catch(e) {
-      notify("読み取りに失敗しました。電波状況を確認してください","error");
+      notify("失敗: " + String((e && e.message) || e).slice(0, 150), "error");
     }
     setOcrBusy(false); setOcrProgress(0);
   };
@@ -802,7 +802,7 @@ function App() {
 
       {/* トースト */}
       {toast && (
-        <div style={{ position:"fixed", bottom:96, left:"50%", transform:"translateX(-50%)", background:toast.type==="error"?C.red:"#2a2218", color:"#fff", padding:"10px 20px", borderRadius:12, fontSize:14, fontWeight:700, zIndex:1000, whiteSpace:"nowrap", boxShadow:"0 4px 12px rgba(0,0,0,0.25)" }}>
+        <div style={{ position:"fixed", bottom:96, left:"50%", transform:"translateX(-50%)", background:toast.type==="error"?C.red:"#2a2218", color:"#fff", padding:"10px 20px", borderRadius:12, fontSize:14, fontWeight:700, zIndex:1000, whiteSpace:"pre-wrap", maxWidth:"85vw", textAlign:"center", boxShadow:"0 4px 12px rgba(0,0,0,0.25)" }}>
           {toast.msg}
         </div>
       )}
