@@ -41,6 +41,16 @@ const normalize = s => (s||"").toLowerCase()
   .replace(/[\u30A1-\u30F6]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0x60))
   .replace(/[Ａ-Ｚａ-ｚ０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0xFEE0));
 
+// ネットワーク起因の一時的な失敗を吸収するため、失敗時は少し待って自動で再試行する
+const withRetry = async (fn, attempts = 3, delayMs = 1000) => {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try { return await fn(); }
+    catch (e) { lastErr = e; if (i < attempts - 1) await new Promise(r => setTimeout(r, delayMs)); }
+  }
+  throw lastErr;
+};
+
 // OCRテキストの各行を商品と照合。①商品コード（数字）優先 → ②商品名あいまい照合
 const matchReceiptLines = (text, products) => {
   const lines = (text||"").split(/\n/).map(l=>l.trim()).filter(Boolean);
@@ -124,6 +134,7 @@ function App() {
   const [ocrProgress, setOcrProgress] = useState(0);
   const cameraInputRef = useRef(null);
   const libInputRef = useRef(null);
+  const ocrServiceRef = useRef(null);
 
   // 画像→テキスト（PaddleOCR.js／PP-OCRv5、ブラウザ内で完結・API不要）
   const ocrImage = async (file) => {
@@ -139,20 +150,26 @@ function App() {
       const ctx = canvas.getContext("2d");
       ctx.filter = "grayscale(1) contrast(1.5)";
       ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-      const dynImport = new Function("specifier", "return import(specifier)");
-      const { PaddleOcrService } = await dynImport("https://esm.sh/ppu-paddle-ocr/web");
-      const MODEL_BASE = "https://media.githubusercontent.com/media/PT-Perkasa-Pilar-Utama/ppu-paddle-ocr-models/refs/heads/main";
-      const DICT_BASE = "https://raw.githubusercontent.com/PT-Perkasa-Pilar-Utama/ppu-paddle-ocr-models/refs/heads/main";
-      const service = new PaddleOcrService({
-        model: {
-          detection: MODEL_BASE + "/detection/PP-OCRv5_mobile_det_infer.onnx",
-          recognition: MODEL_BASE + "/recognition/multi/japan/v3/japan_PP-OCRv3_mobile_rec_infer.onnx",
-          charactersDictionary: DICT_BASE + "/recognition/multi/japan/v3/japan_dict.txt",
-        },
-      });
-      await service.initialize();
-      const result = await service.recognize(canvas);
-      await service.destroy();
+      let service = ocrServiceRef.current;
+      if (!service) {
+        service = await withRetry(async () => {
+          const dynImport = new Function("specifier", "return import(specifier)");
+          const { PaddleOcrService } = await dynImport("https://esm.sh/ppu-paddle-ocr/web");
+          const MODEL_BASE = "https://media.githubusercontent.com/media/PT-Perkasa-Pilar-Utama/ppu-paddle-ocr-models/refs/heads/main";
+          const DICT_BASE = "https://raw.githubusercontent.com/PT-Perkasa-Pilar-Utama/ppu-paddle-ocr-models/refs/heads/main";
+          const s = new PaddleOcrService({
+            model: {
+              detection: MODEL_BASE + "/detection/PP-OCRv5_mobile_det_infer.onnx",
+              recognition: MODEL_BASE + "/recognition/multi/japan/v3/japan_PP-OCRv3_mobile_rec_infer.onnx",
+              charactersDictionary: DICT_BASE + "/recognition/multi/japan/v3/japan_dict.txt",
+            },
+          });
+          await s.initialize();
+          return s;
+        });
+        ocrServiceRef.current = service; // 初期化済みインスタンスを保持し、次回以降はモデル再取得なしで使い回す
+      }
+      const result = await withRetry(() => service.recognize(canvas), 2, 800);
       const text = (result.text || "").trim();
       if (!text) { notify("文字を読み取れませんでした","error"); }
       else {
