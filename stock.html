@@ -11,6 +11,7 @@
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+  <script src="https://unpkg.com/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { font-family: -apple-system, 'Hiragino Sans', sans-serif; background: #faf8f4; }
@@ -39,12 +40,6 @@ const normalize = s => (s||"").toLowerCase()
   .replace(/[\s　]/g,"")
   .replace(/[\u30A1-\u30F6]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0x60))
   .replace(/[Ａ-Ｚａ-ｚ０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0xFEE0));
-
-// OCRで字形が似ていて誤読されやすい文字を同一視する（口⇔ロ、二⇔ニ、力⇔カ、夕⇔タ、工⇔エ、卜⇔ト、八⇔ハ、ソ⇔ン、シ⇔ツ）
-const foldConfusables = s => s
-  .replace(/口/g, "ろ").replace(/二/g, "に").replace(/力/g, "か")
-  .replace(/夕/g, "た").replace(/工/g, "え").replace(/卜/g, "と")
-  .replace(/八/g, "は").replace(/ん/g, "そ").replace(/つ/g, "し");
 
 // OCRテキストの各行を商品と照合。①商品コード（数字）優先 → ②商品名あいまい照合
 const matchReceiptLines = (text, products) => {
@@ -77,12 +72,12 @@ const matchReceiptLines = (text, products) => {
     }
     // ②商品名あいまい照合（フォールバック）
     if (!hit) {
-      const nl = foldConfusables(normalize(line));
+      const nl = normalize(line);
       if (nl.length >= 2) {
         real.forEach(p => {
-          const np = foldConfusables(normalize(p.name));
+          const np = normalize(p.name);
           if (np.length >= 2 && (nl.includes(np) || np.includes(nl))) {
-            if (!hit || np.length > foldConfusables(normalize(hit.name)).length) hit = p;
+            if (!hit || np.length > normalize(hit.name).length) hit = p;
           }
         });
       }
@@ -129,7 +124,6 @@ function App() {
   const [ocrProgress, setOcrProgress] = useState(0);
   const cameraInputRef = useRef(null);
   const libInputRef = useRef(null);
-  const ocrServiceRef = useRef(null);
 
   // 画像→テキスト（PaddleOCR.js／PP-OCRv5、ブラウザ内で完結・API不要）
   const ocrImage = async (file) => {
@@ -145,31 +139,28 @@ function App() {
       const ctx = canvas.getContext("2d");
       ctx.filter = "grayscale(1) contrast(1.5)";
       ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-      let service = ocrServiceRef.current;
-      if (!service) {
-        const dynImport = new Function("specifier", "return import(specifier)");
-        const { PaddleOcrService } = await dynImport("https://esm.sh/ppu-paddle-ocr/web");
-        const MODEL_BASE = "https://media.githubusercontent.com/media/PT-Perkasa-Pilar-Utama/ppu-paddle-ocr-models/refs/heads/main";
-        const DICT_BASE = "https://raw.githubusercontent.com/PT-Perkasa-Pilar-Utama/ppu-paddle-ocr-models/refs/heads/main";
-        service = new PaddleOcrService({
-          model: {
-            detection: MODEL_BASE + "/detection/PP-OCRv5_mobile_det_infer.onnx",
-            recognition: MODEL_BASE + "/recognition/multi/japan/v3/japan_PP-OCRv3_mobile_rec_infer.onnx",
-            charactersDictionary: DICT_BASE + "/recognition/multi/japan/v3/japan_dict.txt",
-          },
-        });
-        await service.initialize();
-        ocrServiceRef.current = service; // 初期化済みインスタンスを保持し、次回以降はモデル再取得なしで使い回す
-      }
+      const dynImport = new Function("specifier", "return import(specifier)");
+      const { PaddleOcrService } = await dynImport("https://esm.sh/ppu-paddle-ocr/web");
+      const MODEL_BASE = "https://media.githubusercontent.com/media/PT-Perkasa-Pilar-Utama/ppu-paddle-ocr-models/refs/heads/main";
+      const DICT_BASE = "https://raw.githubusercontent.com/PT-Perkasa-Pilar-Utama/ppu-paddle-ocr-models/refs/heads/main";
+      const service = new PaddleOcrService({
+        model: {
+          detection: MODEL_BASE + "/detection/PP-OCRv5_mobile_det_infer.onnx",
+          recognition: MODEL_BASE + "/recognition/multi/japan/v3/japan_PP-OCRv3_mobile_rec_infer.onnx",
+          charactersDictionary: DICT_BASE + "/recognition/multi/japan/v3/japan_dict.txt",
+        },
+      });
+      await service.initialize();
       const result = await service.recognize(canvas);
+      await service.destroy();
       const text = (result.text || "").trim();
       if (!text) { notify("文字を読み取れませんでした","error"); }
       else {
         setScanModal(p => p ? ({ ...p, text: (p.text ? p.text + "\n" : "") + text }) : p);
-        notify("読み取りました ✓ 内容を確認して照合してください");
+        notify("読み取りました(v8-japan-v3) ✓ 内容を確認して照合してください");
       }
     } catch(e) {
-      notify("読み取りに失敗しました: " + String((e && e.message) || e).slice(0, 150), "error");
+      notify("v8-japan-v3 失敗: " + String((e && e.message) || e).slice(0, 150), "error");
     }
     setOcrBusy(false); setOcrProgress(0);
   };
