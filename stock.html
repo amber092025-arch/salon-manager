@@ -157,10 +157,10 @@ function App() {
       if (!text) { notify("文字を読み取れませんでした","error"); }
       else {
         setScanModal(p => p ? ({ ...p, text: (p.text ? p.text + "\n" : "") + text }) : p);
-        notify("読み取りました(v5-fix-ppu) ✓ 内容を確認して照合してください");
+        notify("読み取りました(v6-retry) ✓ 内容を確認して照合してください");
       }
     } catch(e) {
-      notify("v5-fix-ppu 失敗: " + String((e && e.message) || e).slice(0, 150), "error");
+      notify("v6-retry 失敗: " + String((e && e.message) || e).slice(0, 150), "error");
     }
     setOcrBusy(false); setOcrProgress(0);
   };
