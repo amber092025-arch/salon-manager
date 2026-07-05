@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="在庫管理" />
+  <link rel="apple-touch-icon" href="icon_stock.png" />
+  <link rel="icon" href="icon_stock.png" />
+  <title>在庫管理 | Amber</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+  <script src="https://unpkg.com/tesseract.js@5/dist/tesseract.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { font-family: -apple-system, 'Hiragino Sans', sans-serif; background: #faf8f4; }
+    #root { max-width: 480px; margin: 0 auto; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useMemo, useRef } = React;
+
+// 初期パスコード（アプリ本体の「その他 > 経費ページ パスコード」と共通）
+const DEFAULT_PIN = "0000";
+
+const SUPABASE_URL = "https://yvsavbxijdggzihvoram.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2c2F2YnhpamRnZ3ppaHZvcmFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NTkyNTEsImV4cCI6MjA5NTUzNTI1MX0.v_5yFWKizgOSUHifx10vSm7OEafy6fZhjy5cff-QHQw";
+const HDRS = { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY, "Content-Type": "application/json", "Prefer": "return=representation" };
+
+const C = { bg:"#faf8f4", card:"#ffffff", border:"#ece7df", text:"#2a2218", sub:"#9a9088", accent:"#7a6848", red:"#ff3b30", orange:"#e8924a", green:"#6aaa7a" };
+const yen = n => "¥" + (n||0).toLocaleString();
+
+const fromDb = r => ({ id:r.id, name:r.name, price:r.price||0, cost:r.cost||0, stock:r.stock||0, minStock:r.min_stock||3, category:r.category||"", subCategory:r.sub_category||"", placeholder:r.placeholder||false, sortOrder:r.sort_order||0, productCode:(r.product_code||"").trim() });
+
+// あいまい照合用の正規化：空白除去・小文字化・カタカナ→ひらがな・全角英数→半角
+const normalize = s => (s||"").toLowerCase()
+  .replace(/[\s　]/g,"")
+  .replace(/[\u30A1-\u30F6]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0x60))
+  .replace(/[Ａ-Ｚａ-ｚ０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0xFEE0));
+
+// OCRテキストの各行を商品と照合。①商品コード（数字）優先 → ②商品名あいまい照合
+const matchReceiptLines = (text, products) => {
+  const lines = (text||"").split(/\n/).map(l=>l.trim()).filter(Boolean);
+  const real = products.filter(p => !p.placeholder && p.name);
+  const matches = []; const unmatched = [];
+  const addMatch = (p, qty) => {
+    const ex = matches.find(m => m.product.id === p.id);
+    if (ex) ex.qty += qty; else matches.push({ product: p, qty });
+  };
+  lines.forEach(line => {
+    // 数量推定：納品書は「…80g 数量 単価」の並びのため末尾から走査。
+    // g付き=容量、3桁以上=単価/金額/コード として除外し、1〜99を数量とみなす
+    let qty = 1;
+    const toks = line.match(/\d[\d,]*g?/g) || [];
+    for (let i = toks.length - 1; i >= 0; i--) {
+      const t = toks[i];
+      if (t.endsWith("g")) continue;
+      const plain = t.replace(/,/g,"");
+      if (plain.length >= 3) continue;
+      const n = parseInt(plain);
+      if (n >= 1 && n <= 99) { qty = n; break; }
+    }
+    // ①商品コード照合（最優先・完全一致）
+    const codes = line.match(/\d{4,7}/g) || [];
+    let hit = null;
+    for (const c of codes) {
+      hit = real.find(p => p.productCode && p.productCode === c) || null;
+      if (hit) break;
+    }
+    // ②商品名あいまい照合（フォールバック）
+    if (!hit) {
+      const nl = normalize(line);
+      if (nl.length >= 2) {
+        real.forEach(p => {
+          const np = normalize(p.name);
+          if (np.length >= 2 && (nl.includes(np) || np.includes(nl))) {
+            if (!hit || np.length > normalize(hit.name).length) hit = p;
+          }
+        });
+      }
+    }
+    if (hit) addMatch(hit, qty);
+    else {
+      if (/[ぁ-んァ-ヶ一-龠a-zA-Zａ-ｚＡ-Ｚ]{2,}/.test(line) && !/合計|小計|消費税|税込|税抜|請求|納品|御中|様|TEL|FAX|〒|株式会社|有限会社|振込|銀行|支店/.test(line)) unmatched.push(line);
+    }
+  });
+  return { matches, unmatched };
+};
+
+const css = {
+  card: { background:C.card, borderRadius:14, padding:14, marginBottom:12, boxShadow:"0 1px 3px rgba(0,0,0,0.08)" },
+  input: { width:"100%", boxSizing:"border-box", border:"1px solid "+C.border, borderRadius:10, padding:"11px 13px", fontSize:16, background:"#fff", color:C.text, outline:"none", fontFamily:"inherit" },
+  label: { fontSize:12, color:C.sub, fontWeight:700, marginBottom:6 },
+};
+
+function App() {
+  const [authed, setAuthed] = useState(localStorage.getItem("stock_auth") === "1");
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState("");
+  const [checking, setChecking] = useState(false);
+
+  const [view, setView] = useState("gyomu"); // gyomu | hanbai
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  const [products, setProducts] = useState([]);
+  const [shopCats, setShopCats] = useState([]);
+
+  const emptyForm = { name:"", code:"", category:"", subCategory:"", price:"", cost:"", stock:"", minStock:"3" };
+  const [modal, setModal] = useState(null); // { mode:"add"|"edit", id? }
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkEditModal, setBulkEditModal] = useState(null);
+  const [form, setForm] = useState(emptyForm);
+
+  // 納品書/カラータグ読み取り
+  const [scanModal, setScanModal] = useState(null); // { text, result, dir:"in"|"out" }
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState(0);
+  const cameraInputRef = useRef(null);
+  const libInputRef = useRef(null);
+
+  // 画像→テキスト（PaddleOCR.js／PP-OCRv5、ブラウザ内で完結・API不要）
+  const ocrImage = async (file) => {
+    if (!file) return;
+    setOcrBusy(true); setOcrProgress(0);
+    try {
+      // 大きい写真は縮小してから認識（速度改善）
+      const bmp = await createImageBitmap(file);
+      const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(bmp.width * scale);
+      canvas.height = Math.round(bmp.height * scale);
+      const ctx = canvas.getContext("2d");
+      ctx.filter = "grayscale(1) contrast(1.5)";
+      ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+      const dynImport = new Function("specifier", "return import(specifier)");
+      const { PaddleOcrService } = await dynImport("https://esm.sh/ppu-paddle-ocr/web");
+      const MODEL_BASE = "https://media.githubusercontent.com/media/PT-Perkasa-Pilar-Utama/ppu-paddle-ocr-models/refs/heads/main";
+      const DICT_BASE = "https://raw.githubusercontent.com/PT-Perkasa-Pilar-Utama/ppu-paddle-ocr-models/refs/heads/main";
+      const service = new PaddleOcrService({
+        model: {
+          detection: MODEL_BASE + "/detection/PP-OCRv5_mobile_det_infer.onnx",
+          recognition: MODEL_BASE + "/recognition/multi/japan/v3/japan_PP-OCRv3_mobile_rec_infer.onnx",
+          charactersDictionary: DICT_BASE + "/recognition/multi/japan/v3/japan_dict.txt",
+        },
+      });
+      await service.initialize();
+      const result = await service.recognize(canvas);
+      await service.destroy();
+      const text = (result.text || "").trim();
+      if (!text) { notify("文字を読み取れませんでした","error"); }
+      else {
+        setScanModal(p => p ? ({ ...p, text: (p.text ? p.text + "\n" : "") + text }) : p);
+        notify("読み取りました(v8-japan-v3) ✓ 内容を確認して照合してください");
+      }
+    } catch(e) {
+      notify("v8-japan-v3 失敗: " + String((e && e.message) || e).slice(0, 150), "error");
+    }
+    setOcrBusy(false); setOcrProgress(0);
+  };
+
+  const applyScan = async () => {
+    const targets = (scanModal.result?.matches || []).filter(m => m.qty > 0);
+    if (!targets.length) return notify("数量が入っている商品がありません","error");
+    setSaving(true);
+    try {
+      for (const m of targets) {
+        const cur = products.find(x => x.id === m.product.id) || m.product;
+        const ns = scanModal.dir === "out" ? Math.max(0, (cur.stock||0) - m.qty) : (cur.stock||0) + m.qty;
+        const res = await fetch(SUPABASE_URL + "/rest/v1/products?id=eq." + m.product.id, { method:"PATCH", headers:HDRS, body: JSON.stringify({ stock: ns }) });
+        if (!res.ok) throw new Error();
+        setProducts(prev => prev.map(x => x.id===m.product.id ? { ...x, stock: ns } : x));
+      }
+      notify(targets.length + "品を" + (scanModal.dir==="out"?"出庫":"入庫") + "しました ✓");
+      setScanModal(null);
+    } catch(e) { notify("保存に失敗しました","error"); }
+    setSaving(false);
+  };
+
+  const notify = (msg, type) => { setToast({ msg, type }); setTimeout(() => setToast(null), 2000); };
+
+  const reload = async () => {
+    try {
+      setLoadError(false);
+      const [pRes, sRes] = await Promise.all([
+        fetch(SUPABASE_URL + "/rest/v1/products?select=id,name,price,cost,stock,min_stock,category,sub_category,placeholder,sort_order,product_code&order=sort_order", { headers: HDRS }),
+        fetch(SUPABASE_URL + "/rest/v1/settings?select=value&key=eq.shopCategoryList", { headers: HDRS }),
+      ]);
+      if (!pRes.ok || !sRes.ok) throw new Error();
+      const pRows = await pRes.json();
+      setProducts(pRows.map(fromDb));
+      const sRows = await sRes.json();
+      if (sRows.length && sRows[0].value) { try { setShopCats(JSON.parse(sRows[0].value)||[]); } catch(e) { setShopCats([]); } }
+      else setShopCats([]);
+    } catch(e) { setLoadError(true); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { if (authed) { setLoading(true); reload(); } }, [authed]);
+
+  // ── PIN（経費ページと共通：settings.expensePin） ──
+  const tryUnlock = async (v) => {
+    setChecking(true);
+    try {
+      const res = await fetch(SUPABASE_URL + "/rest/v1/settings?select=value&key=eq.expensePin", { headers: HDRS });
+      if (!res.ok) throw new Error();
+      const rows = await res.json();
+      let pin = DEFAULT_PIN;
+      if (rows.length && rows[0].value) { try { pin = JSON.parse(rows[0].value); } catch(e) { pin = rows[0].value; } }
+      if (String(v) === String(pin)) {
+        localStorage.setItem("stock_auth", "1");
+        setAuthed(true); setPinInput(""); setPinError("");
+      } else { setPinError("パスコードが違います"); setPinInput(""); }
+    } catch(e) { setPinError("通信エラー。電波状況を確認して再入力してください"); setPinInput(""); }
+    setChecking(false);
+  };
+  const lock = () => { localStorage.removeItem("stock_auth"); setAuthed(false); };
+
+  // ── グルーピング（業務/店販） ──
+  const grouped = useMemo(() => {
+    const isShop = c => shopCats.includes(c);
+    const filtered = products.filter(p => {
+      const cat = p.category || "未分類";
+      return view === "hanbai" ? isShop(cat) : !isShop(cat);
+    });
+    const map = {};
+    filtered.forEach(p => {
+      const cat = p.category || "未分類"; const sub = p.subCategory || "一般";
+      if (!map[cat]) map[cat] = {};
+      if (!map[cat][sub]) map[cat][sub] = [];
+      map[cat][sub].push(p);
+    });
+    return map;
+  }, [products, view, shopCats]);
+
+  const existingCats = useMemo(() => {
+    const isShop = c => shopCats.includes(c);
+    const set = [];
+    products.forEach(p => {
+      const cat = p.category || "未分類";
+      if ((view === "hanbai" ? isShop(cat) : !isShop(cat)) && !set.includes(cat)) set.push(cat);
+    });
+    return set;
+  }, [products, view, shopCats]);
+  const existingSubs = useMemo(() => {
+    const set = [];
+    products.forEach(p => { if ((p.category||"未分類") === form.category && p.subCategory && !set.includes(p.subCategory)) set.push(p.subCategory); });
+    return set;
+  }, [products, form.category]);
+  const getSubsForCat = (cat) => {
+    const set = [];
+    products.forEach(p => { if ((p.category||"未分類") === cat && p.subCategory && !set.includes(p.subCategory)) set.push(p.subCategory); });
+    return set;
+  };
+
+  // ── 店販タブで新カテゴリを作った場合、shopCategoryListにも追加（read-modify-write） ──
+  const ensureShopCategory = async (cat) => {
+    if (view !== "hanbai" || !cat) return;
+    const res = await fetch(SUPABASE_URL + "/rest/v1/settings?select=value&key=eq.shopCategoryList", { headers: HDRS });
+    if (!res.ok) throw new Error();
+    const rows = await res.json();
+    let list = [], exists = false;
+    if (rows.length) { exists = true; try { list = JSON.parse(rows[0].value)||[]; } catch(e) {} }
+    if (list.includes(cat)) { setShopCats(list); return; }
+    const next = [...list, cat];
+    const body = JSON.stringify({ value: JSON.stringify(next) });
+    if (exists) await fetch(SUPABASE_URL + "/rest/v1/settings?key=eq.shopCategoryList", { method:"PATCH", headers:HDRS, body });
+    else await fetch(SUPABASE_URL + "/rest/v1/settings", { method:"POST", headers:HDRS, body: JSON.stringify({ key:"shopCategoryList", value: JSON.stringify(next) }) });
+    setShopCats(next);
+  };
+
+  // ── 追加・編集・削除・在庫増減 ──
+  const openAdd = () => { setForm(emptyForm); setModal({ mode:"add" }); };
+  const openEdit = (p) => { setForm({ name:p.name, code:p.productCode||"", category:p.category||"", subCategory:p.subCategory||"", price:String(p.price||0), cost:String(p.cost||0), stock:String(p.stock||0), minStock:String(p.minStock||3) }); setModal({ mode:"edit", id:p.id }); };
+
+  const saveProduct = async () => {
+    if (!form.name.trim()) return notify("商品名を入力してください","error");
+    if (!form.category.trim()) return notify("カテゴリを入力してください","error");
+    const body = {
+      name: form.name.trim(),
+      product_code: (form.code||"").trim() || null,
+      category: form.category.trim(),
+      sub_category: (form.subCategory||"").trim() || null,
+      price: parseInt(form.price)||0,
+      cost: parseInt(form.cost)||0,
+      stock: parseInt(form.stock)||0,
+      min_stock: parseInt(form.minStock)||3,
+    };
+    setSaving(true);
+    try {
+      await ensureShopCategory(body.category);
+      if (modal.mode === "add") {
+        const res = await fetch(SUPABASE_URL + "/rest/v1/products", { method:"POST", headers:HDRS,
+          body: JSON.stringify({ ...body, placeholder:false, photos:[], is_public:false, description:null, sort_order: Date.now() }) });
+        if (!res.ok) throw new Error(await res.text());
+        const rows = await res.json();
+        if (rows.length) setProducts(p => [...p, fromDb(rows[0])]);
+        notify("追加しました ✓");
+      } else {
+        const res = await fetch(SUPABASE_URL + "/rest/v1/products?id=eq." + modal.id, { method:"PATCH", headers:HDRS, body: JSON.stringify(body) });
+        if (!res.ok) throw new Error(await res.text());
+        setProducts(p => p.map(x => x.id===modal.id ? { ...x, name:body.name, productCode:body.product_code||"", category:body.category, subCategory:body.sub_category||"", price:body.price, cost:body.cost, stock:body.stock, minStock:body.min_stock } : x));
+        notify("更新しました ✓");
+      }
+      setModal(null);
+    } catch(e) { notify("保存に失敗しました","error"); }
+    setSaving(false);
+  };
+
+  const deleteProduct = async (p) => {
+    if (!window.confirm(`「${p.name}」を削除しますか？`)) return;
+    setSaving(true);
+    try {
+      const res = await fetch(SUPABASE_URL + "/rest/v1/products?id=eq." + p.id, { method:"DELETE", headers:HDRS });
+      if (!res.ok) throw new Error();
+      setProducts(prev => prev.filter(x => x.id !== p.id));
+      notify("削除しました");
+    } catch(e) { notify("削除に失敗しました","error"); }
+    setSaving(false);
+  };
+
+  const changeStock = async (p, delta) => {
+    const ns = Math.max(0, (p.stock||0) + delta);
+    setProducts(prev => prev.map(x => x.id===p.id ? { ...x, stock: ns } : x));
+    try {
+      const res = await fetch(SUPABASE_URL + "/rest/v1/products?id=eq." + p.id, { method:"PATCH", headers:HDRS, body: JSON.stringify({ stock: ns }) });
+      if (!res.ok) throw new Error();
+    } catch(e) { notify("保存に失敗しました","error"); }
+  };
+
+  const stockColor = p => (p.stock||0) < (p.minStock||3) ? C.red : (p.stock||0) < (p.minStock||3)*2 ? C.orange : C.green;
+
+  const toggleSelect = (id) => setSelectedIds(prev => {
+    const n = new Set(prev);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    return n;
+  });
+  const exitSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()); };
+
+  const applyBulkEdit = async (fields) => {
+    // fields: { category?, subCategory?, price?, cost?, minStock? } チェックされた項目のみ含む
+    if (Object.keys(fields).length === 0) return notify("変更する項目を選んでください","error");
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    const body = {};
+    if ("category" in fields) body.category = fields.category.trim();
+    if ("subCategory" in fields) body.sub_category = fields.subCategory.trim() || null;
+    if ("price" in fields) body.price = parseInt(fields.price)||0;
+    if ("cost" in fields) body.cost = parseInt(fields.cost)||0;
+    if ("minStock" in fields) body.min_stock = parseInt(fields.minStock)||3;
+    setSaving(true);
+    try {
+      if (body.category) await ensureShopCategory(body.category);
+      const res = await fetch(SUPABASE_URL + "/rest/v1/products?id=in.(" + ids.join(",") + ")", { method:"PATCH", headers:HDRS, body: JSON.stringify(body) });
+      if (!res.ok) throw new Error(await res.text());
+      setProducts(prev => prev.map(p => {
+        if (!selectedIds.has(p.id)) return p;
+        return {
+          ...p,
+          ...(body.category !== undefined ? { category: body.category } : {}),
+          ...(body.sub_category !== undefined ? { subCategory: body.sub_category||"" } : {}),
+          ...(body.price !== undefined ? { price: body.price } : {}),
+          ...(body.cost !== undefined ? { cost: body.cost } : {}),
+          ...(body.min_stock !== undefined ? { minStock: body.min_stock } : {}),
+        };
+      }));
+      notify(ids.length + "品を更新しました ✓");
+      setBulkEditModal(null); exitSelectMode();
+    } catch(e) { notify("保存に失敗しました","error"); }
+    setSaving(false);
+  };
+
+  const bulkRegister = async (lines, common) => {
+    if (!lines.length) return notify("登録する行を選んでください","error");
+    if (!common.category.trim()) return notify("カテゴリを入力してください","error");
+    setSaving(true);
+    try {
+      await ensureShopCategory(common.category.trim());
+      const rows = lines.map((ln, i) => {
+        const cm = ln.match(/\d{4,7}/);
+        return {
+          name: ln.replace(/\d{4,7}/, "").replace(/\s+/g," ").trim() || ln,
+          product_code: cm ? cm[0] : null,
+          category: common.category.trim(),
+          sub_category: common.subCategory.trim() || null,
+          price: parseInt(common.price)||0,
+          cost: parseInt(common.cost)||0,
+          stock: 0,
+          min_stock: parseInt(common.minStock)||3,
+          placeholder: false, photos: [], is_public: false, description: null,
+          sort_order: Date.now() + i,
+        };
+      });
+      const res = await fetch(SUPABASE_URL + "/rest/v1/products", { method:"POST", headers:HDRS, body: JSON.stringify(rows) });
+      if (!res.ok) throw new Error(await res.text());
+      const inserted = await res.json();
+      setProducts(prev => [...prev, ...inserted.map(fromDb)]);
+      notify(inserted.length + "品を登録しました ✓");
+      return true;
+    } catch(e) { notify("登録に失敗しました","error"); return false; }
+    finally { setSaving(false); }
+  };
+
+  // ── ロック画面 ──
+  if (!authed) {
+    return (
+      <div style={{ minHeight:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:24 }}>
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke={C.accent} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom:16 }}>
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+        </svg>
+        <div style={{ fontWeight:800, fontSize:18, marginBottom:4, color:C.text }}>在庫管理</div>
+        <div style={{ fontSize:13, color:C.sub, marginBottom:20 }}>パスコードを入力してください</div>
+        <input type="tel" inputMode="numeric" maxLength={4} value={pinInput} autoFocus disabled={checking}
+          onChange={e => {
+            const v = e.target.value.replace(/[^0-9]/g,"").slice(0,4);
+            setPinInput(v); setPinError("");
+            if (v.length === 4) tryUnlock(v);
+          }}
+          style={{ width:160, textAlign:"center", fontSize:28, letterSpacing:12, padding:"12px 0", border:"1.5px solid "+(pinError?C.red:C.border), borderRadius:12, background:checking?"#f5f2ec":"#fff", outline:"none" }} />
+        {checking && <div style={{ fontSize:13, color:C.sub, marginTop:12 }}>確認中...</div>}
+        {!checking && pinError && <div style={{ fontSize:13, color:C.red, marginTop:12, textAlign:"center", padding:"0 20px" }}>{pinError}</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight:"100vh", paddingBottom:90 }}>
+      {/* ヘッダー */}
+      <div style={{ position:"sticky", top:0, zIndex:100, background:C.bg, padding:"14px 16px 10px", borderBottom:"1px solid "+C.border }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+          <div style={{ fontWeight:800, fontSize:17, color:C.text }}>在庫管理</div>
+          <div style={{ display:"flex", gap:8 }}>
+            <button onClick={() => { setLoading(true); reload(); }} style={{ background:"none", border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px", cursor:"pointer" }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.sub} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            </button>
+            <button onClick={lock} style={{ background:"none", border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px", cursor:"pointer" }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.sub} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </button>
+          </div>
+        </div>
+        <div style={{ display:"flex", gap:8 }}>
+          {[["gyomu","業務"],["hanbai","店販"]].map(([k,l]) => (
+            <button key={k} onClick={() => setView(k)}
+              style={{ flex:1, padding:"9px 0", borderRadius:20, border:"1.5px solid "+(view===k?C.accent:C.border), background:view===k?C.accent:"#fff", color:view===k?"#fff":C.text, fontWeight:700, fontSize:13, cursor:"pointer" }}>
+              {l}
+            </button>
+          ))}
+        </div>
+        <div style={{ display:"flex", justifyContent:"flex-end", marginTop:8 }}>
+          <button onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
+            style={{ background:"none", border:"none", color:selectMode?C.red:C.accent, fontSize:13, fontWeight:700, cursor:"pointer", padding:"4px 2px" }}>
+            {selectMode ? "選択をやめる" : "商品を選択して一括編集"}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ padding:16 }}>
+        {loading && <div style={{ textAlign:"center", color:C.sub, fontSize:14, padding:"40px 0" }}>読み込み中...</div>}
+        {!loading && loadError && (
+          <div style={{ ...css.card, textAlign:"center" }}>
+            <div style={{ fontSize:14, color:C.red, marginBottom:10 }}>データの読み込みに失敗しました</div>
+            <button onClick={() => { setLoading(true); reload(); }} style={{ padding:"8px 14px", borderRadius:10, border:"1px solid "+C.border, background:"#fff", cursor:"pointer", fontWeight:700, fontSize:14 }}>再読み込み</button>
+          </div>
+        )}
+
+        {!loading && !loadError && Object.keys(grouped).length === 0 && (
+          <div style={{ textAlign:"center", color:C.sub, fontSize:13, padding:"30px 0" }}>商品がありません。「＋商品を追加」から登録してください</div>
+        )}
+
+        {!loading && !loadError && Object.entries(grouped).map(([cat, subs]) => (
+          <div key={cat} style={css.card}>
+            <div style={{ fontWeight:800, fontSize:15, marginBottom:6, color:C.accent }}>{cat}</div>
+            {Object.entries(subs).map(([sub, items]) => {
+              const realItems = items.filter(p => !p.placeholder);
+              if (realItems.length === 0) return (
+                <div key={sub} style={{ padding:"8px 0", borderBottom:"1px solid "+C.border }}>
+                  <div style={{ fontSize:12, color:C.sub, fontWeight:700 }}>{sub}</div>
+                  <div style={{ fontSize:12, color:C.sub, padding:"6px 0" }}>（商品なし）</div>
+                </div>
+              );
+              return (
+                <div key={sub} style={{ padding:"8px 0", borderBottom:"1px solid "+C.border }}>
+                  <div style={{ fontSize:12, color:C.sub, fontWeight:700, marginBottom:4 }}>{sub}</div>
+                  {realItems.map(p => (
+                    <div key={p.id} onClick={() => selectMode && toggleSelect(p.id)}
+                      style={{ padding:"9px 0", borderBottom:"1px dashed "+C.border, cursor:selectMode?"pointer":"default", background:selectMode&&selectedIds.has(p.id)?"#f5f0e8":"transparent", borderRadius:selectMode?8:0 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+                        {selectMode && (
+                          <div style={{ width:24, height:24, borderRadius:7, border:"2px solid "+(selectedIds.has(p.id)?C.accent:C.border), background:selectedIds.has(p.id)?C.accent:"#fff", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                            {selectedIds.has(p.id) && <span style={{ color:"#fff", fontSize:14, fontWeight:800 }}>✓</span>}
+                          </div>
+                        )}
+                        <div style={{ minWidth:0, flex:1 }}>
+                          <div style={{ fontWeight:700, fontSize:14 }}>{p.name}</div>
+                          <div style={{ fontSize:11, color:C.sub, marginTop:1 }}>{view!=="gyomu"?`売価${yen(p.price)}・`:""}原価{yen(p.cost)}・最小{p.minStock}個{p.subCategory?"・"+p.subCategory:""}</div>
+                        </div>
+                        {!selectMode && (
+                          <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+                            <button onClick={() => changeStock(p, -1)}
+                              style={{ width:34, height:34, borderRadius:10, border:"1px solid "+C.border, background:"#fff", fontSize:18, fontWeight:700, color:C.text, cursor:"pointer" }}>−</button>
+                            <span style={{ fontSize:20, fontWeight:800, minWidth:30, textAlign:"center", color:stockColor(p) }}>{p.stock||0}</span>
+                            <button onClick={() => changeStock(p, 1)}
+                              style={{ width:34, height:34, borderRadius:10, border:"1px solid "+C.border, background:"#fff", fontSize:18, fontWeight:700, color:C.text, cursor:"pointer" }}>＋</button>
+                          </div>
+                        )}
+                      </div>
+                      {!selectMode && (
+                        <div style={{ display:"flex", gap:6, justifyContent:"flex-end", marginTop:6 }}>
+                          <button onClick={() => openEdit(p)}
+                            style={{ fontSize:12, color:C.accent, background:"none", border:"1px solid "+C.accent, borderRadius:8, padding:"4px 12px", cursor:"pointer" }}>編集</button>
+                          <button onClick={() => deleteProduct(p)}
+                            style={{ fontSize:12, color:C.red, background:"none", border:"1px solid "+C.red, borderRadius:8, padding:"4px 12px", cursor:"pointer" }}>削除</button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      {/* 追加/編集モーダル */}
+      {modal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:900, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px 16px" }}
+          onClick={e => { if (e.target === e.currentTarget) setModal(null); }}>
+          <div style={{ background:C.card, borderRadius:20, width:"100%", maxWidth:440, maxHeight:"80vh", overflowY:"auto", WebkitOverflowScrolling:"touch", padding:20, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+              <div style={{ fontWeight:800, fontSize:16 }}>{modal.mode==="add" ? "商品を追加" : "商品を編集"}<span style={{ fontSize:12, color:C.sub, fontWeight:600, marginLeft:8 }}>{view==="hanbai"?"店販":"業務"}</span></div>
+              <button onClick={() => setModal(null)} style={{ background:"none", border:"none", fontSize:22, color:C.sub, cursor:"pointer", padding:"0 4px" }}>✕</button>
+            </div>
+            <div style={{ marginBottom:12 }}>
+              <div style={css.label}>商品名 *</div>
+              <input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} style={css.input} />
+            </div>
+            <div style={{ marginBottom:12 }}>
+              <div style={css.label}>商品コード（納品書の番号・読み取り照合用）</div>
+              <input inputMode="numeric" value={form.code} onChange={e=>setForm(p=>({...p,code:e.target.value.replace(/[^0-9]/g,"")}))} placeholder="例：902786" style={css.input} />
+            </div>
+            <div style={{ marginBottom:12 }}>
+              <div style={css.label}>カテゴリ *</div>
+              <input value={form.category} onChange={e=>setForm(p=>({...p,category:e.target.value}))} placeholder="例：カラー剤" style={css.input} />
+              {existingCats.length > 0 && (
+                <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:6 }}>
+                  {existingCats.map(c => (
+                    <button key={c} onClick={() => setForm(p=>({...p,category:c}))}
+                      style={{ padding:"5px 10px", borderRadius:14, border:"1px solid "+(form.category===c?C.accent:C.border), background:form.category===c?"#f5f0e8":"#fff", color:form.category===c?C.accent:C.sub, fontSize:12, fontWeight:700, cursor:"pointer" }}>{c}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div style={{ marginBottom:12 }}>
+              <div style={css.label}>サブカテゴリ（メーカー等）</div>
+              <input value={form.subCategory} onChange={e=>setForm(p=>({...p,subCategory:e.target.value}))} placeholder="例：フユヒロ" style={css.input} />
+              {existingSubs.length > 0 && (
+                <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:6 }}>
+                  {existingSubs.map(s => (
+                    <button key={s} onClick={() => setForm(p=>({...p,subCategory:s}))}
+                      style={{ padding:"5px 10px", borderRadius:14, border:"1px solid "+(form.subCategory===s?C.accent:C.border), background:form.subCategory===s?"#f5f0e8":"#fff", color:form.subCategory===s?C.accent:C.sub, fontSize:12, fontWeight:700, cursor:"pointer" }}>{s}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
+              {[["price","売価"],["cost","原価"],["stock","在庫数"],["minStock","最小在庫"]].filter(([k]) => k !== "price" || view !== "gyomu").map(([k,l]) => (
+                <div key={k}>
+                  <div style={css.label}>{l}</div>
+                  <input type="number" inputMode="numeric" value={form[k]} onChange={e=>setForm(p=>({...p,[k]:e.target.value}))} style={{ ...css.input, textAlign:"right" }} />
+                </div>
+              ))}
+            </div>
+            <button onClick={saveProduct} disabled={saving}
+              style={{ width:"100%", marginTop:4, padding:14, borderRadius:12, border:"none", background:saving?C.sub:C.accent, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer" }}>
+              {saving ? "保存中..." : (modal.mode==="add" ? "追加する" : "更新する")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 一括編集モーダル */}
+      {bulkEditModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:900, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px 16px" }}
+          onClick={e => { if (e.target === e.currentTarget) setBulkEditModal(null); }}>
+          <div style={{ background:C.card, borderRadius:20, width:"100%", maxWidth:440, maxHeight:"80vh", overflowY:"auto", WebkitOverflowScrolling:"touch", padding:20, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+              <div style={{ fontWeight:800, fontSize:16 }}>一括編集<span style={{ fontSize:12, color:C.sub, fontWeight:600, marginLeft:8 }}>{selectedIds.size}件</span></div>
+              <button onClick={() => setBulkEditModal(null)} style={{ background:"none", border:"none", fontSize:22, color:C.sub, cursor:"pointer", padding:"0 4px" }}>✕</button>
+            </div>
+            <div style={{ fontSize:12, color:C.sub, lineHeight:1.6, marginBottom:14 }}>
+              チェックを入れた項目だけ、選択した商品すべてに反映されます。
+            </div>
+
+            {[
+              { key:"category", label:"カテゴリ", type:"cats" },
+              { key:"subCategory", label:"サブカテゴリ（メーカー等）", type:"subs" },
+              { key:"price", label:"売価", type:"num" },
+              { key:"cost", label:"原価", type:"num" },
+              { key:"minStock", label:"最小在庫", type:"num" },
+            ].filter(f => f.key !== "price" || view !== "gyomu").map(f => (
+              <div key={f.key} style={{ marginBottom:14, opacity:bulkEditModal.use[f.key]?1:0.5 }}>
+                <label style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6, cursor:"pointer" }}>
+                  <input type="checkbox" checked={!!bulkEditModal.use[f.key]}
+                    onChange={e => setBulkEditModal(p => ({ ...p, use:{ ...p.use, [f.key]: e.target.checked } }))} />
+                  <span style={{ fontSize:12, color:C.sub, fontWeight:700 }}>{f.label}を変更する</span>
+                </label>
+                {f.type === "cats" ? (
+                  <div>
+                    <input value={bulkEditModal.category} disabled={!bulkEditModal.use.category}
+                      onChange={e=>setBulkEditModal(p=>({...p,category:e.target.value}))} placeholder="例：カラー剤" style={css.input} />
+                    {existingCats.length > 0 && bulkEditModal.use.category && (
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:6 }}>
+                        {existingCats.map(c => (
+                          <button key={c} onClick={() => setBulkEditModal(p=>({...p,category:c}))}
+                            style={{ padding:"5px 10px", borderRadius:14, border:"1px solid "+(bulkEditModal.category===c?C.accent:C.border), background:bulkEditModal.category===c?"#f5f0e8":"#fff", color:bulkEditModal.category===c?C.accent:C.sub, fontSize:12, fontWeight:700, cursor:"pointer" }}>{c}</button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : f.type === "subs" ? (
+                  <div>
+                    <input value={bulkEditModal.subCategory} disabled={!bulkEditModal.use.subCategory}
+                      onChange={e=>setBulkEditModal(p=>({...p,subCategory:e.target.value}))} placeholder="例：フユヒロ" style={css.input} />
+                    {bulkEditModal.use.subCategory && getSubsForCat(bulkEditModal.category || (existingCats[0]||"")).length > 0 && (
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:6 }}>
+                        {getSubsForCat(bulkEditModal.category || (existingCats[0]||"")).map(s => (
+                          <button key={s} onClick={() => setBulkEditModal(p=>({...p,subCategory:s}))}
+                            style={{ padding:"5px 10px", borderRadius:14, border:"1px solid "+(bulkEditModal.subCategory===s?C.accent:C.border), background:bulkEditModal.subCategory===s?"#f5f0e8":"#fff", color:bulkEditModal.subCategory===s?C.accent:C.sub, fontSize:12, fontWeight:700, cursor:"pointer" }}>{s}</button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <input type="number" inputMode="numeric" disabled={!bulkEditModal.use[f.key]} value={bulkEditModal[f.key]}
+                    onChange={e=>setBulkEditModal(p=>({...p,[f.key]:e.target.value}))} style={{ ...css.input, textAlign:"right" }} />
+                )}
+              </div>
+            ))}
+
+            <button onClick={() => {
+              const fields = {};
+              if (bulkEditModal.use.category) fields.category = bulkEditModal.category;
+              if (bulkEditModal.use.subCategory) fields.subCategory = bulkEditModal.subCategory;
+              if (bulkEditModal.use.price) fields.price = bulkEditModal.price;
+              if (bulkEditModal.use.cost) fields.cost = bulkEditModal.cost;
+              if (bulkEditModal.use.minStock) fields.minStock = bulkEditModal.minStock;
+              applyBulkEdit(fields);
+            }} disabled={saving}
+              style={{ width:"100%", marginTop:4, padding:14, borderRadius:12, border:"none", background:saving?C.sub:C.accent, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer" }}>
+              {saving ? "保存中..." : selectedIds.size + "件に反映する"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 読み取りモーダル */}
+      {scanModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:900, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px 16px" }}
+          onClick={e => { if (e.target === e.currentTarget) setScanModal(null); }}>
+          <div style={{ background:C.card, borderRadius:20, width:"100%", maxWidth:440, maxHeight:"80vh", overflowY:"auto", WebkitOverflowScrolling:"touch", padding:20, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+              <div style={{ fontWeight:800, fontSize:16 }}>納品書・タグ読み取り</div>
+              <button onClick={() => setScanModal(null)} style={{ background:"none", border:"none", fontSize:22, color:C.sub, cursor:"pointer", padding:"0 4px" }}>✕</button>
+            </div>
+
+            {!scanModal.result ? (
+              <div>
+                <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+                  <button onClick={() => cameraInputRef.current && cameraInputRef.current.click()} disabled={ocrBusy}
+                    style={{ flex:1, padding:"12px 0", borderRadius:12, border:"none", background:ocrBusy?C.sub:C.accent, color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer" }}>
+                    📷 カメラで撮影
+                  </button>
+                  <button onClick={() => libInputRef.current && libInputRef.current.click()} disabled={ocrBusy}
+                    style={{ flex:1, padding:"12px 0", borderRadius:12, border:"1.5px solid "+C.accent, background:"#fff", color:ocrBusy?C.sub:C.accent, fontWeight:800, fontSize:14, cursor:"pointer" }}>
+                    写真から選択
+                  </button>
+                </div>
+                <input type="file" accept="image/*" capture="environment" ref={cameraInputRef} style={{ display:"none" }}
+                  onChange={e => { const f = e.target.files && e.target.files[0]; if (f) ocrImage(f); e.target.value = ""; }} />
+                <input type="file" accept="image/*" ref={libInputRef} style={{ display:"none" }}
+                  onChange={e => { const f = e.target.files && e.target.files[0]; if (f) ocrImage(f); e.target.value = ""; }} />
+                {ocrBusy && (
+                  <div style={{ marginBottom:10 }}>
+                    <div style={{ fontSize:13, color:C.accent, fontWeight:700, textAlign:"center", marginBottom:6 }}>
+                      読み取り中...
+                    </div>
+                    <div style={{ fontSize:11, color:C.sub, textAlign:"center", marginTop:4 }}>初回はモデルファイルのダウンロードで時間がかかることがあります</div>
+                  </div>
+                )}
+                <div style={{ fontSize:12, color:C.sub, lineHeight:1.7, marginBottom:8 }}>
+                  読み取った文字は下の欄に入ります（手直しもできます）。文字欄を<b>長押し→「テキストをスキャン」</b>でも読み取れます。
+                </div>
+                <textarea value={scanModal.text} onChange={e=>setScanModal(p=>({...p,text:e.target.value}))} rows={6}
+                  placeholder="カメラ・写真から読み取るか、ここを長押し→「テキストをスキャン」"
+                  style={{ width:"100%", boxSizing:"border-box", border:"1px solid "+C.border, borderRadius:10, padding:"10px 12px", fontSize:13, fontFamily:"inherit", resize:"vertical" }} />
+                <button onClick={() => {
+                  const r = matchReceiptLines(scanModal.text, products);
+                  if (!r.matches.length && !r.unmatched.length) return notify("商品名を読み取れませんでした","error");
+                  setScanModal(p => ({ ...p, result: r }));
+                }}
+                  style={{ width:"100%", marginTop:10, padding:13, borderRadius:12, border:"none", background:C.accent, color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer" }}>
+                  商品と照合する
+                </button>
+              </div>
+            ) : (
+              <div>
+                <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+                  {[["in","入庫（＋）"],["out","出庫（−）"]].map(([k,l]) => (
+                    <button key={k} onClick={() => setScanModal(p=>({...p,dir:k}))}
+                      style={{ flex:1, padding:"9px 0", borderRadius:20, border:"1.5px solid "+(scanModal.dir===k?C.accent:C.border), background:scanModal.dir===k?C.accent:"#fff", color:scanModal.dir===k?"#fff":C.text, fontWeight:700, fontSize:13, cursor:"pointer" }}>{l}</button>
+                  ))}
+                </div>
+
+                {scanModal.result.matches.length === 0
+                  ? <div style={{ fontSize:13, color:C.sub, textAlign:"center", padding:"8px 0" }}>一致する登録商品はありませんでした</div>
+                  : scanModal.result.matches.map((m, i) => (
+                    <div key={m.product.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, padding:"9px 0", borderBottom:"1px solid "+C.border }}>
+                      <div style={{ minWidth:0, flex:1 }}>
+                        <div style={{ fontWeight:700, fontSize:14 }}>{m.product.name}</div>
+                        <div style={{ fontSize:11, color:C.sub }}>現在庫 {m.product.stock||0}個</div>
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+                        <button onClick={() => setScanModal(p => { const ms=[...p.result.matches]; ms[i]={...ms[i], qty:Math.max(0, ms[i].qty-1)}; return {...p, result:{...p.result, matches:ms}}; })}
+                          style={{ width:32, height:32, borderRadius:10, border:"1px solid "+C.border, background:"#fff", fontSize:16, fontWeight:700, cursor:"pointer" }}>−</button>
+                        <span style={{ fontSize:18, fontWeight:800, minWidth:26, textAlign:"center", color:m.qty>0?(scanModal.dir==="out"?C.red:C.green):C.sub }}>{m.qty}</span>
+                        <button onClick={() => setScanModal(p => { const ms=[...p.result.matches]; ms[i]={...ms[i], qty:ms[i].qty+1}; return {...p, result:{...p.result, matches:ms}}; })}
+                          style={{ width:32, height:32, borderRadius:10, border:"1px solid "+C.border, background:"#fff", fontSize:16, fontWeight:700, cursor:"pointer" }}>＋</button>
+                      </div>
+                    </div>
+                  ))}
+
+                {scanModal.result.matches.length > 0 && (
+                  <button onClick={applyScan} disabled={saving}
+                    style={{ width:"100%", marginTop:12, padding:13, borderRadius:12, border:"none", background:saving?C.sub:(scanModal.dir==="out"?C.red:C.accent), color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer" }}>
+                    {saving ? "保存中..." : (scanModal.dir==="out" ? "出庫を反映する" : "入庫を反映する")}
+                  </button>
+                )}
+
+                {scanModal.result.unmatched.length > 0 && (
+                  <div style={{ marginTop:16, background:"#f9f6f0", border:"1px solid "+C.border, borderRadius:12, padding:12 }}>
+                    <div style={{ fontSize:12, color:C.sub, fontWeight:700, marginBottom:8 }}>未登録の可能性がある行（チェックしたものを一括登録）</div>
+                    {scanModal.result.unmatched.slice(0,15).map((ln, i) => {
+                      const checkedSet = scanModal.bulkChecked || new Set(scanModal.result.unmatched.map((_,idx)=>idx));
+                      const checked = checkedSet.has(i);
+                      return (
+                        <label key={i} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", cursor:"pointer" }}>
+                          <input type="checkbox" checked={checked}
+                            onChange={e => setScanModal(p => {
+                              const cs = new Set(p.bulkChecked || p.result.unmatched.map((_,idx)=>idx));
+                              if (e.target.checked) cs.add(i); else cs.delete(i);
+                              return { ...p, bulkChecked: cs };
+                            })} />
+                          <span style={{ fontSize:13, color:C.text }}>{ln}</span>
+                        </label>
+                      );
+                    })}
+
+                    <div style={{ marginTop:12, paddingTop:12, borderTop:"1px dashed "+C.border }}>
+                      <div style={{ fontSize:12, color:C.sub, fontWeight:700, marginBottom:8 }}>登録する内容（全て共通で設定）</div>
+                      <input value={scanModal.bulkCat||""} onChange={e=>setScanModal(p=>({...p,bulkCat:e.target.value}))}
+                        placeholder="カテゴリ（例：カラー剤）* 必須" style={{ ...css.input, marginBottom:6 }} />
+                      {existingCats.length > 0 && (
+                        <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:8 }}>
+                          {existingCats.map(c => (
+                            <button key={c} onClick={() => setScanModal(p=>({...p,bulkCat:c}))}
+                              style={{ padding:"5px 10px", borderRadius:14, border:"1px solid "+(scanModal.bulkCat===c?C.accent:C.border), background:scanModal.bulkCat===c?"#eee6d8":"#fff", color:scanModal.bulkCat===c?C.accent:C.sub, fontSize:12, fontWeight:700, cursor:"pointer" }}>{c}</button>
+                          ))}
+                        </div>
+                      )}
+                      <input value={scanModal.bulkSub||""} onChange={e=>setScanModal(p=>({...p,bulkSub:e.target.value}))}
+                        placeholder="サブカテゴリ・メーカー（任意）" style={{ ...css.input, marginBottom:8 }} />
+                      <div style={{ display:"grid", gridTemplateColumns:view==="gyomu"?"1fr 1fr":"1fr 1fr 1fr", gap:8 }}>
+                        {view !== "gyomu" && (
+                          <input type="number" inputMode="numeric" value={scanModal.bulkPrice||""} onChange={e=>setScanModal(p=>({...p,bulkPrice:e.target.value}))}
+                            placeholder="売価" style={{ ...css.input, textAlign:"right", fontSize:14 }} />
+                        )}
+                        <input type="number" inputMode="numeric" value={scanModal.bulkCost||""} onChange={e=>setScanModal(p=>({...p,bulkCost:e.target.value}))}
+                          placeholder="原価" style={{ ...css.input, textAlign:"right", fontSize:14 }} />
+                        <input type="number" inputMode="numeric" value={scanModal.bulkMin||""} onChange={e=>setScanModal(p=>({...p,bulkMin:e.target.value}))}
+                          placeholder="最小" style={{ ...css.input, textAlign:"right", fontSize:14 }} />
+                      </div>
+                      <button onClick={async () => {
+                        const checkedSet = scanModal.bulkChecked || new Set(scanModal.result.unmatched.map((_,idx)=>idx));
+                        const lines = scanModal.result.unmatched.filter((_,idx) => checkedSet.has(idx));
+                        const ok = await bulkRegister(lines, { category:scanModal.bulkCat||"", subCategory:scanModal.bulkSub||"", price:scanModal.bulkPrice||"", cost:scanModal.bulkCost||"", minStock:scanModal.bulkMin||"3" });
+                        if (ok) setScanModal(null);
+                      }} disabled={saving}
+                        style={{ width:"100%", marginTop:10, padding:13, borderRadius:12, border:"none", background:saving?C.sub:C.accent, color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer" }}>
+                        {saving ? "登録中..." : "チェックした行を一括登録"}
+                      </button>
+                      <div style={{ fontSize:11, color:C.sub, marginTop:6, lineHeight:1.6 }}>
+                        登録後、在庫数は0から始まります。個別の商品名やカテゴリの微調整は一覧の「編集」、複数まとめて直す場合は「商品を選択して一括編集」をご利用ください。
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <button onClick={() => setScanModal(p=>({ ...p, result:null }))}
+                  style={{ width:"100%", marginTop:12, padding:10, borderRadius:10, border:"1px solid "+C.border, background:"#fff", color:C.sub, fontWeight:700, fontSize:13, cursor:"pointer" }}>
+                  ← 読み取りをやり直す
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* トースト */}
+      {toast && (
+        <div style={{ position:"fixed", bottom:96, left:"50%", transform:"translateX(-50%)", background:toast.type==="error"?C.red:"#2a2218", color:"#fff", padding:"10px 20px", borderRadius:12, fontSize:14, fontWeight:700, zIndex:1000, whiteSpace:"pre-wrap", maxWidth:"85vw", textAlign:"center", boxShadow:"0 4px 12px rgba(0,0,0,0.25)" }}>
+          {toast.msg}
+        </div>
+      )}
+
+      {/* 下部固定：商品追加 / 選択モード時は一括編集バー */}
+      <div style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:100 }}>
+        {selectMode ? (
+          <div style={{ maxWidth:480, margin:"0 auto", padding:"10px 16px calc(10px + env(safe-area-inset-bottom))", background:"rgba(250,248,244,0.97)", borderTop:"1px solid "+C.border, display:"flex", alignItems:"center", gap:10 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:C.text, whiteSpace:"nowrap" }}>{selectedIds.size}件選択中</div>
+            <button onClick={exitSelectMode}
+              style={{ padding:"12px 14px", borderRadius:12, border:"1px solid "+C.border, background:"#fff", color:C.sub, fontWeight:700, fontSize:14, cursor:"pointer" }}>
+              キャンセル
+            </button>
+            <button onClick={() => setBulkEditModal({ category:"", subCategory:"", price:"", cost:"", minStock:"", use:{} })} disabled={selectedIds.size===0}
+              style={{ flex:1, padding:14, borderRadius:12, border:"none", background:selectedIds.size===0?C.sub:C.accent, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer" }}>
+              一括編集
+            </button>
+          </div>
+        ) : (
+          <div style={{ maxWidth:480, margin:"0 auto", padding:"10px 16px calc(10px + env(safe-area-inset-bottom))", background:"rgba(250,248,244,0.95)", borderTop:"1px solid "+C.border, display:"flex", gap:8 }}>
+            <button onClick={() => setScanModal({ text:"", result:null, dir:"in" })}
+              style={{ flex:1, padding:14, borderRadius:12, border:"1.5px solid "+C.accent, background:"#fff", color:C.accent, fontWeight:800, fontSize:15, cursor:"pointer" }}>
+              読み取り
+            </button>
+            <button onClick={openAdd}
+              style={{ flex:1, padding:14, borderRadius:12, border:"none", background:C.accent, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer" }}>
+              ＋ 商品を追加
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
