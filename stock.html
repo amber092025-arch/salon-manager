@@ -140,18 +140,27 @@ function App() {
       ctx.filter = "grayscale(1) contrast(1.5)";
       ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
       const dynImport = new Function("specifier", "return import(specifier)");
-      const { PaddleOCR } = await dynImport("https://esm.sh/@paddleocr/paddleocr-js");
-      const ocr = await PaddleOCR.create({ lang: "ch", ocrVersion: "PP-OCRv5", ortOptions: { backend: "auto" } });
-      const [result] = await ocr.predict(canvas);
-      ocr.dispose();
-      const text = (result.items || []).map(it => it.text).join("\n").trim();
+      const { PaddleOcrService } = await dynImport("https://esm.sh/ppu-paddle-ocr/web");
+      const MODEL_BASE = "https://media.githubusercontent.com/media/PT-Perkasa-Pilar-Utama/ppu-paddle-ocr-models/refs/heads/main";
+      const DICT_BASE = "https://raw.githubusercontent.com/PT-Perkasa-Pilar-Utama/ppu-paddle-ocr-models/refs/heads/main";
+      const service = new PaddleOcrService({
+        model: {
+          detection: MODEL_BASE + "/detection/PP-OCRv5_mobile_det_infer.onnx",
+          recognition: MODEL_BASE + "/recognition/multi/chinese/v5/ch_PP-OCRv5_mobile_rec_infer.onnx",
+          charactersDictionary: DICT_BASE + "/recognition/multi/chinese/v5/ppocrv5_ch_dict.txt",
+        },
+      });
+      await service.initialize();
+      const result = await service.recognize(canvas);
+      await service.destroy();
+      const text = (result.text || "").trim();
       if (!text) { notify("文字を読み取れませんでした","error"); }
       else {
         setScanModal(p => p ? ({ ...p, text: (p.text ? p.text + "\n" : "") + text }) : p);
-        notify("読み取りました(v4-fix) ✓ 内容を確認して照合してください");
+        notify("読み取りました(v5-fix-ppu) ✓ 内容を確認して照合してください");
       }
     } catch(e) {
-      notify("v4-fix 失敗: " + String((e && e.message) || e).slice(0, 150), "error");
+      notify("v5-fix-ppu 失敗: " + String((e && e.message) || e).slice(0, 150), "error");
     }
     setOcrBusy(false); setOcrProgress(0);
   };
