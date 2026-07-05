@@ -146,8 +146,8 @@ function App() {
       const service = new PaddleOcrService({
         model: {
           detection: MODEL_BASE + "/detection/PP-OCRv5_mobile_det_infer.onnx",
-          recognition: MODEL_BASE + "/recognition/multi/japan/v5/japan_PP-OCRv5_mobile_rec_infer.onnx",
-          charactersDictionary: DICT_BASE + "/recognition/multi/japan/v5/ppocrv5_japan_dict.txt",
+          recognition: MODEL_BASE + "/recognition/multi/japan/v3/japan_PP-OCRv3_mobile_rec_infer.onnx",
+          charactersDictionary: DICT_BASE + "/recognition/multi/japan/v3/japan_dict.txt",
         },
       });
       await service.initialize();
@@ -157,10 +157,10 @@ function App() {
       if (!text) { notify("文字を読み取れませんでした","error"); }
       else {
         setScanModal(p => p ? ({ ...p, text: (p.text ? p.text + "\n" : "") + text }) : p);
-        notify("読み取りました(v7-japan) ✓ 内容を確認して照合してください");
+        notify("読み取りました(v8-japan-v3) ✓ 内容を確認して照合してください");
       }
     } catch(e) {
-      notify("v7-japan 失敗: " + String((e && e.message) || e).slice(0, 150), "error");
+      notify("v8-japan-v3 失敗: " + String((e && e.message) || e).slice(0, 150), "error");
     }
     setOcrBusy(false); setOcrProgress(0);
   };
