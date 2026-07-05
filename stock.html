@@ -137,6 +137,7 @@ function App() {
       canvas.width = Math.round(bmp.width * scale);
       canvas.height = Math.round(bmp.height * scale);
       const ctx = canvas.getContext("2d");
+      ctx.filter = "grayscale(1) contrast(1.5)";
       ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
       const dynImport = new Function("specifier", "return import(specifier)");
       const { PaddleOcrService } = await dynImport("https://esm.sh/ppu-paddle-ocr/web");
@@ -156,10 +157,10 @@ function App() {
       if (!text) { notify("文字を読み取れませんでした","error"); }
       else {
         setScanModal(p => p ? ({ ...p, text: (p.text ? p.text + "\n" : "") + text }) : p);
-        notify("読み取りました(v9-noprep) ✓ 内容を確認して照合してください");
+        notify("読み取りました(v10-revert) ✓ 内容を確認して照合してください");
       }
     } catch(e) {
-      notify("v9-noprep 失敗: " + String((e && e.message) || e).slice(0, 150), "error");
+      notify("v10-revert 失敗: " + String((e && e.message) || e).slice(0, 150), "error");
     }
     setOcrBusy(false); setOcrProgress(0);
   };
