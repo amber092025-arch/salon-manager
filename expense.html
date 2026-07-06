@@ -111,12 +111,53 @@ const css = {
 };
 
 // ── 仕入れ入力フォーム（追加・編集共通） ──
-function PurchaseForm({ form, setForm, cats, makers, pays }) {
+// ── purchaseCategories の read-modify-write 保存 ──
+async function saveCatsRMW(mutator) {
+  const res = await fetch(SUPABASE_URL + "/rest/v1/settings?select=value&key=eq.purchaseCategories", { headers: HDRS });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json();
+  let base = DEFAULT_CATS, exists = false;
+  if (rows.length) { exists = true; try { base = JSON.parse(rows[0].value) || DEFAULT_CATS; } catch(e) {} }
+  const next = mutator(base);
+  const valueStr = JSON.stringify(next);
+  let saveRes;
+  if (exists) {
+    saveRes = await fetch(SUPABASE_URL + "/rest/v1/settings?key=eq.purchaseCategories", { method:"PATCH", headers: HDRS, body: JSON.stringify({ value: valueStr }) });
+  } else {
+    saveRes = await fetch(SUPABASE_URL + "/rest/v1/settings", { method:"POST", headers: HDRS, body: JSON.stringify({ key:"purchaseCategories", value: valueStr }) });
+  }
+  if (!saveRes.ok) throw new Error(await saveRes.text());
+  return next;
+}
+
+// ── purchaseMakers の read-modify-write 保存 ──
+async function saveMakersRMW(mutator) {
+  const res = await fetch(SUPABASE_URL + "/rest/v1/settings?select=value&key=eq.purchaseMakers", { headers: HDRS });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json();
+  let base = DEFAULT_MAKERS, exists = false;
+  if (rows.length) { exists = true; try { base = JSON.parse(rows[0].value) || DEFAULT_MAKERS; } catch(e) {} }
+  const next = mutator(base);
+  const valueStr = JSON.stringify(next);
+  let saveRes;
+  if (exists) {
+    saveRes = await fetch(SUPABASE_URL + "/rest/v1/settings?key=eq.purchaseMakers", { method:"PATCH", headers: HDRS, body: JSON.stringify({ value: valueStr }) });
+  } else {
+    saveRes = await fetch(SUPABASE_URL + "/rest/v1/settings", { method:"POST", headers: HDRS, body: JSON.stringify({ key:"purchaseMakers", value: valueStr }) });
+  }
+  if (!saveRes.ok) throw new Error(await saveRes.text());
+  return next;
+}
+
+function PurchaseForm({ form, setForm, cats, makers, pays, onManageCats, onManageMakers }) {
   const chip = (active) => ({ padding:"8px 14px", borderRadius:20, border:"1.5px solid "+(active?C.accent:C.border), background:active?C.accent:"#fff", color:active?"#fff":C.text, fontWeight:700, fontSize:13, cursor:"pointer" });
   return (
     <div>
       <div style={{ marginBottom:14 }}>
-        <div style={css.label}>科目</div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+          <div style={css.label}>科目</div>
+          {onManageCats && <button onClick={onManageCats} style={{ background:"none", border:"none", color:C.accent, fontWeight:700, fontSize:12, cursor:"pointer", textDecoration:"underline" }}>管理</button>}
+        </div>
         {cats.map(cat => (
           <button key={cat.key} onClick={() => setForm(p=>({...p,category:cat.key}))}
             style={{ display:"block", width:"100%", padding:"10px 14px", marginBottom:6, borderRadius:10, border:"1.5px solid "+(form.category===cat.key?C.accent:C.border), background:form.category===cat.key?"#f5f0e8":"#fff", color:form.category===cat.key?C.accent:C.text, fontWeight:form.category===cat.key?800:400, fontSize:14, cursor:"pointer", textAlign:"left" }}>
@@ -138,7 +179,10 @@ function PurchaseForm({ form, setForm, cats, makers, pays }) {
         </div>
       </div>
       <div style={{ marginBottom:14 }}>
-        <div style={css.label}>取引先</div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+          <div style={css.label}>取引先</div>
+          {onManageMakers && <button onClick={onManageMakers} style={{ background:"none", border:"none", color:C.accent, fontWeight:700, fontSize:12, cursor:"pointer", textDecoration:"underline" }}>管理</button>}
+        </div>
         <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
           {makers.map(m => (
             <button key={m.id} onClick={() => setForm(p=>({...p,maker:m.name}))} style={chip(form.maker===m.name)}>{m.name}</button>
@@ -187,6 +231,12 @@ function App() {
   const [ocrText, setOcrText] = useState("");
   const [editTarget, setEditTarget] = useState(null); // { monthKey, item }
   const [editForm, setEditForm] = useState(null);
+  const [showCatManage, setShowCatManage] = useState(false);
+  const [showMakerManage, setShowMakerManage] = useState(false);
+  const [catForm, setCatForm] = useState({ name:"" });
+  const [editingCat, setEditingCat] = useState(null); // { key, label }
+  const [makerForm, setMakerForm] = useState({ name:"" });
+  const [editingMaker, setEditingMaker] = useState(null); // { id, name }
 
   const notify = (msg, type) => { setToast({ msg, type }); setTimeout(() => setToast(null), 2000); };
 
@@ -403,7 +453,7 @@ function App() {
                 解析してフォームに反映
               </button>
             </div>
-            <PurchaseForm form={form} setForm={setForm} cats={cats} makers={makers} pays={pays} />
+            <PurchaseForm form={form} setForm={setForm} cats={cats} makers={makers} pays={pays} onManageCats={()=>setShowCatManage(true)} onManageMakers={()=>setShowMakerManage(true)} />
             <button onClick={addItem} disabled={saving}
               style={{ width:"100%", marginTop:14, padding:14, borderRadius:12, border:"none", background:saving?C.sub:C.accent, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer" }}>
               {saving ? "保存中..." : "追加する"}
@@ -510,11 +560,135 @@ function App() {
               <button onClick={() => { setEditTarget(null); setEditForm(null); }}
                 style={{ background:"none", border:"none", fontSize:22, color:C.sub, cursor:"pointer", padding:"0 4px" }}>✕</button>
             </div>
-            <PurchaseForm form={editForm} setForm={setEditForm} cats={cats} makers={makers} pays={pays} />
+            <PurchaseForm form={editForm} setForm={setEditForm} cats={cats} makers={makers} pays={pays} onManageCats={()=>setShowCatManage(true)} onManageMakers={()=>setShowMakerManage(true)} />
             <button onClick={updateItem} disabled={saving}
               style={{ width:"100%", marginTop:14, padding:14, borderRadius:12, border:"none", background:saving?C.sub:C.accent, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer" }}>
               {saving ? "保存中..." : "更新する"}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── 科目管理モーダル ── */}
+      {showCatManage && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:950, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px 16px" }}
+          onClick={e => { if (e.target === e.currentTarget) { setShowCatManage(false); setEditingCat(null); } }}>
+          <div style={{ background:C.card, borderRadius:20, width:"100%", maxWidth:440, maxHeight:"85vh", overflowY:"auto", padding:20, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+              <div style={{ fontWeight:800, fontSize:16 }}>科目管理</div>
+              <button onClick={() => { setShowCatManage(false); setEditingCat(null); }}
+                style={{ background:"none", border:"none", fontSize:22, color:C.sub, cursor:"pointer", padding:"0 4px" }}>✕</button>
+            </div>
+            <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+              <input type="text" value={catForm.name} onChange={e=>setCatForm({name:e.target.value})} placeholder="科目名を入力"
+                style={{ ...css.input, flex:1 }} />
+              <button onClick={async()=>{
+                  if (!catForm.name.trim()) return;
+                  try {
+                    const next = await saveCatsRMW(base => [...(base||[]), { key:"cat_"+Date.now(), label:catForm.name.trim() }]);
+                    setCats(next); setCatForm({name:""}); notify("追加しました ✓");
+                  } catch(e) { notify("追加に失敗しました","error"); }
+                }}
+                style={{ padding:"0 20px", borderRadius:10, border:"none", background:C.accent, color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer" }}>追加</button>
+            </div>
+            {cats.map(c => (
+              <div key={c.key} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 0", borderBottom:"1px solid "+C.border }}>
+                {editingCat && editingCat.key===c.key ? (
+                  <input type="text" value={editingCat.label} onChange={e=>setEditingCat({...editingCat,label:e.target.value})}
+                    style={{ ...css.input, flex:1, marginRight:8 }} autoFocus />
+                ) : (
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <span style={{ fontSize:14, fontWeight:700 }}>{c.label}</span>
+                    {c.fixed && <span style={{ fontSize:11, color:C.sub, border:"1px solid "+C.border, borderRadius:6, padding:"2px 6px" }}>分析用</span>}
+                  </div>
+                )}
+                <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+                  {editingCat && editingCat.key===c.key ? (
+                    <button onClick={async()=>{
+                        if (!editingCat.label.trim()) return;
+                        try {
+                          const next = await saveCatsRMW(base => (base||[]).map(x=>x.key===c.key?{...x,label:editingCat.label.trim()}:x));
+                          setCats(next); setEditingCat(null); notify("更新しました ✓");
+                        } catch(e) { notify("更新に失敗しました","error"); }
+                      }}
+                      style={{ fontSize:12, color:"#fff", background:C.accent, border:"none", borderRadius:8, padding:"4px 10px", cursor:"pointer" }}>保存</button>
+                  ) : (
+                    <button onClick={()=>setEditingCat({key:c.key,label:c.label})}
+                      style={{ fontSize:12, color:C.accent, background:"none", border:"1px solid "+C.accent, borderRadius:8, padding:"4px 10px", cursor:"pointer" }}>編集</button>
+                  )}
+                  {!c.fixed && (
+                    <button onClick={async()=>{
+                        try {
+                          const next = await saveCatsRMW(base => (base||[]).filter(x=>x.key!==c.key));
+                          setCats(next); notify("削除しました");
+                        } catch(e) { notify("削除に失敗しました","error"); }
+                      }}
+                      style={{ fontSize:12, color:C.red, background:"none", border:"1px solid "+C.red, borderRadius:8, padding:"4px 10px", cursor:"pointer" }}>削除</button>
+                  )}
+                </div>
+              </div>
+            ))}
+            <div style={{ fontSize:11, color:C.sub, marginTop:12, lineHeight:1.6 }}>
+              「分析用」の科目は経費率の計算（材料費＝対技術売上、店販仕入れ＝対店販売上）に使うため削除できません。名前の変更は可能です。
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 取引先管理モーダル ── */}
+      {showMakerManage && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:950, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px 16px" }}
+          onClick={e => { if (e.target === e.currentTarget) { setShowMakerManage(false); setEditingMaker(null); } }}>
+          <div style={{ background:C.card, borderRadius:20, width:"100%", maxWidth:440, maxHeight:"85vh", overflowY:"auto", padding:20, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+              <div style={{ fontWeight:800, fontSize:16 }}>取引先管理</div>
+              <button onClick={() => { setShowMakerManage(false); setEditingMaker(null); }}
+                style={{ background:"none", border:"none", fontSize:22, color:C.sub, cursor:"pointer", padding:"0 4px" }}>✕</button>
+            </div>
+            <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+              <input type="text" value={makerForm.name} onChange={e=>setMakerForm({name:e.target.value})} placeholder="取引先名を入力"
+                style={{ ...css.input, flex:1 }} />
+              <button onClick={async()=>{
+                  if (!makerForm.name.trim()) return;
+                  try {
+                    const next = await saveMakersRMW(base => [...(base||[]), { id:Date.now(), name:makerForm.name.trim() }]);
+                    setMakers(next); setMakerForm({name:""}); notify("追加しました ✓");
+                  } catch(e) { notify("追加に失敗しました","error"); }
+                }}
+                style={{ padding:"0 20px", borderRadius:10, border:"none", background:C.accent, color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer" }}>追加</button>
+            </div>
+            {makers.map(m => (
+              <div key={m.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 0", borderBottom:"1px solid "+C.border }}>
+                {editingMaker && editingMaker.id===m.id ? (
+                  <input type="text" value={editingMaker.name} onChange={e=>setEditingMaker({...editingMaker,name:e.target.value})}
+                    style={{ ...css.input, flex:1, marginRight:8 }} autoFocus />
+                ) : (
+                  <span style={{ fontSize:14, fontWeight:700 }}>{m.name}</span>
+                )}
+                <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+                  {editingMaker && editingMaker.id===m.id ? (
+                    <button onClick={async()=>{
+                        if (!editingMaker.name.trim()) return;
+                        try {
+                          const next = await saveMakersRMW(base => (base||[]).map(x=>x.id===m.id?{...x,name:editingMaker.name.trim()}:x));
+                          setMakers(next); setEditingMaker(null); notify("更新しました ✓");
+                        } catch(e) { notify("更新に失敗しました","error"); }
+                      }}
+                      style={{ fontSize:12, color:"#fff", background:C.accent, border:"none", borderRadius:8, padding:"4px 10px", cursor:"pointer" }}>保存</button>
+                  ) : (
+                    <button onClick={()=>setEditingMaker({id:m.id,name:m.name})}
+                      style={{ fontSize:12, color:C.accent, background:"none", border:"1px solid "+C.accent, borderRadius:8, padding:"4px 10px", cursor:"pointer" }}>編集</button>
+                  )}
+                  <button onClick={async()=>{
+                      try {
+                        const next = await saveMakersRMW(base => (base||[]).filter(x=>x.id!==m.id));
+                        setMakers(next); notify("削除しました");
+                      } catch(e) { notify("削除に失敗しました","error"); }
+                    }}
+                    style={{ fontSize:12, color:C.red, background:"none", border:"1px solid "+C.red, borderRadius:8, padding:"4px 10px", cursor:"pointer" }}>削除</button>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}

@@ -5390,27 +5390,25 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
 
             {/* ヘッダー */}
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                {purchaseView !== "list" && (
-                  <button onClick={() => {
-                      const dest = (purchaseView==="makers"||purchaseView==="cats") ? purchaseCameFrom : "list";
-                      setPurchaseView(dest);
-                      if (dest === "list") setPurchaseEditItem(null);
-                    }}
-                    style={{ background:"none", border:"none", color:"#7a6848", fontWeight:700, fontSize:14, cursor:"pointer" }}>
-                    {"<"} 戻る
-                  </button>
-                )}
-                <span style={{ fontWeight:800, fontSize:16 }}>
-                  {purchaseView==="list" && "仕入れ管理"}
-                  {purchaseView==="add" && "仕入れを追加"}
-                  {purchaseView==="edit" && "仕入れを編集"}
-                  {purchaseView==="makers" && "取引先管理"}
-                  {purchaseView==="cats" && "科目管理"}
-                </span>
-              </div>
               <button onClick={() => { setShowPurchaseModal(false); setPurchaseView("list"); }}
                 style={{ background:"none", border:"none", fontSize:22, color:"#9a9088", cursor:"pointer", padding:"4px 8px" }}>✕</button>
+              <span style={{ fontWeight:800, fontSize:16 }}>
+                {purchaseView==="list" && "仕入れ管理"}
+                {purchaseView==="add" && "仕入れを追加"}
+                {purchaseView==="edit" && "仕入れを編集"}
+                {purchaseView==="makers" && "取引先管理"}
+                {purchaseView==="cats" && "科目管理"}
+              </span>
+              {purchaseView !== "list" && (
+                <button onClick={() => {
+                    const dest = (purchaseView==="makers"||purchaseView==="cats") ? purchaseCameFrom : "list";
+                    setPurchaseView(dest);
+                    if (dest === "list") setPurchaseEditItem(null);
+                  }}
+                  style={{ background:"none", border:"none", color:"#7a6848", fontWeight:700, fontSize:14, cursor:"pointer" }}>
+                  {"<"} 戻る
+                </button>
+              )}
             </div>
 
             {/* LIST */}
