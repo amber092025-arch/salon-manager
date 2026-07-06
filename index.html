@@ -4695,6 +4695,7 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
   const [purchaseEditMonth, setPurchaseEditMonth] = useState(() => { const n = new Date(); return n.getFullYear() + "-" + String(n.getMonth()+1).padStart(2,"0"); });
   const [purchaseView, setPurchaseView] = useState("list");
   const [purchaseEditItem, setPurchaseEditItem] = useState(null);
+  const [purchaseCameFrom, setPurchaseCameFrom] = useState("list"); // 取引先/科目管理から戻る先(入力中の内容を消さないため)
   const [purchaseForm, setPurchaseForm] = useState({ category:"material", maker:"", amount:"", date:"", payMethod:"", memo:"" });
   const [makerForm, setMakerForm] = useState({ name:"" });
   const [editingMaker, setEditingMaker] = useState(null);
@@ -5391,7 +5392,11 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
               <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                 {purchaseView !== "list" && (
-                  <button onClick={() => { setPurchaseView("list"); setPurchaseEditItem(null); }}
+                  <button onClick={() => {
+                      const dest = (purchaseView==="makers"||purchaseView==="cats") ? purchaseCameFrom : "list";
+                      setPurchaseView(dest);
+                      if (dest === "list") setPurchaseEditItem(null);
+                    }}
                     style={{ background:"none", border:"none", color:"#7a6848", fontWeight:700, fontSize:14, cursor:"pointer" }}>
                     {"<"} 戻る
                   </button>
@@ -5498,7 +5503,13 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                   </div>
                 )}
                 <div style={{ marginBottom:14 }}>
-                  <div style={{ fontSize:12, color:"#9a9088", fontWeight:700, marginBottom:8 }}>科目</div>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                    <div style={{ fontSize:12, color:"#9a9088", fontWeight:700 }}>科目</div>
+                    <button onClick={() => { setPurchaseCameFrom(purchaseView); setPurchaseView("cats"); }}
+                      style={{ background:"none", border:"none", color:"#7a6848", fontWeight:700, fontSize:12, cursor:"pointer", textDecoration:"underline" }}>
+                      管理
+                    </button>
+                  </div>
                   {PURCHASE_CATS.map(cat => (
                     <button key={cat.key} onClick={() => setPurchaseForm(p=>({...p,category:cat.key}))}
                       style={{ display:"block", width:"100%", padding:"10px 14px", marginBottom:6, borderRadius:10, border:"1.5px solid "+(purchaseForm.category===cat.key?"#7a6848":"#ece7df"), background:purchaseForm.category===cat.key?"#f5f0e8":"#fff", color:purchaseForm.category===cat.key?"#7a6848":"#2a2218", fontWeight:purchaseForm.category===cat.key?800:400, fontSize:14, cursor:"pointer", textAlign:"left" }}>
@@ -5524,7 +5535,13 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                   </div>
                 </div>
                 <div style={{ marginBottom:14 }}>
-                  <div style={{ fontSize:12, color:"#9a9088", fontWeight:700, marginBottom:8 }}>取引先</div>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                    <div style={{ fontSize:12, color:"#9a9088", fontWeight:700 }}>取引先</div>
+                    <button onClick={() => { setPurchaseCameFrom(purchaseView); setPurchaseView("makers"); }}
+                      style={{ background:"none", border:"none", color:"#7a6848", fontWeight:700, fontSize:12, cursor:"pointer", textDecoration:"underline" }}>
+                      管理
+                    </button>
+                  </div>
                   <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
                     {(purchaseMakers||[]).map(m => (
                       <button key={m.id} onClick={() => setPurchaseForm(p=>({...p,maker:m.name}))}
