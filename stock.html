@@ -124,6 +124,8 @@ function App() {
   const emptyForm = { name:"", code:"", category:"", subCategory:"", price:"", cost:"", stock:"", minStock:"3" };
   const [modal, setModal] = useState(null); // { mode:"add"|"edit", id? }
   const [selectMode, setSelectMode] = useState(false);
+  const [openCats, setOpenCats] = useState({});
+  const [openSubs, setOpenSubs] = useState({});
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkEditModal, setBulkEditModal] = useState(null);
   const [form, setForm] = useState(emptyForm);
@@ -489,21 +491,40 @@ function App() {
           <div style={{ textAlign:"center", color:C.sub, fontSize:13, padding:"30px 0" }}>商品がありません。「＋商品を追加」から登録してください</div>
         )}
 
-        {!loading && !loadError && Object.entries(grouped).map(([cat, subs]) => (
+        {!loading && !loadError && Object.entries(grouped).map(([cat, subs]) => {
+          const catOpen = openCats[cat] === true;
+          const catTotal = Object.values(subs).flat().filter(p=>!p.placeholder).length;
+          return (
           <div key={cat} style={css.card}>
-            <div style={{ fontWeight:800, fontSize:15, marginBottom:6, color:C.accent }}>{cat}</div>
-            {Object.entries(subs).map(([sub, items]) => {
+            <div onClick={() => setOpenCats(prev=>({...prev,[cat]:!catOpen}))}
+              style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer" }}>
+              <div style={{ fontWeight:800, fontSize:15, color:C.accent }}>{cat}</div>
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <span style={{ fontSize:12, color:C.sub }}>{catTotal}品目</span>
+                <span style={{ fontSize:12, color:C.sub }}>{catOpen?"▲":"▼"}</span>
+              </div>
+            </div>
+            {catOpen && Object.entries(subs).map(([sub, items]) => {
               const realItems = items.filter(p => !p.placeholder);
+              const subKey = cat+"_"+sub;
+              const subOpen = openSubs[subKey] === true;
               if (realItems.length === 0) return (
-                <div key={sub} style={{ padding:"8px 0", borderBottom:"1px solid "+C.border }}>
+                <div key={sub} style={{ padding:"8px 0", borderBottom:"1px solid "+C.border, marginTop:6 }}>
                   <div style={{ fontSize:12, color:C.sub, fontWeight:700 }}>{sub}</div>
                   <div style={{ fontSize:12, color:C.sub, padding:"6px 0" }}>（商品なし）</div>
                 </div>
               );
               return (
-                <div key={sub} style={{ padding:"8px 0", borderBottom:"1px solid "+C.border }}>
-                  <div style={{ fontSize:12, color:C.sub, fontWeight:700, marginBottom:4 }}>{sub}</div>
-                  {realItems.map(p => (
+                <div key={sub} style={{ padding:"8px 0", borderBottom:"1px solid "+C.border, marginTop:6 }}>
+                  <div onClick={() => setOpenSubs(prev=>({...prev,[subKey]:!subOpen}))}
+                    style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer", marginBottom:subOpen?4:0 }}>
+                    <div style={{ fontSize:12, color:C.sub, fontWeight:700 }}>{sub}</div>
+                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      <span style={{ fontSize:11, color:C.sub }}>{realItems.length}品目</span>
+                      <span style={{ fontSize:11, color:C.sub }}>{subOpen?"▲":"▼"}</span>
+                    </div>
+                  </div>
+                  {subOpen && realItems.map(p => (
                     <div key={p.id} onClick={() => selectMode && toggleSelect(p.id)}
                       style={{ padding:"9px 0", borderBottom:"1px dashed "+C.border, cursor:selectMode?"pointer":"default", background:selectMode&&selectedIds.has(p.id)?"#f5f0e8":"transparent", borderRadius:selectMode?8:0 }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
@@ -540,7 +561,8 @@ function App() {
               );
             })}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* 追加/編集モーダル */}
