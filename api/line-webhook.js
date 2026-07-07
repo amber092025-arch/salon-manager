@@ -43,6 +43,9 @@ module.exports = async (req, res) => {
       ok: true,
       version: VERSION,
       tokenTest,
+      // 期待値: idLen=10, secretLen=32（trim後）。違っていたら値の貼り間違い
+      idLen: (process.env.LINE_CHANNEL_ID || "").trim().length,
+      secretLen: (process.env.LINE_CHANNEL_SECRET || "").trim().length,
       env: {
         LINE_CHANNEL_ID: !!process.env.LINE_CHANNEL_ID,
         LINE_CHANNEL_ACCESS_TOKEN: !!process.env.LINE_CHANNEL_ACCESS_TOKEN,
@@ -317,15 +320,15 @@ async function finalize(replyToken, userId, dateStr, time) {
 let cachedToken = null; // { token, expiresAt }
 
 async function getAccessToken() {
-  if (process.env.LINE_CHANNEL_ACCESS_TOKEN) return process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (process.env.LINE_CHANNEL_ACCESS_TOKEN) return process.env.LINE_CHANNEL_ACCESS_TOKEN.trim();
   if (cachedToken && Date.now() < cachedToken.expiresAt) return cachedToken.token;
   const res = await fetch("https://api.line.me/oauth2/v3/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "client_credentials",
-      client_id: process.env.LINE_CHANNEL_ID,
-      client_secret: process.env.LINE_CHANNEL_SECRET,
+      client_id: (process.env.LINE_CHANNEL_ID || "").trim(),
+      client_secret: (process.env.LINE_CHANNEL_SECRET || "").trim(),
     }).toString(),
   });
   if (!res.ok) {
