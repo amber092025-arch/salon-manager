@@ -1,63 +1,85 @@
 // ═══════════════════════════════════════════
-// /api/booking-confirm.js  (LINE-v1)
-// カレンダー予約ページ用: 予約確定
-// POST /api/booking-confirm  body: { t, date, time, message }
-// 直前再チェック → appointments+visits INSERT → お客様/オーナーへLINE通知
+// /api/_lib/line.js  (LINE-v1)
+// LINE APIヘルパー（カレンダー予約用の新APIから使用）
 // ═══════════════════════════════════════════
 
-const B = require("./_lib/booking.js");
-const L = require("./_lib/line.js");
+let cachedToken = null;
 
-module.exports = async (req, res) => {
-  if (req.method !== "POST") return res.status(405).end();
+async function getAccessToken() {
+  if (process.env.LINE_CHANNEL_ACCESS_TOKEN) return process.env.LINE_CHANNEL_ACCESS_TOKEN.trim();
+  if (cachedToken && Date.now() < cachedToken.expiresAt) return cachedToken.token;
+  const res = await fetch("https://api.line.me/oauth2/v3/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: (process.env.LINE_CHANNEL_ID || "").trim(),
+      client_secret: (process.env.LINE_CHANNEL_SECRET || "").trim(),
+    }).toString(),
+  });
+  if (!res.ok) throw new Error(`token issue failed ${res.status}: ${await res.text()}`);
+  const data = await res.json();
+  cachedToken = {
+    token: data.access_token,
+    expiresAt: Date.now() + Math.max((data.expires_in - 60) * 1000, 60000),
+  };
+  return cachedToken.token;
+}
+
+async function push(to, messages) {
+  const token = await getAccessToken();
+  const res = await fetch("https://api.line.me/v2/bot/message/push", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ to, messages }),
+  });
+  if (!res.ok) throw new Error(`LINE push ${res.status}: ${await res.text()}`);
+}
+
+async function getProfile(userId) {
   try {
-    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
-    const { t, date, time, message } = body;
-
-    const session = await B.findSessionByToken(t);
-    if (!session) return res.status(401).json({ ok: false, error: "expired" });
-    const userId = session.line_user_id;
-
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date || "") || !/^\d{2}:\d{2}$/.test(time || "")) {
-      return res.status(400).json({ ok: false, error: "bad_request" });
-    }
-
-    const settings = await B.getSettings();
-
-    // リスクヘッジ原則③: 確定直前に空きを必ず再チェック
-    const free = await B.isSlotFree(date, time, settings);
-    if (!free) return res.status(409).json({ ok: false, error: "taken" });
-
-    const profile = await L.getProfile(userId);
-    const { customer, isNew } = await B.findOrCreateCustomer(userId, profile.displayName);
-    await B.createBooking({
-      customerId: customer.id,
-      dateStr: date,
-      time,
-      userId,
-      displayName: profile.displayName,
-      isNew,
-      customerMessage: message,
+    const token = await getAccessToken();
+    const res = await fetch(`https://api.line.me/v2/bot/profile/${userId}`, {
+      headers: { Authorization: `Bearer ${token}` },
     });
-    await B.clearSession(userId);
-
-    const phoneNote = process.env.SALON_PHONE ? `（TEL: ${process.env.SALON_PHONE}）` : "";
-
-    // お客様のLINEトークにも確認を残す
-    await L.push(userId, [
-      L.text(
-        `ご予約を承りました✂️\n\n📅 ${B.formatDateJP(date)} ${time}〜\n\n変更・キャンセルはお電話にてお願いいたします${phoneNote}。\nご来店お待ちしております！`
-      ),
-    ]).catch((e) => console.error("customer push:", e));
-
-    // オーナー通知（LINE push＋メール）
-    await L.notifyOwner(
-      `🔔 [LINE-v1] カレンダー予約が入りました\n\n📅 ${B.formatDateJP(date)} ${time}〜\n👤 ${profile.displayName}${isNew ? "（新規・空カルテ自動作成）" : ""}${message ? `\n💬 ${String(message).slice(0, 200)}` : ""}\n\n★サロンボード（HPB）側の同時間帯を手動でブロックしてください`
-    );
-
-    return res.status(200).json({ ok: true, date, time, dateLabel: B.formatDateJP(date) });
+    if (res.ok) return await res.json();
   } catch (e) {
-    console.error("booking-confirm error:", e);
-    return res.status(500).json({ ok: false, error: "server" });
+    console.error("getProfile error:", e);
   }
-};
+  return { displayName: "LINEのお客様" };
+}
+
+function text(t) {
+  return { type: "text", text: t };
+}
+
+// オーナー通知（LINE push＋メール、未設定分はスキップ）
+async function notifyOwner(message) {
+  const jobs = [];
+  if (process.env.OWNER_LINE_USER_ID) {
+    jobs.push(push(process.env.OWNER_LINE_USER_ID.trim(), [text(message)]).catch((e) => console.error("owner push:", e)));
+  }
+  if (process.env.RESEND_API_KEY && process.env.OWNER_EMAIL) {
+    jobs.push(
+      fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+        },
+        body: JSON.stringify({
+          from: process.env.MAIL_FROM || "onboarding@resend.dev",
+          to: [process.env.OWNER_EMAIL],
+          subject: `[${process.env.SALON_NAME || "Amber"}] LINE予約通知`,
+          text: message,
+        }),
+      }).catch((e) => console.error("owner email:", e))
+    );
+  }
+  await Promise.all(jobs);
+}
+
+module.exports = { getAccessToken, push, getProfile, text, notifyOwner };

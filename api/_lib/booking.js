@@ -196,9 +196,11 @@ async function findOrCreateCustomer(userId, displayName) {
 
 // ---------- 予約INSERT（appointments + 空カルテvisits） ----------
 // リスクヘッジ原則②: INSERTのみ。UPDATE/DELETEは行わない
-async function createBooking({ customerId, dateStr, time, userId, displayName, isNew }) {
+async function createBooking({ customerId, dateStr, time, userId, displayName, isNew, customerMessage }) {
   const endTime = toHHMM(toMin(time) + DEFAULT_DURATION);
   const customerType = isNew ? "new" : "existing";
+  let notes = `[LINE予約] ${displayName || ""} (${userId})`;
+  if (customerMessage) notes += `\n【お客様メッセージ】${String(customerMessage).slice(0, 500)}`;
 
   // 出所タグ原則④: notesに[LINE予約]+userId、専用色
   const appt = await sbInsert("appointments", {
@@ -208,7 +210,7 @@ async function createBooking({ customerId, dateStr, time, userId, displayName, i
     end_time: endTime,
     duration: DEFAULT_DURATION,
     menu_ids: [],
-    notes: `[LINE予約] ${displayName || ""} (${userId})`,
+    notes: notes,
     color: LINE_COLOR,
     paid: false,
     shimeika: "shimeika",
@@ -260,6 +262,50 @@ async function clearSession(userId) {
   });
 }
 
+// ---------- カレンダー予約用（booking.html） ----------
+// 14日分の空き状況グリッドを構築: { rows: ["10:00",...], days: [{date, w, holiday, avail: [...]}] }
+async function buildGrid(settings) {
+  const today = jstNow().dateStr;
+  const endDate = addDays(today, SEARCH_DAYS - 1);
+  const rows14 = await sbFetch(
+    `appointments?select=date,time,end_time,duration&date=gte.${today}&date=lte.${endDate}`
+  );
+  const byDate = {};
+  for (const r of rows14 || []) (byDate[r.date] = byDate[r.date] || []).push(r);
+
+  let minOpen = Infinity;
+  let maxLastStart = -Infinity;
+  const days = [];
+  for (let i = 0; i < SEARCH_DAYS; i++) {
+    const dateStr = addDays(today, i);
+    const biz = getBizForDate(dateStr, settings);
+    const slots = calcSlots(dateStr, settings, byDate[dateStr]);
+    if (!biz.isHoliday) {
+      minOpen = Math.min(minOpen, toMin(biz.open));
+      maxLastStart = Math.max(maxLastStart, toMin(biz.close) - DEFAULT_DURATION);
+    }
+    days.push({ date: dateStr, w: weekdayJP(dateStr), holiday: biz.isHoliday, avail: slots });
+  }
+  const rows = [];
+  if (minOpen !== Infinity) {
+    for (let t = minOpen; t <= maxLastStart; t += settings.slotUnit) rows.push(toHHMM(t));
+  }
+  return { rows, days, slotUnit: settings.slotUnit, duration: DEFAULT_DURATION };
+}
+
+// webToken（カレンダーページ用の一時トークン）からセッションを検索
+async function findSessionByToken(token) {
+  if (!token || !/^[a-f0-9]{32}$/.test(token)) return null;
+  const rows = await sbFetch(
+    `line_sessions?select=line_user_id,state&state->>webToken=eq.${token}`
+  );
+  const s = rows && rows[0];
+  if (!s) return null;
+  const exp = s.state && s.state.webTokenExp;
+  if (!exp || Date.now() > exp) return null;
+  return s; // { line_user_id, state }
+}
+
 module.exports = {
   DEFAULT_DURATION,
   MAX_DATE_CHOICES,
@@ -273,4 +319,6 @@ module.exports = {
   createBooking,
   saveSession,
   clearSession,
+  buildGrid,
+  findSessionByToken,
 };
