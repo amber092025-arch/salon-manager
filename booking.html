@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>ご予約 | Amber</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style>
+  :root{
+    --cream:#faf8f5; --ink:#3d3833; --amber:#c8a97e; --amber-deep:#a8865a;
+    --border:#e8e2da; --muted:#8a8278; --closed:#f1ece4; --white:#fff;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{background:var(--cream);color:var(--ink);
+    font-family:'Noto Sans JP',sans-serif;font-size:14px;line-height:1.6}
+  .serif{font-family:'Cormorant Garamond',serif}
+  button{font-family:inherit;border:none;background:none;cursor:pointer;color:inherit}
+  button:focus-visible,a:focus-visible{outline:2px solid var(--amber-deep);outline-offset:2px}
+  @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
+
+const token = new URLSearchParams(location.search).get("t") || "";
+
+/* ── 琥珀の粒（空き枠マーカー） ── */
+function Gem({ active }) {
+  return (
+    <span style={{
+      display:"inline-block", width:12, height:12, borderRadius:"50%",
+      background: active
+        ? "radial-gradient(circle at 35% 30%, #e6cfa4, #a8865a)"
+        : "radial-gradient(circle at 35% 30%, #ead9b8, #c8a97e)",
+      boxShadow: active ? "0 0 0 4px rgba(200,169,126,.28)" : "0 1px 2px rgba(61,56,51,.18)",
+      transition:"box-shadow .15s"
+    }}/>
+  );
+}
+
+function App() {
+  const [phase, setPhase] = useState("loading"); // loading | grid | expired | error | done
+  const [data, setData] = useState(null);
+  const [page, setPage] = useState(0);           // 0: 今日〜6日目, 1: 7〜13日目
+  const [sel, setSel] = useState(null);          // {date, time, label, w}
+  const [msg, setMsg] = useState("");
+  const [sending, setSending] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [done, setDone] = useState(null);
+
+  const load = () => {
+    setPhase("loading");
+    fetch(`/api/booking-slots?t=${token}`)
+      .then(r => r.status === 401 ? Promise.reject("expired") : r.json())
+      .then(d => { if (!d.ok) throw "error"; setData(d); setPhase("grid"); })
+      .catch(e => setPhase(e === "expired" ? "expired" : "error"));
+  };
+  useEffect(load, []);
+
+  const confirm = () => {
+    if (!sel || sending) return;
+    setSending(true);
+    fetch("/api/booking-confirm", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ t: token, date: sel.date, time: sel.time, message: msg })
+    })
+    .then(r => r.json().then(d => ({ status:r.status, d })))
+    .then(({status, d}) => {
+      if (d.ok) { setDone(d); setPhase("done"); return; }
+      if (status === 409) {
+        setSel(null); setNotice("申し訳ありません、たった今その時間が埋まりました。空き状況を更新しました。"); load();
+      } else if (status === 401) { setPhase("expired"); }
+      else { setNotice("エラーが発生しました。もう一度お試しください。"); }
+    })
+    .catch(() => setNotice("通信エラーが発生しました。電波の良い場所でもう一度お試しください。"))
+    .finally(() => setSending(false));
+  };
+
+  /* ── ヘッダー ── */
+  const Header = ({sub}) => (
+    <header style={{padding:"18px 16px 10px", textAlign:"center"}}>
+      <div className="serif" style={{fontSize:30, fontWeight:600, letterSpacing:"0.12em"}}>Amber</div>
+      <div style={{fontSize:12, color:"var(--muted)", letterSpacing:"0.3em", marginTop:-2}}>ご予約{sub || ""}</div>
+    </header>
+  );
+
+  if (phase === "loading") return (
+    <div>
+      <Header/>
+      <p style={{textAlign:"center", color:"var(--muted)", marginTop:60}}>空き状況を確認しています…</p>
+    </div>
+  );
+
+  if (phase === "expired") return (
+    <div>
+      <Header/>
+      <div style={{maxWidth:340, margin:"48px auto", textAlign:"center", padding:"0 16px"}}>
+        <p style={{fontWeight:700, marginBottom:10}}>このリンクの有効期限が切れました</p>
+        <p style={{color:"var(--muted)", fontSize:13}}>
+          LINEのトーク画面に戻り、もう一度「予約」と送信して新しいカレンダーを開いてください。
+        </p>
+      </div>
+    </div>
+  );
+
+  if (phase === "error") return (
+    <div>
+      <Header/>
+      <div style={{maxWidth:340, margin:"48px auto", textAlign:"center", padding:"0 16px"}}>
+        <p style={{fontWeight:700, marginBottom:10}}>空き状況を取得できませんでした</p>
+        <button onClick={load} style={{marginTop:8, padding:"10px 28px", background:"var(--amber)", color:"#fff", borderRadius:22, fontWeight:700}}>再読み込み</button>
+      </div>
+    </div>
+  );
+
+  /* ── 予約完了：予約カード ── */
+  if (phase === "done") return (
+    <div>
+      <Header/>
+      <div style={{maxWidth:340, margin:"36px auto", padding:"0 16px"}}>
+        <div style={{background:"var(--white)", border:"1px solid var(--border)", borderRadius:14, padding:"30px 20px", textAlign:"center", boxShadow:"0 8px 28px rgba(61,56,51,.07)"}}>
+          <div style={{fontSize:12, letterSpacing:"0.28em", color:"var(--amber-deep)", fontWeight:700}}>ご予約を承りました</div>
+          <div style={{width:34, height:1, background:"var(--amber)", margin:"14px auto"}}/>
+          <div className="serif" style={{fontSize:36, fontWeight:600, lineHeight:1.25}}>{done.dateLabel}</div>
+          <div className="serif" style={{fontSize:30, fontWeight:500}}>{done.time}〜</div>
+          <p style={{fontSize:12, color:"var(--muted)", marginTop:16}}>
+            LINEにも確認メッセージをお送りしました。<br/>
+            変更・キャンセルはお電話にてお願いいたします。
+          </p>
+        </div>
+        <p style={{textAlign:"center", fontSize:12, color:"var(--muted)", marginTop:18}}>この画面は閉じていただいて構いません。</p>
+      </div>
+    </div>
+  );
+
+  /* ── カレンダーグリッド ── */
+  const days = data.days.slice(page*7, page*7+7);
+  const range = `${days[0].date.slice(5).replace("-","/")} 〜 ${days[days.length-1].date.slice(5).replace("-","/")}`;
+
+  return (
+    <div style={{paddingBottom: sel ? 300 : 40}}>
+      <Header/>
+
+      {/* 週切替 */}
+      <div style={{display:"flex", alignItems:"center", justifyContent:"center", gap:14, padding:"4px 0 10px"}}>
+        <button aria-label="前の週" disabled={page===0} onClick={()=>setPage(0)}
+          style={{width:34,height:34,borderRadius:"50%",border:"1px solid var(--border)",background:"var(--white)",opacity:page===0?0.35:1,fontSize:16}}>‹</button>
+        <div style={{fontSize:13, fontWeight:700, letterSpacing:"0.06em", minWidth:120, textAlign:"center"}}>{range}</div>
+        <button aria-label="次の週" disabled={page===1} onClick={()=>setPage(1)}
+          style={{width:34,height:34,borderRadius:"50%",border:"1px solid var(--border)",background:"var(--white)",opacity:page===1?0.35:1,fontSize:16}}>›</button>
+      </div>
+
+      {notice && (
+        <div role="status" style={{margin:"0 14px 10px", padding:"9px 12px", background:"#fff6ea", border:"1px solid var(--amber)", borderRadius:8, fontSize:12}}>
+          {notice}
+        </div>
+      )}
+
+      {/* グリッド */}
+      <div style={{margin:"0 8px", background:"var(--white)", border:"1px solid var(--border)", borderRadius:12, overflow:"hidden"}}>
+        <table style={{width:"100%", borderCollapse:"collapse", tableLayout:"fixed"}}>
+          <thead>
+            <tr>
+              <th style={{width:44}}></th>
+              {days.map(d => (
+                <th key={d.date} style={{padding:"8px 0 6px", borderLeft:"1px solid var(--border)", fontWeight:500}}>
+                  <div style={{fontSize:15, fontWeight:700}}>{Number(d.date.slice(8))}</div>
+                  <div style={{fontSize:10, color: d.w==="日" ? "#c0392b" : d.w==="土" ? "#2e6da4" : "var(--muted)"}}>{d.w}</div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.map((t, ri) => (
+              <tr key={t}>
+                <td style={{fontSize:10, color:"var(--muted)", textAlign:"right", padding:"0 5px 0 0",
+                  borderTop:"1px solid var(--border)", height:34,
+                  fontWeight: t.endsWith(":00") ? 700 : 400}}>{t}</td>
+                {days.map(d => {
+                  const ok = !d.holiday && d.avail.includes(t);
+                  const isSel = sel && sel.date===d.date && sel.time===t;
+                  return (
+                    <td key={d.date+t} style={{
+                      borderTop:"1px solid var(--border)", borderLeft:"1px solid var(--border)",
+                      textAlign:"center", height:34,
+                      background: d.holiday ? "var(--closed)" : ok ? (isSel ? "#f6eddd" : "var(--white)") : "var(--closed)"
+                    }}>
+                      {d.holiday && ri===0 && <span style={{fontSize:9, color:"var(--muted)"}}>休</span>}
+                      {ok && (
+                        <button aria-label={`${d.date} ${t}を選択`} onClick={()=>{setSel({date:d.date, time:t, label:`${Number(d.date.slice(5,7))}/${Number(d.date.slice(8))}`, w:d.w}); setNotice("");}}
+                          style={{width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center"}}>
+                          <Gem active={isSel}/>
+                        </button>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <p style={{textAlign:"center", fontSize:11, color:"var(--muted)", marginTop:10}}>
+        <Gem/> <span style={{marginLeft:4}}>が空きのあるお時間です（施術目安 {data.duration}分）</span>
+      </p>
+
+      {/* 確認シート */}
+      {sel && (
+        <div style={{position:"fixed", left:0, right:0, bottom:0, background:"var(--white)",
+          borderTop:"1px solid var(--border)", borderRadius:"18px 18px 0 0",
+          boxShadow:"0 -10px 30px rgba(61,56,51,.14)", padding:"18px 18px calc(18px + env(safe-area-inset-bottom))"}}>
+          <div style={{display:"flex", alignItems:"baseline", justifyContent:"center", gap:8}}>
+            <span className="serif" style={{fontSize:30, fontWeight:600}}>{sel.label}</span>
+            <span style={{fontSize:13, color:"var(--muted)"}}>({sel.w})</span>
+            <span className="serif" style={{fontSize:30, fontWeight:600}}>{sel.time}〜</span>
+          </div>
+          <textarea
+            value={msg} onChange={e=>setMsg(e.target.value)} maxLength={300}
+            placeholder="一言メッセージ（任意）例：前回と同じ感じで"
+            style={{width:"100%", marginTop:12, padding:"10px 12px", border:"1px solid var(--border)",
+              borderRadius:10, fontFamily:"inherit", fontSize:13, minHeight:64, resize:"none", background:"var(--cream)"}}/>
+          <button onClick={confirm} disabled={sending}
+            style={{width:"100%", marginTop:12, padding:"14px", borderRadius:26,
+              background: sending ? "#d9c7a8" : "linear-gradient(135deg, #d3b58a, #a8865a)",
+              color:"#fff", fontWeight:700, fontSize:15, letterSpacing:"0.08em"}}>
+            {sending ? "送信中…" : "この日時で予約する"}
+          </button>
+          <button onClick={()=>setSel(null)} disabled={sending}
+            style={{width:"100%", marginTop:6, padding:"10px", color:"var(--muted)", fontSize:13}}>
+            選び直す
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
