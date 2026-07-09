@@ -12,7 +12,7 @@ module.exports = async (req, res) => {
   if (req.method !== "POST") return res.status(405).end();
   try {
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
-    const { t, date, time, message } = body;
+    const { t, date, time, message, menuId } = body;
 
     const session = await B.findSessionByToken(t);
     if (!session) return res.status(401).json({ ok: false, error: "expired" });
@@ -22,10 +22,14 @@ module.exports = async (req, res) => {
       return res.status(400).json({ ok: false, error: "bad_request" });
     }
 
+    const menus = await B.getMenus();
+    const menu = menus.find((m) => m.id === Number(menuId));
+    if (!menu) return res.status(400).json({ ok: false, error: "bad_menu" });
+
     const settings = await B.getSettings();
 
-    // リスクヘッジ原則③: 確定直前に空きを必ず再チェック
-    const free = await B.isSlotFree(date, time, settings);
+    // リスクヘッジ原則③: 確定直前に空きを必ず再チェック（選択メニューのdurationで）
+    const free = await B.isSlotFree(date, time, settings, menu.duration);
     if (!free) return res.status(409).json({ ok: false, error: "taken" });
 
     const profile = await L.getProfile(userId);
@@ -38,6 +42,7 @@ module.exports = async (req, res) => {
       displayName: profile.displayName,
       isNew,
       customerMessage: message,
+      menu,
     });
     await B.clearSession(userId);
 
@@ -46,16 +51,16 @@ module.exports = async (req, res) => {
     // お客様のLINEトークにも確認を残す
     await L.push(userId, [
       L.text(
-        `ご予約を承りました✂️\n\n📅 ${B.formatDateJP(date)} ${time}〜\n\n変更・キャンセルはお電話にてお願いいたします${phoneNote}。\nご来店お待ちしております！`
+        `ご予約を承りました✂️\n\n📅 ${B.formatDateJP(date)} ${time}〜\nメニュー: ${menu.name}\n\n変更・キャンセルはお電話にてお願いいたします${phoneNote}。\nご来店お待ちしております！`
       ),
     ]).catch((e) => console.error("customer push:", e));
 
     // オーナー通知（LINE push＋メール）
     await L.notifyOwner(
-      `🔔 [LINE-v1] カレンダー予約が入りました\n\n📅 ${B.formatDateJP(date)} ${time}〜\n👤 ${profile.displayName}${isNew ? "（新規・空カルテ自動作成）" : ""}${message ? `\n💬 ${String(message).slice(0, 200)}` : ""}\n\n★サロンボード（HPB）側の同時間帯を手動でブロックしてください`
+      `🔔 [LINE-v1] カレンダー予約が入りました\n\n📅 ${B.formatDateJP(date)} ${time}〜\nメニュー: ${menu.name}（${menu.price}円・約${menu.duration}分）\n👤 ${profile.displayName}${isNew ? "（新規・空カルテ自動作成）" : ""}${message ? `\n💬 ${String(message).slice(0, 200)}` : ""}\n\n★サロンボード（HPB）側の同時間帯を手動でブロックしてください`
     );
 
-    return res.status(200).json({ ok: true, date, time, dateLabel: B.formatDateJP(date) });
+    return res.status(200).json({ ok: true, date, time, dateLabel: B.formatDateJP(date), menu });
   } catch (e) {
     console.error("booking-confirm error:", e);
     return res.status(500).json({ ok: false, error: "server" });
