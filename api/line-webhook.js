@@ -188,7 +188,8 @@ async function handleEvent(event) {
 // Step 1: 空きのある日を最大4件提示＋カレンダーページへの本人専用リンク
 async function startFlow(replyToken, userId) {
   const settings = await B.getSettings();
-  const dates = await B.findAvailableDates(settings);
+  // 14日以内に本当に空きが無いかの概算チェック（メニュー選択前なので一律デフォルト時間で判定）
+  const dates = await B.findAvailableDates(settings, B.DEFAULT_DURATION);
   if (dates.length === 0) {
     return reply(replyToken, [
       text(
@@ -204,17 +205,17 @@ async function startFlow(replyToken, userId) {
     webTokenExp: Date.now() + 30 * 60 * 1000,
   });
   const bookingUrl = `${(process.env.BOOKING_URL || "https://salon-manager-sigma.vercel.app/booking.html").trim()}?t=${webToken}`;
-  const items = [
-    {
-      type: "action",
-      action: { type: "uri", label: "📅 カレンダーで選ぶ", uri: bookingUrl },
-    },
-    ...dates.map((d) => pbItem(B.formatDateJP(d.date), `a=d&v=${d.date}`)),
-  ];
+  // STEKiNA同様「カード1枚→ボタン1つ→即モーダル」の導線に統一（旧・日付ごとのテキストボタンは廃止）
   return reply(replyToken, [
     {
-      ...text("ご希望の日をお選びください。\n（📅カレンダーなら空き状況を一覧で見られます）"),
-      quickReply: qr(items),
+      type: "template",
+      altText: "空き状況を確認する",
+      template: {
+        type: "buttons",
+        title: SALON_NAME,
+        text: "メニューと空き状況を確認して\nそのままご予約いただけます。",
+        actions: [{ type: "uri", label: "📅 空き状況を確認する", uri: bookingUrl }],
+      },
     },
   ]);
 }
