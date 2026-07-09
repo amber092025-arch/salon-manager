@@ -121,12 +121,13 @@ function normalizeAppt(r) {
 }
 
 // その日の空きスロット(開始時刻 "HH:MM" の配列)を計算
-function calcSlots(dateStr, settings, apptsForDate) {
+function calcSlots(dateStr, settings, apptsForDate, duration) {
+  const dur = Number(duration) > 0 ? Number(duration) : DEFAULT_DURATION;
   const biz = getBizForDate(dateStr, settings);
   if (biz.isHoliday) return [];
   const open = toMin(biz.open);
   const close = toMin(biz.close);
-  const lastStart = close - DEFAULT_DURATION; // 閉店までに施術が終わる枠のみ
+  const lastStart = close - dur; // 閉店までに施術が終わる枠のみ
   const now = jstNow();
   const minStart = dateStr === now.dateStr ? now.minutes + LEAD_MINUTES : -1;
   const appts = (apptsForDate || []).map(normalizeAppt);
@@ -134,14 +135,14 @@ function calcSlots(dateStr, settings, apptsForDate) {
   const slots = [];
   for (let s = open; s <= lastStart; s += settings.slotUnit) {
     if (s < minStart) continue;
-    const overlapping = appts.filter((a) => a.start < s + DEFAULT_DURATION && a.end > s).length;
+    const overlapping = appts.filter((a) => a.start < s + dur && a.end > s).length;
     if (overlapping < settings.capacity) slots.push(toHHMM(s));
   }
   return slots;
 }
 
 // 今日〜14日先で空きのある日を最大4件返す: [{date, slots}]
-async function findAvailableDates(settings) {
+async function findAvailableDates(settings, duration) {
   const today = jstNow().dateStr;
   const endDate = addDays(today, SEARCH_DAYS - 1);
   const rows = await sbFetch(
@@ -153,23 +154,23 @@ async function findAvailableDates(settings) {
   const result = [];
   for (let i = 0; i < SEARCH_DAYS && result.length < MAX_DATE_CHOICES; i++) {
     const dateStr = addDays(today, i);
-    const slots = calcSlots(dateStr, settings, byDate[dateStr]);
+    const slots = calcSlots(dateStr, settings, byDate[dateStr], duration);
     if (slots.length > 0) result.push({ date: dateStr, slots });
   }
   return result;
 }
 
 // 指定日の空きスロットを再取得（最新のDB状態で）
-async function getSlotsForDate(dateStr, settings) {
+async function getSlotsForDate(dateStr, settings, duration) {
   const rows = await sbFetch(
     `appointments?select=date,time,end_time,duration&date=eq.${dateStr}`
   );
-  return calcSlots(dateStr, settings, rows);
+  return calcSlots(dateStr, settings, rows, duration);
 }
 
 // 確定直前の空き再チェック（リスクヘッジ原則③）
-async function isSlotFree(dateStr, time, settings) {
-  const slots = await getSlotsForDate(dateStr, settings);
+async function isSlotFree(dateStr, time, settings, duration) {
+  const slots = await getSlotsForDate(dateStr, settings, duration);
   return slots.includes(time);
 }
 
@@ -196,10 +197,12 @@ async function findOrCreateCustomer(userId, displayName) {
 
 // ---------- 予約INSERT（appointments + 空カルテvisits） ----------
 // リスクヘッジ原則②: INSERTのみ。UPDATE/DELETEは行わない
-async function createBooking({ customerId, dateStr, time, userId, displayName, isNew, customerMessage }) {
-  const endTime = toHHMM(toMin(time) + DEFAULT_DURATION);
+async function createBooking({ customerId, dateStr, time, userId, displayName, isNew, customerMessage, menu }) {
+  const dur = menu && Number(menu.duration) > 0 ? Number(menu.duration) : DEFAULT_DURATION;
+  const endTime = toHHMM(toMin(time) + dur);
   const customerType = isNew ? "new" : "existing";
   let notes = `[LINE予約] ${displayName || ""} (${userId})`;
+  if (menu && menu.name) notes += `\nメニュー: ${menu.name}`;
   if (customerMessage) notes += `\n【お客様メッセージ】${String(customerMessage).slice(0, 500)}`;
 
   // 出所タグ原則④: notesに[LINE予約]+userId、専用色
@@ -208,8 +211,8 @@ async function createBooking({ customerId, dateStr, time, userId, displayName, i
     date: dateStr,
     time: time,
     end_time: endTime,
-    duration: DEFAULT_DURATION,
-    menu_ids: [],
+    duration: dur,
+    menu_ids: menu && menu.id ? [menu.id] : [],
     notes: notes,
     color: LINE_COLOR,
     paid: false,
@@ -222,17 +225,17 @@ async function createBooking({ customerId, dateStr, time, userId, displayName, i
     customer_id: customerId,
     date: dateStr,
     time: time,
-    menus: [],
+    menus: menu && menu.id ? [{ menuId: menu.id, name: menu.name, price: menu.price || 0 }] : [],
     products: [],
     drug_cost: 0,
     payment_method: "cash",
-    total: 0,
+    total: menu && menu.price ? menu.price : 0,
     notes: null,
     images: [],
     customer_type: customerType,
     hpb_point: 0,
     paid: false,
-    duration: DEFAULT_DURATION,
+    duration: dur,
     appointment_id: appt.id,
     tags: [],
     style_name: null,
@@ -262,9 +265,26 @@ async function clearSession(userId) {
   });
 }
 
+// ---------- メニュー一覧（カレンダー予約ページ用） ----------
+async function getMenus() {
+  // photosカラムは無いのでSELECT負荷なし。業務カテゴリ(裏)は除外し表示用のみ
+  const rows = await sbFetch("menus?select=id,name,price,duration,category,sort_order&order=sort_order.asc");
+  return (rows || [])
+    .filter((m) => m.category !== "業務")
+    .map((m) => ({
+      id: m.id,
+      name: m.name,
+      price: m.price || 0,
+      duration: Math.max(Number(m.duration) || DEFAULT_DURATION, settingsSlotFloor()),
+    }));
+}
+function settingsSlotFloor() { return 15; } // 極端に短いdurationの防止
+
 // ---------- カレンダー予約用（booking.html） ----------
 // 14日分の空き状況グリッドを構築: { rows: ["10:00",...], days: [{date, w, holiday, avail: [...]}] }
-async function buildGrid(settings) {
+// duration省略時はDEFAULT_DURATION(60分)。メニュー選択に応じて呼び出し側から渡す
+async function buildGrid(settings, duration) {
+  const dur = Number(duration) > 0 ? Number(duration) : DEFAULT_DURATION;
   const today = jstNow().dateStr;
   const endDate = addDays(today, SEARCH_DAYS - 1);
   const rows14 = await sbFetch(
@@ -279,10 +299,10 @@ async function buildGrid(settings) {
   for (let i = 0; i < SEARCH_DAYS; i++) {
     const dateStr = addDays(today, i);
     const biz = getBizForDate(dateStr, settings);
-    const slots = calcSlots(dateStr, settings, byDate[dateStr]);
+    const slots = calcSlots(dateStr, settings, byDate[dateStr], dur);
     if (!biz.isHoliday) {
       minOpen = Math.min(minOpen, toMin(biz.open));
-      maxLastStart = Math.max(maxLastStart, toMin(biz.close) - DEFAULT_DURATION);
+      maxLastStart = Math.max(maxLastStart, toMin(biz.close) - dur);
     }
     days.push({ date: dateStr, w: weekdayJP(dateStr), holiday: biz.isHoliday, avail: slots });
   }
@@ -290,7 +310,7 @@ async function buildGrid(settings) {
   if (minOpen !== Infinity) {
     for (let t = minOpen; t <= maxLastStart; t += settings.slotUnit) rows.push(toHHMM(t));
   }
-  return { rows, days, slotUnit: settings.slotUnit, duration: DEFAULT_DURATION };
+  return { rows, days, slotUnit: settings.slotUnit, duration: dur };
 }
 
 // webToken（カレンダーページ用の一時トークン）からセッションを検索
@@ -312,6 +332,7 @@ module.exports = {
   jstNow,
   formatDateJP,
   getSettings,
+  getMenus,
   findAvailableDates,
   getSlotsForDate,
   isSlotFree,
