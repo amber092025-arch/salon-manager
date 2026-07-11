@@ -208,13 +208,52 @@ async function startFlow(replyToken, userId) {
   // STEKiNA同様「カード1枚→ボタン1つ→即モーダル」の導線に統一（旧・日付ごとのテキストボタンは廃止）
   return reply(replyToken, [
     {
-      type: "template",
+      type: "flex",
       altText: "空き状況を確認する",
-      template: {
-        type: "buttons",
-        title: SALON_NAME,
-        text: "メニューと空き状況を確認して\nそのままご予約いただけます。",
-        actions: [{ type: "uri", label: "📅 空き状況を確認する", uri: bookingUrl }],
+      contents: {
+        type: "bubble",
+        body: {
+          type: "box",
+          layout: "vertical",
+          backgroundColor: "#FAF8F5",
+          paddingAll: "24px",
+          contents: [
+            {
+              type: "text",
+              text: "Amber",
+              weight: "bold",
+              size: "xl",
+              color: "#A8865A",
+              align: "center",
+            },
+            { type: "separator", margin: "lg", color: "#E8E2DA" },
+            {
+              type: "text",
+              text: "メニューと空き状況を確認して\nそのままご予約いただけます。",
+              wrap: true,
+              margin: "lg",
+              size: "sm",
+              color: "#3D3833",
+              align: "center",
+            },
+          ],
+        },
+        footer: {
+          type: "box",
+          layout: "vertical",
+          backgroundColor: "#FAF8F5",
+          paddingAll: "16px",
+          paddingTop: "0px",
+          contents: [
+            {
+              type: "button",
+              style: "primary",
+              height: "md",
+              color: "#A8865A",
+              action: { type: "uri", label: "📅 空き状況を確認する", uri: bookingUrl },
+            },
+          ],
+        },
       },
     },
   ]);
