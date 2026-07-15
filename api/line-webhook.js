@@ -204,7 +204,11 @@ async function startFlow(replyToken, userId) {
     webToken,
     webTokenExp: Date.now() + 30 * 60 * 1000,
   });
-  const bookingUrl = `${(process.env.BOOKING_URL || "https://salon-manager-sigma.vercel.app/booking.html").trim()}?t=${webToken}`;
+  const base = (process.env.BOOKING_URL || "https://salon-manager-sigma.vercel.app/booking.html").trim();
+  // LIFF登録済み（liff-setup実行済み）ならモーダル表示のLIFF URL、未登録なら通常URL
+  const bookingUrl = settings.liffBookingId
+    ? `https://liff.line.me/${settings.liffBookingId}?t=${webToken}`
+    : `${base}?t=${webToken}`;
   // STEKiNA同様「カード1枚→ボタン1つ→即モーダル」の導線に統一（旧・日付ごとのテキストボタンは廃止）
   return reply(replyToken, [
     {
