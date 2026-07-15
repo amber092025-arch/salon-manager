@@ -95,7 +95,17 @@ async function getSettings() {
     personalHolidays: map.personalHolidays || [],
     slotUnit: Number(map.bookingSlotUnit) || 30,   // 未設定なら30分
     capacity: Number(map.bookingCapacity) || 1,    // 未設定なら1（1人サロン）
+    liffBookingId: map.liffBookingId || null,      // LIFF登録済みならモーダル表示に使う
   };
+}
+
+// settingsに1キーだけ保存（upsert）。既存キーには触らない
+async function saveSetting(key, value) {
+  await sbFetch("settings?on_conflict=key", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates" },
+    body: JSON.stringify([{ key, value: JSON.stringify(value) }]),
+  });
 }
 
 function getBizForDate(dateStr, settings) {
@@ -332,6 +342,7 @@ module.exports = {
   jstNow,
   formatDateJP,
   getSettings,
+  saveSetting,
   getMenus,
   findAvailableDates,
   getSlotsForDate,
