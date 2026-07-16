@@ -28,7 +28,16 @@
 <div id="root"></div>
 <script type="text/babel" data-presets="react">
 const { useState, useEffect } = React;
-const token = new URLSearchParams(location.search).get("t") || "";
+// トークン取得: 通常URL(?t=xxx)とLIFF経由(?liff.state=%3Ft%3Dxxx)の両対応
+const token = (() => {
+  const sp = new URLSearchParams(location.search);
+  let t = sp.get("t");
+  if (!t && sp.get("liff.state")) {
+    const ls = sp.get("liff.state");
+    t = new URLSearchParams(ls.startsWith("?") ? ls.slice(1) : ls).get("t");
+  }
+  return t || "";
+})();
 const STEPS = ["メニュー選択", "日時選択", "内容確認"];
 
 function Gem({ active }) {
