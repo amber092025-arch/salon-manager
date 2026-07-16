@@ -82,6 +82,22 @@ const sb = {
   })
 };
 
+// ── 通信リトライヘルパー（失敗時は1秒→2秒→3秒待って最大3回試行） ──
+const sbRetry = async (buildQuery, tries = 3) => {
+  let last = null;
+  for (let i = 0; i < tries; i++) {
+    const r = await buildQuery();
+    if (!r.error) return r;
+    last = r;
+    console.warn("sbRetry: attempt " + (i + 1) + " failed", r.error);
+    if (i < tries - 1) await new Promise(res => setTimeout(res, 1000 * (i + 1)));
+  }
+  return last;
+};
+
+// visitsの軽量カラム（写真base64のphoto_data/imagesを除外。写真は後追いで取得）
+const VISIT_LIGHT_COLS = "id,customer_id,date,time,menus,products,drug_cost,payment_method,total,notes,customer_type,hpb_point,paid,duration,appointment_id,tags,style_name,style_comment,is_public,paid_at";
+
 // ── DB helpers ──
 const toDb = {
   customer: (c) => ({ name:c.name, kana:c.kana||null, phone:c.phone||null, birthday:c.birthday||null, gender:c.gender||"female", notes:c.notes||null, join_date:c.joinDate||null }),
@@ -268,6 +284,7 @@ function App() {
   const [monthlyGoals, setMonthlyGoals] = useState({ techRev:"", visitCount:"", avgPrice:"", shopRev:"" });
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false); // 初回読み込み失敗フラグ（バナー表示用）
   const [bizHours, setBizHours] = useState({
     mon: { open:"10:00", close:"20:00", closed:false },
     tue: { open:"10:00", close:"20:00", closed:false },
@@ -333,7 +350,7 @@ function App() {
       setLoading(true);
 
       // ① settingsを最初に取得してロゴを即セット（ローディング画面に反映させるため）
-      const s = await sb.from("settings").select();
+      const s = await sbRetry(() => sb.from("settings").select());
       if (!s.error && s.data && s.data.length > 0) {
         const settingsMap = {};
         s.data.forEach(row => { settingsMap[row.key] = row.value; });
@@ -356,16 +373,21 @@ function App() {
         setSalonLogo(null);
       }
 
-      // ② 残りのデータを並列取得
+      // ② 残りのデータを並列取得（各クエリ最大3回リトライ。visitsは写真カラム除外の軽量版）
       const [c, m, p, v, a, tc, ti] = await Promise.all([
-        sb.from("customers").select().order("name"),
-        sb.from("menus").select().order("sort_order"),
-        sb.from("products").select("id,name,price,cost,stock,min_stock,category,sub_category,placeholder,description,is_public,sort_order").order("sort_order"),
-        sb.from("visits").select().order("date", {ascending:false}),
-        sb.from("appointments").select().order("date"),
-        sb.from("tag_categories").select().order("sort_order"),
-        sb.from("tag_items").select().order("sort_order"),
+        sbRetry(() => sb.from("customers").select().order("name")),
+        sbRetry(() => sb.from("menus").select().order("sort_order")),
+        sbRetry(() => sb.from("products").select("id,name,price,cost,stock,min_stock,category,sub_category,placeholder,description,is_public,sort_order").order("sort_order")),
+        sbRetry(() => sb.from("visits").select(VISIT_LIGHT_COLS).order("date", {ascending:false})),
+        sbRetry(() => sb.from("appointments").select().order("date")),
+        sbRetry(() => sb.from("tag_categories").select().order("sort_order")),
+        sbRetry(() => sb.from("tag_items").select().order("sort_order")),
       ]);
+      // 重要データ（顧客・来店・予約・メニュー）が1つでも読めなかったらバナー表示
+      if (c.error || v.error || a.error || m.error) {
+        setLoadError(true);
+        console.error("initial load error", { c: c.error, v: v.error, a: a.error, m: m.error });
+      }
       if (!c.error) setCustomers(c.data.map(fromDb.customer));
       if (!m.error) setMenus(m.data.map(fromDb.menu));
       if (!p.error) {
@@ -397,6 +419,22 @@ function App() {
         if (insertedProds) setProducts(insertedProds.map(fromDb.product));
       }
       setLoading(false);
+
+      // ③ 写真（photo_data/images）は後追いでバックグラウンド取得して合流
+      //    → 失敗しても売上・カルテ文字情報には影響しない
+      if (!v.error) {
+        (async () => {
+          const ph = await sbRetry(() => sb.from("visits").select("id,photo_data,images"));
+          if (ph.error || !ph.data) { console.warn("photo background load failed", ph && ph.error); return; }
+          const map = {};
+          ph.data.forEach(r => {
+            let pd = {};
+            try { pd = r.photo_data ? JSON.parse(r.photo_data) : {}; } catch(e) {}
+            map[r.id] = { images: r.images || [], beforeImgs: pd.before || [], afterImgs: pd.after || [], otherImgs: pd.other || [] };
+          });
+          setVisits(prev => prev.map(x => map[x.id] ? { ...x, ...map[x.id] } : x));
+        })();
+      }
     };
     load();
   }, []);
@@ -467,12 +505,22 @@ function App() {
           // 再接続前に最新データを再取得
           try {
             const [a, v, c] = await Promise.all([
-              sb.from("appointments").select("*").order("date").order("time"),
-              sb.from("visits").select("id,customer_id,date,time,paid,total,payment_method,paid_at,menus,products,notes,tags,style_name,style_comment,is_public,photo_data,hpb_point,appointment_id,customer_type,drug_cost,images,duration").order("date"),
-              sb.from("customers").select().order("name"),
+              sbRetry(() => sb.from("appointments").select("*").order("date").order("time")),
+              sbRetry(() => sb.from("visits").select(VISIT_LIGHT_COLS).order("date")),
+              sbRetry(() => sb.from("customers").select().order("name")),
             ]);
             if (a.data) setAppointments(a.data.map(fromDb.appointment));
-            if (v.data) setVisits(v.data.map(fromDb.visit));
+            if (v.data) setVisits(prev => {
+              // 軽量クエリには写真が含まれないため、既に読み込み済みの写真を保持して合流
+              const byId = {};
+              prev.forEach(x => { byId[x.id] = x; });
+              return v.data.map(r => {
+                const nv = fromDb.visit(r);
+                const old = byId[nv.id];
+                if (old) { nv.beforeImgs = old.beforeImgs; nv.afterImgs = old.afterImgs; nv.otherImgs = old.otherImgs; nv.images = old.images; }
+                return nv;
+              });
+            });
             if (c.data) setCustomers(c.data.map(fromDb.customer));
           } catch(e) {}
           connect();
@@ -738,6 +786,14 @@ function App() {
 
   return (
     <div style={{ background: C.bg, minHeight: "100vh", maxWidth: 480, margin: "0 auto", fontFamily: "-apple-system, 'Hiragino Sans', 'Yu Gothic UI', sans-serif", paddingBottom: 80, position: "relative", overflowX: "hidden" }}>
+      {/* 初回読み込み失敗バナー */}
+      {loadError && (
+        <div style={{ position: "sticky", top: 0, zIndex: 300, background: "#c0392b", color: "#fff", padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+          <span style={{ flex: 1, fontWeight: 600 }}>データの読み込みに失敗しました。表示中の数値は不完全です。</span>
+          <button onClick={() => window.location.reload()} style={{ background: "#fff", color: "#c0392b", border: "none", borderRadius: 8, padding: "6px 12px", fontWeight: 700, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>再読み込み</button>
+          <button onClick={() => setLoadError(false)} style={{ background: "transparent", color: "#fff", border: "none", fontSize: 16, cursor: "pointer", padding: "2px 4px" }}>✕</button>
+        </div>
+      )}
       {/* Content */}
       <div style={{ padding: "0 0 8px" }}>
         {tab === "home" && <HomeTab visits={visits} customers={customers} appointments={appointments} menus={menus} setTab={setTab} products={products} purchaseCosts={purchaseCosts} purchaseCategories={purchaseCategories} monthlyGoals={monthlyGoals} />}
