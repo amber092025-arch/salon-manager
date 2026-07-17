@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════
-// /api/_lib/booking.js  (LINE-v1)
+// /api/_lib/booking.js  (LINE-v2)
 // 空き枠計算・Supabaseアクセスの共通ライブラリ
 // ※ _lib フォルダ内のファイルはVercelのエンドポイントにはならない
 // ※ 既存アプリ(index.html等)には一切手を入れない。新規ファイルのみで完結
@@ -96,6 +96,7 @@ async function getSettings() {
     slotUnit: Number(map.bookingSlotUnit) || 30,   // 未設定なら30分
     capacity: Number(map.bookingCapacity) || 1,    // 未設定なら1（1人サロン）
     liffBookingId: map.liffBookingId || null,      // LIFF登録済みならモーダル表示に使う
+    lineBookingEnabled: map.lineBookingEnabled,    // 受付停止スイッチ（未設定undefined=受付中扱い）
   };
 }
 
