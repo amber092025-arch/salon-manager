@@ -825,7 +825,7 @@ function App() {
       }
       <div style={{ fontSize:16, fontWeight:700, color:C.text, marginBottom:8 }}>読み込み中...</div>
       <div style={{ fontSize:13, color:C.sub }}>データを取得しています</div>
-      <div style={{ fontSize:11, color:C.sub, opacity:0.6, marginTop:6 }}>v2026.07.17-b</div>
+      <div style={{ fontSize:11, color:C.sub, opacity:0.6, marginTop:6 }}>{APP_VERSION}</div>
     </div>
   );
 
@@ -1055,6 +1055,7 @@ function HomeTab({ visits, customers, appointments, menus, setTab, products, pur
         ))}
         <button onClick={() => setTab("appointments")} style={{ ...css.btn(C.accent, false), width: "100%", marginTop: 10, fontSize: 13 }}>予約表を見る</button>
       </div>
+      <div style={{ textAlign: "center", fontSize: 11, color: C.sub, opacity: 0.55, padding: "6px 0 2px" }}>{APP_VERSION}</div>
     </div>
   );
 }
@@ -3689,6 +3690,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
+const APP_VERSION = "v2026.07.17-c"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
