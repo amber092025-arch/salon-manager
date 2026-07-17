@@ -825,7 +825,7 @@ function App() {
       }
       <div style={{ fontSize:16, fontWeight:700, color:C.text, marginBottom:8 }}>読み込み中...</div>
       <div style={{ fontSize:13, color:C.sub }}>データを取得しています</div>
-      <div style={{ fontSize:11, color:C.sub, opacity:0.6, marginTop:6 }}>v2026.07.17-a</div>
+      <div style={{ fontSize:11, color:C.sub, opacity:0.6, marginTop:6 }}>v2026.07.17-b</div>
     </div>
   );
 
@@ -853,7 +853,7 @@ function App() {
         {tab === "goalSettings" && <GoalSettingsTab setTab={setTab} notify={notify} monthlyGoals={monthlyGoals} setMonthlyGoals={setMonthlyGoals} saveSetting={saveSetting} />}
         {tab === "lineBookingSettings" && <LineBookingSettingsTab setTab={setTab} notify={notify} lineBooking={lineBooking} setLineBooking={setLineBooking} saveSetting={saveSetting} />}
         {tab === "tagSettings" && <TagSettingsTab setTab={setTab} notify={notify} tagCategories={tagCategories} setTagCategories={setTagCategories} />}
-        {tab === "appointments" && <AppointmentsTab appointments={appointments} setAppointments={setAppointmentsW} customers={customers} setCustomers={setCustomers} visits={visits} setVisits={setVisitsW} products={products} menus={menus} notify={notify} setTab={setTab} bizHours={bizHours} closedDaysOfWeek={closedDaysOfWeek} personalHolidays={personalHolidays} openKarteDetail={openKarteDetail} addCustomer={addCustomer} addVisit={addVisit} addAppointment={addAppointment} deleteAppointment={deleteAppointment} pendingCustomerId={pendingCustomerId} setPendingCustomerId={setPendingCustomerId} weekOffset={weekOffset} setWeekOffset={setWeekOffset} viewMode={viewMode} setViewMode={setViewMode} dayOffset={dayOffset} setDayOffset={setDayOffset} monthOffset={monthOffset} setMonthOffset={setMonthOffset} shopCategoryList={shopCategoryList} />}
+        {tab === "appointments" && <AppointmentsTab appointments={appointments} setAppointments={setAppointmentsW} customers={customers} setCustomers={setCustomers} visits={visits} setVisits={setVisitsW} products={products} menus={menus} notify={notify} setTab={setTab} bizHours={bizHours} closedDaysOfWeek={closedDaysOfWeek} personalHolidays={personalHolidays} openKarteDetail={openKarteDetail} addCustomer={addCustomer} addVisit={addVisit} addAppointment={addAppointment} deleteAppointment={deleteAppointment} pendingCustomerId={pendingCustomerId} setPendingCustomerId={setPendingCustomerId} weekOffset={weekOffset} setWeekOffset={setWeekOffset} viewMode={viewMode} setViewMode={setViewMode} dayOffset={dayOffset} setDayOffset={setDayOffset} monthOffset={monthOffset} setMonthOffset={setMonthOffset} shopCategoryList={shopCategoryList} slotUnit={lineBooking.slotUnit} />}
         {tab === "inventory" && <InventoryTab products={products} setProducts={setProductsW} addProduct={addProduct} updateProduct={updateProduct} deleteProduct={deleteProduct} notify={notify} setTab={setTab} visits={visits} purchaseCosts={purchaseCosts} setPurchaseCosts={setPurchaseCosts} purchaseMakers={purchaseMakers} setPurchaseMakers={setPurchaseMakers} purchasePayMethods={purchasePayMethods} setPurchasePayMethods={setPurchasePayMethods} purchaseCategories={purchaseCategories} setPurchaseCategories={setPurchaseCategories} />}
         {tab === "bizHours" && <BizHoursTab setTab={setTab} bizHours={bizHours} setBizHours={setBizHours} closedDaysOfWeek={closedDaysOfWeek} setClosedDaysOfWeek={setClosedDaysOfWeek} personalHolidays={personalHolidays} setPersonalHolidays={setPersonalHolidays} saveSetting={saveSetting} notify={notify} />}
         {tab === "settings" && <SettingsTab menus={menus} setMenus={setMenusW} products={products} setProducts={setProductsW} notify={notify} setTab={setTab} />}
@@ -3724,7 +3724,7 @@ function getWeekStart(offset = 0) {
   return mon;
 }
 
-function AppointmentsTab({ appointments, setAppointments, customers, setCustomers, visits, setVisits, products, menus, notify, setTab, bizHours, closedDaysOfWeek, personalHolidays, openKarteDetail, addCustomer, addVisit, addAppointment, updateAppointment, deleteAppointment, initialCustomer, pendingCustomerId, setPendingCustomerId, weekOffset, setWeekOffset, viewMode, setViewMode, dayOffset, setDayOffset, monthOffset, setMonthOffset, shopCategoryList }) {
+function AppointmentsTab({ appointments, setAppointments, customers, setCustomers, visits, setVisits, products, menus, notify, setTab, bizHours, closedDaysOfWeek, personalHolidays, openKarteDetail, addCustomer, addVisit, addAppointment, updateAppointment, deleteAppointment, initialCustomer, pendingCustomerId, setPendingCustomerId, weekOffset, setWeekOffset, viewMode, setViewMode, dayOffset, setDayOffset, monthOffset, setMonthOffset, shopCategoryList, slotUnit = 30 }) {
   const [showAdd, setShowAdd] = useState(!!(initialCustomer || pendingCustomerId));
   const [showEdit, setShowEdit] = useState(null);
   const [showEditMenuPicker, setShowEditMenuPicker] = useState(false);
@@ -4015,7 +4015,15 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
                     <span style={{ fontSize: 11, color: C.sub }}>{h}:00</span>
                   </div>
                   <div style={{ flex: 1, borderLeft: "1px solid #e0e0e0", position: "relative" }}>
-                    <div style={{ height: "50%", borderBottom: "1px dashed #e8e8e8" }} />
+                    {slotUnit === 15 ? (
+                      <>
+                        <div style={{ height: "25%", borderBottom: "1px dashed #f1f1f1" }} />
+                        <div style={{ height: "25%", borderBottom: "1px dashed #e8e8e8" }} />
+                        <div style={{ height: "25%", borderBottom: "1px dashed #f1f1f1" }} />
+                      </>
+                    ) : (
+                      <div style={{ height: "50%", borderBottom: "1px dashed #e8e8e8" }} />
+                    )}
                   </div>
                 </div>
               );
@@ -4085,7 +4093,15 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
                         style={{ height: dynCellH, borderTop: "1px solid #ececec", cursor: "pointer", background: wBg }}
                         onPointerDown={e => onCellPointerDown(e, d, h)}
                         onPointerUp={onCellPointerUp} onPointerCancel={onCellPointerCancel} onPointerLeave={onCellPointerUp}>
-                        <div style={{ height: "50%", borderBottom: "1px dashed #e0e0e0" }} />
+                        {slotUnit === 15 ? (
+                          <>
+                            <div style={{ height: "25%", borderBottom: "1px dashed #ededed" }} />
+                            <div style={{ height: "25%", borderBottom: "1px dashed #e0e0e0" }} />
+                            <div style={{ height: "25%", borderBottom: "1px dashed #ededed" }} />
+                          </>
+                        ) : (
+                          <div style={{ height: "50%", borderBottom: "1px dashed #e0e0e0" }} />
+                        )}
                       </div>
                     );
                   })}
