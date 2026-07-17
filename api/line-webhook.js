@@ -20,10 +20,20 @@
 const crypto = require("crypto");
 const B = require("./_lib/booking.js");
 
-const VERSION = "LINE-v1";
+const VERSION = "LINE-v2";
 const SALON_NAME = process.env.SALON_NAME || "Amber";
 const PHONE_NOTE = process.env.SALON_PHONE ? `（TEL: ${process.env.SALON_PHONE}）` : "";
 const TIME_PAGE_SIZE = 12; // Quick Replyは最大13個。12件+「もっと見る」
+
+// 受付停止判定（settings.lineBookingEnabled）
+// アプリ保存(JSON文字列"false")・SQL直接投入(false/"false")のどちらでも判定できるようにする。
+// 未設定(undefined)は「受付中」扱い。
+function bookingDisabled(settings) {
+  const v = settings && settings.lineBookingEnabled;
+  return v === false || String(v).trim() === "false";
+}
+
+const PAUSED_MESSAGE = `申し訳ありません、ただいまLINEでのご予約受付を一時停止しております。\nお手数ですがお電話にてお問い合わせください${PHONE_NOTE}。`;
 
 // ---------- エントリポイント ----------
 module.exports = async (req, res) => {
@@ -188,6 +198,10 @@ async function handleEvent(event) {
 // Step 1: 空きのある日を最大4件提示＋カレンダーページへの本人専用リンク
 async function startFlow(replyToken, userId) {
   const settings = await B.getSettings();
+  // 受付停止スイッチ（アプリのLINE予約設定でOFFの場合）
+  if (bookingDisabled(settings)) {
+    return reply(replyToken, [text(PAUSED_MESSAGE)]);
+  }
   // 14日以内に本当に空きが無いかの概算チェック（メニュー選択前なので一律デフォルト時間で判定）
   const dates = await B.findAvailableDates(settings, B.DEFAULT_DURATION);
   if (dates.length === 0) {
@@ -319,6 +333,12 @@ async function confirmStep(replyToken, userId, dateStr, time) {
 async function finalize(replyToken, userId, dateStr, time) {
   if (!dateStr || !time) return startFlow(replyToken, userId);
   const settings = await B.getSettings();
+
+  // 受付停止スイッチ（操作の途中で停止された場合もここで確定を止める）
+  if (bookingDisabled(settings)) {
+    await B.clearSession(userId);
+    return reply(replyToken, [text(PAUSED_MESSAGE)]);
+  }
 
   // 原則③: 確定直前に空きを必ず再チェック
   const free = await B.isSlotFree(dateStr, time, settings);
