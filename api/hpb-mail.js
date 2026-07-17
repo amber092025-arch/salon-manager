@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════
-// /api/hpb-mail.js  (HPB-v1)
+// /api/hpb-mail.js  (HPB-v2)
 // HPB(サロンボード)予約通知メール取り込み: CloudMailin → 解析 → appointments INSERT → 通知
 //
 // 経路: HPB予約通知メール → メールの自動転送 → CloudMailin(JSON Normalized)
@@ -19,7 +19,7 @@
 //   SALON_PHONE        … 任意
 // ═══════════════════════════════════════════
 
-const VERSION = "HPB-v1";
+const VERSION = "HPB-v2";
 const HPB_COLOR = "#f25c05"; // ホットペッパーオレンジ(出所タグ原則④)
 const DEFAULT_DURATION = 120; // 施術時間目安が読めなかった場合の既定(分)
 
@@ -88,7 +88,12 @@ async function getRawBody(req) {
 
 // ---------- メイン処理 ----------
 async function handleMail(mail) {
-  const { subject, text } = mail;
+  const { subject } = mail;
+  // 転送メールの引用記号(行頭の「> 」)を除去してから解析する(手動転送でも解析できるように)
+  const text = String(mail.text || "")
+    .split("\n")
+    .map((l) => l.replace(/^(\s*>\s?)+/, ""))
+    .join("\n");
   const excerpt = (subject ? `件名: ${subject}\n` : "") + text.slice(0, 600);
 
   // キャンセル・変更メール(書式未確認) → 通知のみ・手動対応
