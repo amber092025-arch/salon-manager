@@ -93,7 +93,21 @@ function ErrorScreen({ title, sub, retry }) {
 function App() {
   const [phase, setPhase] = useState("loadingMenus"); // loadingMenus|menus|loadingGrid|grid|confirm|expired|error|done
   const [menus, setMenus] = useState([]);
+  const [menuImages, setMenuImages] = useState({}); // {menuId: dataURL} 後追いで届いた画像
   const [menu, setMenu] = useState(null);
+
+  // メニュー画像は一覧表示後にバックグラウンドで取得(失敗しても予約はできる)
+  const loadImages = () => {
+    fetch(`/api/booking-slots?t=${token}&images=1`)
+      .then(r => r.json())
+      .then(d => {
+        if (!d.ok || !d.images) return;
+        const map = {};
+        d.images.forEach(x => { map[x.id] = x.image; });
+        setMenuImages(map);
+      })
+      .catch(() => {});
+  };
   const [grid, setGrid] = useState(null);
   const [page, setPage] = useState(0);
   const [sel, setSel] = useState(null);
@@ -106,7 +120,7 @@ function App() {
     setPhase("loadingMenus");
     fetch(`/api/booking-slots?t=${token}`)
       .then(r => r.status === 401 ? Promise.reject("expired") : r.json())
-      .then(d => { if (!d.ok) throw "error"; setMenus(d.menus); setPhase("menus"); })
+      .then(d => { if (!d.ok) throw "error"; setMenus(d.menus); setPhase("menus"); loadImages(); })
       .catch(e => setPhase(e === "expired" ? "expired" : "error"));
   };
   useEffect(loadMenus, []);
@@ -151,31 +165,63 @@ function App() {
   if (phase === "expired") return <ErrorScreen title="このリンクの有効期限が切れました" sub="LINEのトーク画面に戻り、もう一度「予約」と送信してください。"/>;
   if (phase === "error") return <ErrorScreen title="読み込みに失敗しました" retry={loadMenus}/>;
 
-  /* ── ①メニュー選択 ── */
-  if (phase === "menus") return (
-    <div>
-      <Header step={0}/>
-      <div style={{maxWidth:420, margin:"8px auto", padding:"8px 14px 40px"}}>
-        {menus.length === 0 && <p style={{textAlign:"center", color:"var(--muted)", marginTop:40}}>ご予約可能なメニューがありません。お電話にてお問い合わせください。</p>}
-        {menus.map(m => (
-          <button key={m.id} onClick={()=>chooseMenu(m)} style={{
-            display:"flex", justifyContent:"space-between", alignItems:"center", width:"100%",
-            background:"var(--white)", border:"1px solid var(--border)", borderRadius:12,
-            padding:"16px 18px", marginBottom:10, textAlign:"left"
-          }}>
-            <span>
-              <div style={{fontWeight:700, fontSize:16}}>{m.name}</div>
-              <div style={{fontSize:12, color:"var(--muted)", marginTop:3}}>施術目安 {m.duration}分</div>
-            </span>
-            <span style={{display:"flex", alignItems:"center", gap:10}}>
-              <span className="serif" style={{fontSize:20, fontWeight:600}}>¥{m.price.toLocaleString()}</span>
-              <span style={{color:"var(--amber-deep)", fontSize:18}}>›</span>
-            </span>
-          </button>
-        ))}
+  /* ── ①メニュー選択(HPBスタイル: クーポン/メニュー2区分・バッジ・写真) ── */
+  if (phase === "menus") {
+    const coupons = menus.filter(m => m.kind === "coupon");
+    const normals = menus.filter(m => m.kind !== "coupon");
+    const Badge = ({ target }) => {
+      if (target !== "new" && target !== "repeat") return null;
+      return (
+        <span style={{display:"inline-block", background: target==="new" ? "var(--amber-deep)" : "#8a8278",
+          color:"#fff", fontSize:10, fontWeight:700, borderRadius:4, padding:"2px 7px", marginRight:6, verticalAlign:"middle", letterSpacing:"0.08em"}}>
+          {target === "new" ? "新規" : "再来"}
+        </span>
+      );
+    };
+    const Card = ({ m, cta }) => (
+      <div style={{background:"var(--white)", border:"1px solid var(--border)", borderRadius:12, padding:"14px 14px 12px", marginBottom:12}}>
+        <div style={{fontSize:15, fontWeight:700, lineHeight:1.5}}>
+          <Badge target={m.target}/>{m.name}
+        </div>
+        <div className="serif" style={{fontSize:22, fontWeight:600, color:"var(--amber-deep)", marginTop:4}}>
+          ¥{m.price.toLocaleString()}
+        </div>
+        <div style={{display:"flex", gap:12, alignItems:"center", marginTop:8}}>
+          {menuImages[m.id] ? (
+            <img src={menuImages[m.id]} alt="" style={{width:88, height:88, objectFit:"cover", borderRadius:10, border:"1px solid var(--border)", flexShrink:0}}/>
+          ) : null}
+          <div style={{flex:1}}>
+            <div style={{fontSize:12, color:"var(--muted)"}}>施術目安 {m.duration}分</div>
+            <button onClick={()=>chooseMenu(m)} style={{width:"100%", marginTop:8, padding:"11px 0", borderRadius:22,
+              background:"linear-gradient(135deg, #d3b58a, #a8865a)", color:"#fff", fontWeight:700, fontSize:13, letterSpacing:"0.04em"}}>
+              {cta} ›
+            </button>
+          </div>
+        </div>
       </div>
-    </div>
-  );
+    );
+    return (
+      <div>
+        <Header step={0}/>
+        <div style={{maxWidth:420, margin:"8px auto", padding:"8px 14px 40px"}}>
+          {menus.length === 0 && <p style={{textAlign:"center", color:"var(--muted)", marginTop:40}}>ご予約可能なメニューがありません。お電話にてお問い合わせください。</p>}
+          {menus.length > 0 && (
+            <div style={{fontSize:12, color:"var(--muted)", marginBottom:10, textAlign:"center"}}>
+              クーポン <b style={{color:"var(--ink)"}}>{coupons.length}</b>件　メニュー <b style={{color:"var(--ink)"}}>{normals.length}</b>件
+            </div>
+          )}
+          {coupons.length > 0 && (
+            <div style={{fontSize:13, fontWeight:700, background:"var(--closed)", borderRadius:8, padding:"7px 12px", marginBottom:10}}>クーポン</div>
+          )}
+          {coupons.map(m => <Card key={m.id} m={m} cta="このクーポンで予約"/>)}
+          {normals.length > 0 && (
+            <div style={{fontSize:13, fontWeight:700, background:"var(--closed)", borderRadius:8, padding:"7px 12px", margin:"6px 0 10px"}}>メニュー</div>
+          )}
+          {normals.map(m => <Card key={m.id} m={m} cta="このメニューで予約"/>)}
+        </div>
+      </div>
+    );
+  }
 
   /* ── ②日時選択 ── */
   if (phase === "grid") {
