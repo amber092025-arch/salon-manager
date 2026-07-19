@@ -40,18 +40,6 @@ const token = (() => {
 })();
 const STEPS = ["メニュー選択", "日時選択", "内容確認"];
 
-function Gem({ active }) {
-  return (
-    <span style={{
-      display:"inline-block", width:12, height:12, borderRadius:"50%",
-      background: active
-        ? "radial-gradient(circle at 35% 30%, #e6cfa4, #a8865a)"
-        : "radial-gradient(circle at 35% 30%, #ead9b8, #c8a97e)",
-      boxShadow: active ? "0 0 0 4px rgba(200,169,126,.28)" : "0 1px 2px rgba(61,56,51,.18)",
-    }}/>
-  );
-}
-
 /* ── ヘッダー：ワードマーク＋①②③ステップバー ── */
 function Header({ step }) {
   return (
@@ -91,10 +79,21 @@ function ErrorScreen({ title, sub, retry }) {
 }
 
 function App() {
-  const [phase, setPhase] = useState("loadingMenus"); // loadingMenus|menus|loadingGrid|grid|confirm|expired|error|done
+  const [phase, setPhase] = useState("loadingMenus"); // loadingMenus|menus|addons|loadingGrid|grid|confirm|expired|error|done
   const [menus, setMenus] = useState([]);
   const [menuImages, setMenuImages] = useState({}); // {menuId: dataURL} 後追いで届いた画像
-  const [menu, setMenu] = useState(null);
+  const [mainMenu, setMainMenu] = useState(null);   // メインで選んだクーポン/メニュー
+  const [addons, setAddons] = useState([]);         // 追加メニュー(複数)
+  const [grid, setGrid] = useState(null);           // 空き状況(選択合計時間で計算済み・合計金額入り)
+  const [page, setPage] = useState(0);
+  const [sel, setSel] = useState(null);
+  const [msg, setMsg] = useState("");
+  const [sending, setSending] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [done, setDone] = useState(null);
+
+  const selMenus = mainMenu ? [mainMenu, ...addons] : [];
+  const selIds = selMenus.map(m => m.id);
 
   // メニュー画像は一覧表示後にバックグラウンドで取得(失敗しても予約はできる)
   const loadImages = () => {
@@ -108,13 +107,6 @@ function App() {
       })
       .catch(() => {});
   };
-  const [grid, setGrid] = useState(null);
-  const [page, setPage] = useState(0);
-  const [sel, setSel] = useState(null);
-  const [msg, setMsg] = useState("");
-  const [sending, setSending] = useState(false);
-  const [notice, setNotice] = useState("");
-  const [done, setDone] = useState(null);
 
   const loadMenus = () => {
     setPhase("loadingMenus");
@@ -125,18 +117,24 @@ function App() {
   };
   useEffect(loadMenus, []);
 
-  const chooseMenu = (m) => {
-    setMenu(m); setSel(null); setPage(0); setNotice("");
+  // 選択したメニュー(メイン+追加)の合計時間で空き状況を取得
+  const loadGrid = (list) => {
+    setSel(null); setPage(0); setNotice("");
     setPhase("loadingGrid");
-    fetch(`/api/booking-slots?t=${token}&menuId=${m.id}`)
+    fetch(`/api/booking-slots?t=${token}&menuIds=${list.map(m=>m.id).join(",")}`)
       .then(r => r.status === 401 ? Promise.reject("expired") : r.json())
       .then(d => { if (!d.ok) throw "error"; setGrid(d); setPhase("grid"); })
       .catch(e => setPhase(e === "expired" ? "expired" : "error"));
   };
 
+  // メインだけで日時選択へ
+  const chooseDirect = (m) => { setMainMenu(m); setAddons([]); loadGrid([m]); };
+  // 追加メニュー選択ページへ
+  const goAddons = (m) => { setMainMenu(m); setAddons([]); setPhase("addons"); };
+
   const reloadGrid = () => {
-    if (!menu) return;
-    fetch(`/api/booking-slots?t=${token}&menuId=${menu.id}`)
+    if (selMenus.length === 0) return;
+    fetch(`/api/booking-slots?t=${token}&menuIds=${selIds.join(",")}`)
       .then(r => r.json()).then(d => { if (d.ok) setGrid(d); });
   };
 
@@ -146,13 +144,14 @@ function App() {
     fetch("/api/booking-confirm", {
       method:"POST",
       headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ t: token, date: sel.date, time: sel.time, message: msg, menuId: menu.id })
+      body: JSON.stringify({ t: token, date: sel.date, time: sel.time, message: msg, menuIds: selIds })
     })
     .then(r => r.json().then(d => ({ status:r.status, d })))
     .then(({status, d}) => {
       if (d.ok) { setDone(d); setPhase("done"); return; }
       if (status === 409) { setSel(null); setNotice("申し訳ありません、たった今その時間が埋まりました。空き状況を更新しました。"); setPhase("grid"); reloadGrid(); }
       else if (status === 401) { setPhase("expired"); }
+      else if (status === 403) { setNotice("申し訳ありません、ただいまご予約の受付を一時停止しております。お電話にてお問い合わせください。"); }
       else { setNotice("エラーが発生しました。もう一度お試しください。"); }
     })
     .catch(() => setNotice("通信エラーが発生しました。電波の良い場所でもう一度お試しください。"))
@@ -169,6 +168,7 @@ function App() {
   if (phase === "menus") {
     const coupons = menus.filter(m => m.kind === "coupon");
     const normals = menus.filter(m => m.kind !== "coupon");
+    const hasAddables = normals.length > 0;
     const Badge = ({ target }) => {
       if (target !== "new" && target !== "repeat") return null;
       return (
@@ -186,16 +186,22 @@ function App() {
         <div className="serif" style={{fontSize:22, fontWeight:600, color:"var(--amber-deep)", marginTop:4}}>
           ¥{m.price.toLocaleString()}
         </div>
-        <div style={{display:"flex", gap:12, alignItems:"center", marginTop:8}}>
+        <div style={{display:"flex", gap:12, alignItems:"flex-start", marginTop:8}}>
           {menuImages[m.id] ? (
             <img src={menuImages[m.id]} alt="" style={{width:88, height:88, objectFit:"cover", borderRadius:10, border:"1px solid var(--border)", flexShrink:0}}/>
           ) : null}
           <div style={{flex:1}}>
             <div style={{fontSize:12, color:"var(--muted)"}}>施術目安 {m.duration}分</div>
-            <button onClick={()=>chooseMenu(m)} style={{width:"100%", marginTop:8, padding:"11px 0", borderRadius:22,
+            <button onClick={()=>chooseDirect(m)} style={{width:"100%", marginTop:8, padding:"11px 0", borderRadius:22,
               background:"linear-gradient(135deg, #d3b58a, #a8865a)", color:"#fff", fontWeight:700, fontSize:13, letterSpacing:"0.04em"}}>
               {cta} ›
             </button>
+            {hasAddables && (
+              <button onClick={()=>goAddons(m)} style={{width:"100%", marginTop:8, padding:"10px 0", borderRadius:22,
+                background:"var(--white)", border:"1.5px solid var(--amber-deep)", color:"var(--amber-deep)", fontWeight:700, fontSize:13}}>
+                ＋メニューを追加して予約
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -223,7 +229,73 @@ function App() {
     );
   }
 
-  /* ── ②日時選択 ── */
+  /* ── ①-2 追加メニュー選択(HPBスタイル: カテゴリ別チェックリスト・複数選択可) ── */
+  if (phase === "addons") {
+    const candidates = menus.filter(m => m.kind !== "coupon" && m.id !== mainMenu.id);
+    const cats = [...new Set(candidates.map(m => m.category || "その他"))];
+    const toggle = (m) => {
+      setAddons(p => p.find(x => x.id === m.id) ? p.filter(x => x.id !== m.id) : [...p, m]);
+    };
+    const sumPrice = selMenus.reduce((s,m)=>s+(m.price||0),0);
+    const sumDur = selMenus.reduce((s,m)=>s+(m.duration||0),0);
+    return (
+      <div style={{paddingBottom:170}}>
+        <Header step={0}/>
+        <div style={{maxWidth:420, margin:"0 auto", padding:"0 14px"}}>
+          <button onClick={()=>{setPhase("menus"); setAddons([]);}} style={{padding:"6px 0", color:"var(--amber-deep)", fontSize:12, fontWeight:700}}>‹ メニュー一覧へ戻る</button>
+
+          <div style={{background:"var(--white)", border:"1px solid var(--border)", borderRadius:12, padding:"12px 14px", marginBottom:14}}>
+            <div style={{fontSize:11, color:"var(--muted)", fontWeight:700, marginBottom:4}}>選択済クーポン・メニュー</div>
+            <div style={{fontSize:14, fontWeight:700}}>{mainMenu.name}</div>
+            <div className="serif" style={{fontSize:18, fontWeight:600, color:"var(--amber-deep)"}}>¥{mainMenu.price.toLocaleString()}</div>
+          </div>
+
+          <div style={{borderLeft:"3px solid var(--amber-deep)", paddingLeft:10, fontSize:14, fontWeight:700, marginBottom:4}}>追加メニューを選択してください</div>
+          <div style={{fontSize:11, color:"var(--muted)", marginBottom:12}}>※施術時間は目安です　※価格は税込表示です　※複数選択できます</div>
+
+          <div style={{background:"var(--white)", border:"1px solid var(--border)", borderRadius:12, overflow:"hidden"}}>
+            {cats.map(cat => (
+              <div key={cat}>
+                <div style={{background:"var(--closed)", fontSize:13, fontWeight:700, padding:"7px 14px"}}>{cat}</div>
+                {candidates.filter(m => (m.category || "その他") === cat).map(m => {
+                  const on = !!addons.find(x => x.id === m.id);
+                  return (
+                    <button key={m.id} onClick={()=>toggle(m)} style={{display:"flex", alignItems:"center", gap:10, width:"100%",
+                      textAlign:"left", padding:"12px 14px", borderTop:"1px solid var(--border)", background: on ? "#faf4e8" : "var(--white)"}}>
+                      <span style={{width:20, height:20, borderRadius:5, flexShrink:0, border: on ? "none" : "1.5px solid var(--border)",
+                        background: on ? "var(--amber-deep)" : "var(--white)", display:"flex", alignItems:"center", justifyContent:"center",
+                        color:"#fff", fontSize:13, fontWeight:700}}>{on ? "✓" : ""}</span>
+                      <span style={{flex:1, fontSize:13, lineHeight:1.5}}>{m.name}</span>
+                      <span style={{textAlign:"right", flexShrink:0}}>
+                        <div style={{fontSize:13, fontWeight:700}}>¥{m.price.toLocaleString()}</div>
+                        <div style={{fontSize:11, color:"var(--muted)"}}>{m.duration}分</div>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+            {candidates.length === 0 && <p style={{padding:"16px", fontSize:13, color:"var(--muted)"}}>追加できるメニューがありません。</p>}
+          </div>
+        </div>
+
+        <div style={{position:"fixed", left:0, right:0, bottom:0, background:"var(--white)", borderTop:"1px solid var(--border)", borderRadius:"18px 18px 0 0",
+          boxShadow:"0 -10px 30px rgba(61,56,51,.14)", padding:"14px 18px calc(14px + env(safe-area-inset-bottom))"}}>
+          <div style={{display:"flex", justifyContent:"center", alignItems:"baseline", gap:10}}>
+            <span style={{fontSize:12, color:"var(--muted)"}}>追加 {addons.length}件</span>
+            <span className="serif" style={{fontSize:24, fontWeight:600}}>合計 ¥{sumPrice.toLocaleString()}</span>
+            <span style={{fontSize:12, color:"var(--muted)"}}>約{sumDur}分</span>
+          </div>
+          <button onClick={()=>loadGrid(selMenus)} style={{width:"100%", marginTop:10, padding:"14px", borderRadius:26,
+            background:"linear-gradient(135deg, #d3b58a, #a8865a)", color:"#fff", fontWeight:700, fontSize:15, letterSpacing:"0.06em"}}>
+            この内容で日時選択へ ›
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── ②日時選択(選択内容と合計を表示・◎/×/休業日表記) ── */
   if (phase === "grid") {
     const days = grid.days.slice(page*7, page*7+7);
     const range = `${days[0].date.slice(5).replace("-","/")} 〜 ${days[days.length-1].date.slice(5).replace("-","/")}`;
@@ -231,9 +303,20 @@ function App() {
       <div style={{paddingBottom: sel ? 200 : 40}}>
         <Header step={1}/>
         <div style={{maxWidth:420, margin:"0 auto"}}>
-          <button onClick={()=>{setPhase("menus"); setSel(null);}} style={{padding:"6px 14px 0", color:"var(--amber-deep)", fontSize:12, fontWeight:700}}>‹ メニューを選び直す</button>
-          <div style={{textAlign:"center", padding:"6px 14px 8px", fontSize:13, color:"var(--muted)"}}>
-            {menu.name}（{menu.duration}分・¥{menu.price.toLocaleString()}）
+          <button onClick={()=>{setPhase("menus"); setSel(null); setAddons([]);}} style={{padding:"6px 14px 0", color:"var(--amber-deep)", fontSize:12, fontWeight:700}}>‹ メニューを選び直す</button>
+
+          <div style={{margin:"6px 14px 10px", background:"var(--white)", border:"1px solid var(--border)", borderRadius:12, padding:"10px 14px"}}>
+            <div style={{fontSize:11, color:"var(--muted)", fontWeight:700, marginBottom:2}}>選択中のメニュー</div>
+            {(grid.menus || selMenus).map(m => (
+              <div key={m.id} style={{display:"flex", justifyContent:"space-between", fontSize:12, padding:"2px 0"}}>
+                <span style={{flex:1, paddingRight:8}}>{m.name}</span>
+                <span style={{flexShrink:0}}>¥{m.price.toLocaleString()}</span>
+              </div>
+            ))}
+            <div style={{display:"flex", justifyContent:"space-between", borderTop:"1px solid var(--border)", marginTop:6, paddingTop:6, fontWeight:700, fontSize:13}}>
+              <span>合計（約{grid.duration}分）</span>
+              <span className="serif" style={{fontSize:17}}>¥{(grid.totalPrice||0).toLocaleString()}</span>
+            </div>
           </div>
 
           <div style={{display:"flex", alignItems:"center", justifyContent:"center", gap:14, padding:"4px 0 10px"}}>
@@ -260,20 +343,32 @@ function App() {
                 ))}
               </tr></thead>
               <tbody>
-                {grid.rows.map(t => (
+                {grid.rows.map((t, ti) => (
                   <tr key={t}>
                     <td style={{fontSize:10, color:"var(--muted)", textAlign:"right", padding:"0 5px 0 0", borderTop:"1px solid var(--border)", height:34, fontWeight: t.endsWith(":00") ? 700 : 400}}>{t}</td>
                     {days.map(d => {
-                      const ok = !d.holiday && d.avail.includes(t);
+                      if (d.holiday) {
+                        if (ti === 0) return (
+                          <td key={d.date} rowSpan={grid.rows.length}
+                            style={{borderTop:"1px solid var(--border)", borderLeft:"1px solid var(--border)", background:"var(--closed)", textAlign:"center", verticalAlign:"middle"}}>
+                            <span style={{writingMode:"vertical-rl", fontSize:11, color:"var(--muted)", letterSpacing:"0.35em", fontWeight:700}}>休業日</span>
+                          </td>
+                        );
+                        return null;
+                      }
+                      const ok = d.avail.includes(t);
                       const isSel = sel && sel.date===d.date && sel.time===t;
                       return (
                         <td key={d.date+t} style={{borderTop:"1px solid var(--border)", borderLeft:"1px solid var(--border)", textAlign:"center", height:34,
-                          background: d.holiday ? "var(--closed)" : ok ? (isSel ? "#f6eddd" : "var(--white)") : "var(--closed)"}}>
-                          {ok && (
+                          background: isSel ? "#f6eddd" : "var(--white)"}}>
+                          {ok ? (
                             <button aria-label={`${d.date} ${t}を選択`} onClick={()=>{setSel({date:d.date, time:t, label:`${Number(d.date.slice(5,7))}/${Number(d.date.slice(8))}`, w:d.w}); setNotice("");}}
-                              style={{width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center"}}>
-                              <Gem active={isSel}/>
+                              style={{width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center",
+                                color: isSel ? "var(--amber-deep)" : "#c0392b", fontSize:15, fontWeight:700}}>
+                              ◎
                             </button>
+                          ) : (
+                            <span style={{color:"#c8c2b8", fontSize:12}}>×</span>
                           )}
                         </td>
                       );
@@ -283,7 +378,9 @@ function App() {
               </tbody>
             </table>
           </div>
-          <p style={{textAlign:"center", fontSize:11, color:"var(--muted)", marginTop:10}}><Gem/> <span style={{marginLeft:4}}>が空きのあるお時間です</span></p>
+          <p style={{textAlign:"center", fontSize:11, color:"var(--muted)", marginTop:10}}>
+            <span style={{color:"#c0392b", fontWeight:700}}>◎</span>＝ご予約いただけます　<span style={{color:"#c8c2b8"}}>×</span>＝ご予約いただけません
+          </p>
         </div>
 
         {sel && (
@@ -304,7 +401,7 @@ function App() {
     );
   }
 
-  /* ── ③内容確認 ── */
+  /* ── ③内容確認(全メニュー・合計金額・合計時間) ── */
   if (phase === "confirm") return (
     <div>
       <Header step={2}/>
@@ -312,17 +409,29 @@ function App() {
         <button onClick={()=>setPhase("grid")} style={{color:"var(--amber-deep)", fontSize:12, fontWeight:700, marginBottom:12}}>‹ 日時を選び直す</button>
 
         <div style={{background:"var(--white)", border:"1px solid var(--border)", borderRadius:12, overflow:"hidden"}}>
-          {[
-            ["予約日時", `${sel.label}(${sel.w}) ${sel.time}〜`],
-            ["メニュー", menu.name],
-            ["料金", `¥${menu.price.toLocaleString()}`],
-            ["施術予測時間", `${menu.duration}分`],
-          ].map(([k,v],i) => (
-            <div key={k} style={{display:"flex", padding:"13px 16px", borderTop: i===0?"none":"1px solid var(--border)"}}>
-              <span style={{width:110, color:"var(--muted)", fontSize:13}}>{k}</span>
-              <span style={{fontWeight:700, fontSize:14}}>{v}</span>
-            </div>
-          ))}
+          <div style={{display:"flex", padding:"13px 16px"}}>
+            <span style={{width:110, color:"var(--muted)", fontSize:13, flexShrink:0}}>予約日時</span>
+            <span style={{fontWeight:700, fontSize:14}}>{sel.label}({sel.w}) {sel.time}〜</span>
+          </div>
+          <div style={{display:"flex", padding:"13px 16px", borderTop:"1px solid var(--border)"}}>
+            <span style={{width:110, color:"var(--muted)", fontSize:13, flexShrink:0}}>メニュー</span>
+            <span style={{flex:1}}>
+              {(grid.menus || selMenus).map(m => (
+                <div key={m.id} style={{display:"flex", justifyContent:"space-between", fontSize:13, fontWeight:700, padding:"1px 0"}}>
+                  <span style={{flex:1, paddingRight:8}}>{m.name}</span>
+                  <span style={{flexShrink:0, fontWeight:400}}>¥{m.price.toLocaleString()}</span>
+                </div>
+              ))}
+            </span>
+          </div>
+          <div style={{display:"flex", padding:"13px 16px", borderTop:"1px solid var(--border)"}}>
+            <span style={{width:110, color:"var(--muted)", fontSize:13, flexShrink:0}}>合計料金</span>
+            <span style={{fontWeight:700, fontSize:14}}>¥{(grid.totalPrice||0).toLocaleString()}</span>
+          </div>
+          <div style={{display:"flex", padding:"13px 16px", borderTop:"1px solid var(--border)"}}>
+            <span style={{width:110, color:"var(--muted)", fontSize:13, flexShrink:0}}>施術予測時間</span>
+            <span style={{fontWeight:700, fontSize:14}}>約{grid.duration}分</span>
+          </div>
         </div>
 
         <div style={{marginTop:16, fontSize:12, fontWeight:700, marginBottom:6}}>一言メッセージ（任意）</div>
@@ -353,7 +462,10 @@ function App() {
           <div style={{width:34, height:1, background:"var(--amber)", margin:"14px auto"}}/>
           <div className="serif" style={{fontSize:32, fontWeight:600, lineHeight:1.3}}>{done.dateLabel}</div>
           <div className="serif" style={{fontSize:28, fontWeight:500}}>{done.time}〜</div>
-          <div style={{fontSize:13, color:"var(--muted)", marginTop:10}}>{done.menu.name}（¥{done.menu.price.toLocaleString()}）</div>
+          <div style={{fontSize:13, color:"var(--muted)", marginTop:10}}>
+            {(done.menus || []).map(m => <div key={m.id}>{m.name}</div>)}
+            <div style={{marginTop:4, fontWeight:700, color:"var(--ink)"}}>合計 ¥{(done.totalPrice||0).toLocaleString()}（約{done.totalDuration}分）</div>
+          </div>
           <p style={{fontSize:12, color:"var(--muted)", marginTop:16}}>LINEにも確認メッセージをお送りしました。<br/>変更・キャンセルはお電話にてお願いいたします。</p>
         </div>
         <p style={{textAlign:"center", fontSize:12, color:"var(--muted)", marginTop:18}}>この画面は閉じていただいて構いません。</p>
