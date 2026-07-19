@@ -1,9 +1,10 @@
 // ═══════════════════════════════════════════
-// /api/booking-slots.js  (LINE-v2)
+// /api/booking-slots.js  (LINE-v3)
 // カレンダー予約ページ用:
-//   ?t={webToken}                → メニュー一覧のみ返す（①メニュー選択用・画像なしで軽量）
-//   ?t={webToken}&images=1      → メニュー画像だけ返す（ページ表示後に後追い取得・失敗しても予約は可能）
-//   ?t={webToken}&menuId={id}    → 選択メニューのdurationで14日分の空き状況を返す（②日時選択用）
+//   ?t={webToken}                  → メニュー一覧のみ返す（①メニュー選択用・画像なしで軽量）
+//   ?t={webToken}&images=1        → メニュー画像だけ返す（後追い取得・失敗しても予約は可能）
+//   ?t={webToken}&menuIds=1,2,3    → 選択メニュー合計のdurationで14日分の空き状況を返す（複数メニュー対応）
+//   ?t={webToken}&menuId={id}      → 旧形式(単数)。menuIdsと同じ扱い
 // ═══════════════════════════════════════════
 
 const B = require("./_lib/booking.js");
@@ -24,9 +25,9 @@ module.exports = async (req, res) => {
     }
 
     const menus = await B.getMenus();
-    const menuId = req.query && req.query.menuId ? Number(req.query.menuId) : null;
+    const idsParam = (req.query && (req.query.menuIds || req.query.menuId)) || null;
 
-    if (!menuId) {
+    if (!idsParam) {
       // ①メニュー選択ステップ: メニュー一覧のみ返す（グリッド計算はしない・軽量）
       return res.status(200).json({
         ok: true,
@@ -35,16 +36,23 @@ module.exports = async (req, res) => {
       });
     }
 
-    const menu = menus.find((m) => m.id === menuId);
-    if (!menu) return res.status(400).json({ ok: false, error: "bad_menu" });
+    const ids = String(idsParam).split(",").map(Number).filter(Boolean);
+    const selected = ids.map((id) => menus.find((m) => m.id === id)).filter(Boolean);
+    if (selected.length === 0 || selected.length !== ids.length) {
+      return res.status(400).json({ ok: false, error: "bad_menu" });
+    }
+
+    const totalDuration = selected.reduce((s, m) => s + m.duration, 0);
+    const totalPrice = selected.reduce((s, m) => s + (m.price || 0), 0);
 
     const settings = await B.getSettings();
-    const grid = await B.buildGrid(settings, menu.duration);
+    const grid = await B.buildGrid(settings, totalDuration);
     return res.status(200).json({
       ok: true,
       salonName: process.env.SALON_NAME || "Amber",
-      menu,
-      ...grid,
+      menus: selected,
+      totalPrice,
+      ...grid, // rows / days / slotUnit / duration(=合計時間)
     });
   } catch (e) {
     console.error("booking-slots error:", e);
