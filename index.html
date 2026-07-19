@@ -108,7 +108,7 @@ const toDb = {
 };
 const fromDb = {
   customer: (r) => ({ id:r.id, name:r.name, kana:r.kana||"", phone:r.phone||"", birthday:r.birthday||"", gender:r.gender||"female", notes:r.notes||"", joinDate:r.join_date||"" }),
-  menu: (r) => ({ id:r.id, name:r.name, price:r.price||0, category:r.category||"", duration:r.duration||60, showTilde:r.show_tilde||false, tags:r.tags||[], sortOrder:r.sort_order||0 }),
+  menu: (r) => ({ id:r.id, name:r.name, price:r.price||0, category:r.category||"", duration:r.duration||60, showTilde:r.show_tilde||false, tags:r.tags||[], sortOrder:r.sort_order||0, menuKind:r.menu_kind||"menu", targetCustomer:r.target_customer||"all", isBookable:r.is_bookable!==false }),
   product: (r) => ({ id:r.id, name:r.name, price:r.price||0, cost:r.cost||0, stock:r.stock||0, minStock:r.min_stock||3, category:r.category||"", subCategory:r.sub_category||"", placeholder:r.placeholder||false, photos:r.photos||[], description:r.description||"", isPublic:r.is_public||false, sortOrder:r.sort_order||0 }),
   visit: (r) => { var pd={}; try{pd=r.photo_data?JSON.parse(r.photo_data):{};}catch(e){} return { id:r.id, customerId:r.customer_id, date:r.date, time:r.time||"", menus:r.menus||[], products:r.products||[], drugCost:r.drug_cost||0, paymentMethod:r.payment_method||"cash", total:r.total||0, notes:r.notes||"", images:r.images||[], beforeImgs:pd.before||[], afterImgs:pd.after||[], otherImgs:pd.other||[], customerType:r.customer_type||"existing", hpbPoint:r.hpb_point||0, paid:r.paid||false, duration:r.duration||60, appointmentId:r.appointment_id||null, tags:r.tags||[], styleName:r.style_name||"", styleComment:r.style_comment||"", isPublic:r.is_public||false, paidAt:r.paid_at||null }; },
   appointment: (r) => ({ id:r.id, customerId:r.customer_id, date:r.date, time:r.time||"", endTime:r.end_time||"", duration:r.duration||60, menuIds:r.menu_ids||[], notes:r.notes||"", color:r.color||"#00b4a6", paid:r.paid||false, shimeika:r.shimeika||"shimeika", customerType:r.customer_type||"existing" }),
@@ -386,7 +386,7 @@ function App() {
       // ② 残りのデータを並列取得（各クエリ最大3回リトライ。visitsは写真カラム除外の軽量版）
       const [c, m, p, v, a, tc, ti] = await Promise.all([
         sbRetry(() => sb.from("customers").select().order("name")),
-        sbRetry(() => sb.from("menus").select().order("sort_order")),
+        sbRetry(() => sb.from("menus").select("id,name,price,duration,category,tags,show_tilde,sort_order,menu_kind,target_customer,is_bookable").order("sort_order")),
         sbRetry(() => sb.from("products").select("id,name,price,cost,stock,min_stock,category,sub_category,placeholder,description,is_public,sort_order").order("sort_order")),
         sbRetry(() => sb.from("visits").select(VISIT_LIGHT_COLS).order("date", {ascending:false})),
         sbRetry(() => sb.from("appointments").select().order("date")),
@@ -3690,7 +3690,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.17-c"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.18-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -6219,6 +6219,21 @@ function SettingsTab({ menus, setMenus, products, setProducts, notify, setTab })
   const [editCatName, setEditCatName] = useState("");
   const [deleteCatMode, setDeleteCatMode] = useState(false); // カテゴリ削除モード
   const [deleteMenuMode, setDeleteMenuMode] = useState(false); // メニュー削除モード
+  const [imgLoaded, setImgLoaded] = useState(true); // 編集中メニューの画像読込完了フラグ(未完了時は画像の保存を封鎖)
+  const menuImgRef = useRef();
+  const compressMenuImg = (url, cb) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      const MAX = 800;
+      let w = img.width, h = img.height;
+      if (w > MAX || h > MAX) { if (w > h) { h = h * MAX / w; w = MAX; } else { w = w * MAX / h; h = MAX; } }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      cb(canvas.toDataURL("image/jpeg", 0.6));
+    };
+    img.src = url;
+  };
 
   const categories = [...new Set(menus.map(m => m.category))];
   const catMenus = selCategory ? menus.filter(m => m.category === selCategory).sort((a,b)=>(a.sortOrder||0)-(b.sortOrder||0)) : [];
@@ -6266,25 +6281,40 @@ function SettingsTab({ menus, setMenus, products, setProducts, notify, setTab })
 
   const openNewMenu = () => {
     const cat = selCategory || "";
-    setEForm({ name: "", price: "", duration: 60, showTilde: false, category: cat, tags: autoTagsFromCategory(cat) });
+    setEForm({ name: "", price: "", duration: 60, showTilde: false, category: cat, tags: autoTagsFromCategory(cat), menuKind: "menu", targetCustomer: "all", isBookable: true, image: null });
+    setImgLoaded(true); // 新規メニューは守るべき既存画像が無い
     setEditMenu(null); setScreen("edit");
   };
   const openEditMenu = (m) => {
-    setEForm({ name: m.name, price: m.price, duration: m.duration || 60, showTilde: m.showTilde || false, category: m.category, tags: m.tags && m.tags.length > 0 ? m.tags : autoTagsFromCategory(m.category) });
+    setEForm({ name: m.name, price: m.price, duration: m.duration || 60, showTilde: m.showTilde || false, category: m.category, tags: m.tags && m.tags.length > 0 ? m.tags : autoTagsFromCategory(m.category), menuKind: m.menuKind || "menu", targetCustomer: m.targetCustomer || "all", isBookable: m.isBookable !== false, image: null });
+    setImgLoaded(false);
     setEditMenu(m); setScreen("edit");
+    // 画像はこの1件だけ単発取得(起動時の一括読込はしない・カルテ写真と同じ方針)
+    (async () => {
+      const r = await sbRetry(() => sb.from("menus").select("id,image").eq("id", m.id));
+      if (!r.error && r.data && r.data[0]) {
+        setEForm(p => ({ ...p, image: r.data[0].image || null }));
+        setImgLoaded(true);
+      }
+    })();
   };
   const saveMenu = async () => {
     if (!eForm.name) return notify("メニュー名を入力してください", "error");
     const finalTags = eForm.tags && eForm.tags.length > 0 ? eForm.tags : [eForm.category].filter(Boolean);
     const menuData = { ...eForm, tags: finalTags, price: parseInt(eForm.price)||0, duration: parseInt(eForm.duration)||30 };
+    const dbFields = { name: menuData.name, price: menuData.price, duration: menuData.duration, category: menuData.category, tags: menuData.tags, menu_kind: menuData.menuKind || "menu", target_customer: menuData.targetCustomer || "all", is_bookable: menuData.isBookable !== false };
+    // 画像は読込完了が確認できた場合のみ書き込む(未読込のまま保存して既存画像を消さないための安全弁)
+    if (imgLoaded) dbFields.image = menuData.image || null;
     if (editMenu) {
-      await sb.from("menus").update({ name: menuData.name, price: menuData.price, duration: menuData.duration, category: menuData.category, tags: menuData.tags }).eq("id", editMenu.id);
-      setMenus(p => p.map(m => m.id === editMenu.id ? { ...m, ...menuData } : m));
+      await sb.from("menus").update(dbFields).eq("id", editMenu.id);
+      const { image, ...stateData } = menuData; // stateには画像を持たせない(軽量維持)
+      setMenus(p => p.map(m => m.id === editMenu.id ? { ...m, ...stateData } : m));
       notify("更新しました ✓");
     } else {
-      const { data, error } = await sb.from("menus").insert([{ name: menuData.name, price: menuData.price, duration: menuData.duration, category: menuData.category, tags: menuData.tags }]).select();
-      if (!error && data && data[0]) setMenus(p => [...p, { ...menuData, id: data[0].id }]);
-      else setMenus(p => [...p, { ...menuData, id: Date.now() }]);
+      const { data, error } = await sb.from("menus").insert([dbFields]).select("id");
+      const { image, ...stateData } = menuData;
+      if (!error && data && data[0]) setMenus(p => [...p, { ...stateData, id: data[0].id }]);
+      else setMenus(p => [...p, { ...stateData, id: Date.now() }]);
       notify("追加しました ✓");
     }
     setScreen("category");
@@ -6466,6 +6496,65 @@ function SettingsTab({ menus, setMenus, products, setProducts, notify, setTab })
             style={{ border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 12px",fontSize:14,color:C.text }}>
             {[15,30,45,60,90,120,150,180,210,240].map(d => <option key={d} value={d}>{d} 分</option>)}
           </select>
+        </div>
+        {/* ── LINE予約ページ用設定(HPBスタイル) ── */}
+        <div style={{ padding:"12px 16px 4px",fontSize:12,fontWeight:700,color:"#06955f",borderBottom:`1px solid ${C.border}`,background:"#f4faf6" }}>LINE予約ページの設定</div>
+        <div style={{ display:"flex",alignItems:"center",padding:"14px 16px",borderBottom:`1px solid ${C.border}` }}>
+          <span style={{ fontSize:14,color:C.sub,width:90,flexShrink:0 }}>区分：</span>
+          <select value={eForm.menuKind||"menu"} onChange={e => setEForm(p=>({...p,menuKind:e.target.value}))}
+            style={{ flex:1,border:"none",fontSize:15,outline:"none",color:C.text,background:"transparent" }}>
+            <option value="coupon">クーポン（メイン選択のみ）</option>
+            <option value="menu">メニュー（追加メニューにも使える）</option>
+          </select>
+        </div>
+        <div style={{ display:"flex",alignItems:"center",padding:"14px 16px",borderBottom:`1px solid ${C.border}` }}>
+          <span style={{ fontSize:14,color:C.sub,width:90,flexShrink:0 }}>対象：</span>
+          <select value={eForm.targetCustomer||"all"} onChange={e => setEForm(p=>({...p,targetCustomer:e.target.value}))}
+            style={{ flex:1,border:"none",fontSize:15,outline:"none",color:C.text,background:"transparent" }}>
+            <option value="all">全員</option>
+            <option value="new">新規のみ（「新規」バッジ表示）</option>
+            <option value="repeat">再来のみ（「再来」バッジ表示）</option>
+          </select>
+        </div>
+        <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 16px",borderBottom:`1px solid ${C.border}` }}>
+          <span style={{ fontSize:14,color:C.sub }}>予約ページに表示：</span>
+          <div onClick={() => setEForm(p=>({...p,isBookable:!(p.isBookable!==false)}))}
+            style={{ width:48,height:28,borderRadius:14,background:(eForm.isBookable!==false)?"#06c755":"#ccc",position:"relative",cursor:"pointer",transition:"background 0.2s" }}>
+            <div style={{ position:"absolute",top:2,left:(eForm.isBookable!==false)?22:2,width:24,height:24,borderRadius:"50%",background:"#fff",transition:"left 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)" }} />
+          </div>
+        </div>
+        <div style={{ padding:"14px 16px",borderBottom:`1px solid ${C.border}` }}>
+          <div style={{ fontSize:14,color:C.sub,marginBottom:10 }}>メニュー写真（予約ページに表示）</div>
+          {!imgLoaded ? (
+            <div style={{ fontSize:12,color:C.sub }}>写真を読み込み中…（完了するまで写真の変更はできません）</div>
+          ) : (
+            <div style={{ display:"flex",alignItems:"center",gap:12 }}>
+              {eForm.image ? (
+                <img src={eForm.image} alt="" style={{ width:96,height:96,objectFit:"cover",borderRadius:10,border:`1px solid ${C.border}` }} />
+              ) : (
+                <div style={{ width:96,height:96,borderRadius:10,border:`1px dashed ${C.border}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:C.sub }}>写真なし</div>
+              )}
+              <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                <button onClick={() => menuImgRef.current && menuImgRef.current.click()}
+                  style={{ padding:"8px 16px",borderRadius:8,border:`1px solid #06c755`,background:"#fff",color:"#06955f",fontWeight:700,fontSize:13,cursor:"pointer" }}>
+                  {eForm.image ? "写真を変更" : "写真を追加"}
+                </button>
+                {eForm.image && (
+                  <button onClick={() => setEForm(p=>({...p,image:null}))}
+                    style={{ padding:"8px 16px",borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:C.sub,fontSize:13,cursor:"pointer" }}>削除</button>
+                )}
+              </div>
+              <input ref={menuImgRef} type="file" accept="image/*" style={{ display:"none" }}
+                onChange={e => {
+                  const f = e.target.files && e.target.files[0];
+                  if (!f) return;
+                  const reader = new FileReader();
+                  reader.onload = ev => compressMenuImg(ev.target.result, compressed => setEForm(p=>({...p,image:compressed})));
+                  reader.readAsDataURL(f);
+                  e.target.value = "";
+                }} />
+            </div>
+          )}
         </div>
         {/* Tags section */}
         <div style={{ padding:"14px 16px" }}>
