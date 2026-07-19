@@ -29,9 +29,12 @@ module.exports = async (req, res) => {
 
     if (!idsParam) {
       // ①メニュー選択ステップ: メニュー一覧のみ返す（グリッド計算はしない・軽量）
+      // known: このLINEアカウントが既にカルテ連携済みか(未連携の人にだけ確認画面で電話番号を聞く)
+      const known = await B.isKnownUser(session.line_user_id);
       return res.status(200).json({
         ok: true,
         salonName: process.env.SALON_NAME || "Amber",
+        known,
         menus,
       });
     }

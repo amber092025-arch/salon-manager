@@ -12,7 +12,7 @@ module.exports = async (req, res) => {
   if (req.method !== "POST") return res.status(405).end();
   try {
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
-    const { t, date, time, message, menuId, menuIds } = body;
+    const { t, date, time, message, menuId, menuIds, phone } = body;
 
     const session = await B.findSessionByToken(t);
     if (!session) return res.status(401).json({ ok: false, error: "expired" });
@@ -45,7 +45,7 @@ module.exports = async (req, res) => {
     if (!free) return res.status(409).json({ ok: false, error: "taken" });
 
     const profile = await L.getProfile(userId);
-    const { customer, isNew } = await B.findOrCreateCustomer(userId, profile.displayName);
+    const { customer, isNew, linked } = await B.findOrCreateCustomer(userId, profile.displayName, phone);
     await B.createBooking({
       customerId: customer.id,
       dateStr: date,
@@ -70,7 +70,7 @@ module.exports = async (req, res) => {
 
     // オーナー通知（LINE push＋メール）
     await L.notifyOwner(
-      `🔔 [LINE-v3] カレンダー予約が入りました\n\n📅 ${B.formatDateJP(date)} ${time}〜\nメニュー:\n・${menuNames}\n合計: ¥${totalPrice.toLocaleString()}・約${totalDuration}分\n👤 ${profile.displayName}${isNew ? "（新規・空カルテ自動作成）" : ""}${message ? `\n💬 ${String(message).slice(0, 200)}` : ""}\n\n★サロンボード（HPB）側の同時間帯を手動でブロックしてください`
+      `🔔 [LINE-v3] カレンダー予約が入りました\n\n📅 ${B.formatDateJP(date)} ${time}〜\nメニュー:\n・${menuNames}\n合計: ¥${totalPrice.toLocaleString()}・約${totalDuration}分\n👤 ${profile.displayName}${isNew ? "（新規・空カルテ自動作成）" : linked ? `（既存カルテ「${customer.name}」様と電話番号で自動連携しました）` : ""}${message ? `\n💬 ${String(message).slice(0, 200)}` : ""}\n\n★サロンボード（HPB）側の同時間帯を手動でブロックしてください`
     );
 
     return res.status(200).json({
