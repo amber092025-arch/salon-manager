@@ -186,24 +186,50 @@ async function isSlotFree(dateStr, time, settings, duration) {
 }
 
 // ---------- 顧客の検索/作成 ----------
-async function findOrCreateCustomer(userId, displayName) {
+// このLINEアカウントが既にカルテと連携済みか(予約ページで電話番号入力を出すかの判定用)
+async function isKnownUser(userId) {
+  const found = await sbFetch(
+    `customers?line_user_id=eq.${encodeURIComponent(userId)}&select=id`
+  );
+  return !!(found && found.length > 0);
+}
+
+async function findOrCreateCustomer(userId, displayName, phone) {
   const found = await sbFetch(
     `customers?line_user_id=eq.${encodeURIComponent(userId)}&select=id,name`
   );
-  if (found && found.length > 0) return { customer: found[0], isNew: false };
+  if (found && found.length > 0) return { customer: found[0], isNew: false, linked: false };
+
+  // 電話番号で既存カルテを照合(ハイフン・空白の揺れを吸収して数字だけで比較)
+  const normPhone = String(phone || "").replace(/[^0-9]/g, "");
+  if (normPhone.length >= 10) {
+    const rows = await sbFetch("customers?select=id,name,phone,line_user_id&phone=not.is.null");
+    const hits = (rows || []).filter(
+      (c) => String(c.phone || "").replace(/[^0-9]/g, "") === normPhone
+    );
+    // ちょうど1件一致、かつそのカルテが他のLINEアカウントと未連携の場合のみ自動連携する(誤連携防止)
+    if (hits.length === 1 && !hits[0].line_user_id) {
+      // 【INSERT原則の唯一の例外】空欄のline_user_idに1列だけ書き込み、以降このLINEアカウントと紐付ける
+      await sbFetch(`customers?id=eq.${hits[0].id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ line_user_id: userId }),
+      });
+      return { customer: hits[0], isNew: false, linked: true };
+    }
+  }
 
   const today = jstNow().dateStr;
   const customer = await sbInsert("customers", {
     name: displayName || "LINEのお客様",
     kana: null,
-    phone: null,
+    phone: normPhone.length >= 10 ? normPhone : null,
     birthday: null,
     gender: "female", // 本体アプリのデフォルトに合わせる
     notes: "[LINE予約で自動作成]",
     join_date: today,
     line_user_id: userId,
   });
-  return { customer, isNew: true };
+  return { customer, isNew: true, linked: false };
 }
 
 // ---------- 予約INSERT（appointments + 空カルテvisits） ----------
@@ -364,6 +390,7 @@ module.exports = {
   getSlotsForDate,
   isSlotFree,
   findOrCreateCustomer,
+  isKnownUser,
   createBooking,
   saveSession,
   clearSession,
