@@ -208,12 +208,15 @@ async function findOrCreateCustomer(userId, displayName) {
 
 // ---------- 予約INSERT（appointments + 空カルテvisits） ----------
 // リスクヘッジ原則②: INSERTのみ。UPDATE/DELETEは行わない
-async function createBooking({ customerId, dateStr, time, userId, displayName, isNew, customerMessage, menu }) {
-  const dur = menu && Number(menu.duration) > 0 ? Number(menu.duration) : DEFAULT_DURATION;
+// menus(複数)対応。menu(単数)も従来どおり受け付ける(line-webhook.jsとの互換維持)
+async function createBooking({ customerId, dateStr, time, userId, displayName, isNew, customerMessage, menu, menus }) {
+  const list = (menus && menus.length) ? menus : (menu ? [menu] : []);
+  const dur = list.reduce((s, m) => s + (Number(m.duration) > 0 ? Number(m.duration) : 0), 0) || DEFAULT_DURATION;
+  const totalPrice = list.reduce((s, m) => s + (m.price || 0), 0);
   const endTime = toHHMM(toMin(time) + dur);
   const customerType = isNew ? "new" : "existing";
   let notes = `[LINE予約] ${displayName || ""} (${userId})`;
-  if (menu && menu.name) notes += `\nメニュー: ${menu.name}`;
+  if (list.length > 0) notes += `\nメニュー: ${list.map((m) => m.name).join("、")}`;
   if (customerMessage) notes += `\n【お客様メッセージ】${String(customerMessage).slice(0, 500)}`;
 
   // 出所タグ原則④: notesに[LINE予約]+userId、専用色
@@ -223,7 +226,7 @@ async function createBooking({ customerId, dateStr, time, userId, displayName, i
     time: time,
     end_time: endTime,
     duration: dur,
-    menu_ids: menu && menu.id ? [menu.id] : [],
+    menu_ids: list.map((m) => m.id).filter(Boolean),
     notes: notes,
     color: LINE_COLOR,
     paid: false,
@@ -236,11 +239,11 @@ async function createBooking({ customerId, dateStr, time, userId, displayName, i
     customer_id: customerId,
     date: dateStr,
     time: time,
-    menus: menu && menu.id ? [{ menuId: menu.id, name: menu.name, price: menu.price || 0 }] : [],
+    menus: list.map((m) => ({ menuId: m.id, name: m.name, price: m.price || 0 })),
     products: [],
     drug_cost: 0,
     payment_method: "cash",
-    total: menu && menu.price ? menu.price : 0,
+    total: totalPrice,
     notes: null,
     images: [],
     customer_type: customerType,
