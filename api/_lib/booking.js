@@ -317,7 +317,7 @@ async function buildGrid(settings, duration) {
   for (const r of rows14 || []) (byDate[r.date] = byDate[r.date] || []).push(r);
 
   let minOpen = Infinity;
-  let maxLastStart = -Infinity;
+  let maxClose = -Infinity;
   const days = [];
   for (let i = 0; i < SEARCH_DAYS; i++) {
     const dateStr = addDays(today, i);
@@ -325,13 +325,15 @@ async function buildGrid(settings, duration) {
     const slots = calcSlots(dateStr, settings, byDate[dateStr], dur);
     if (!biz.isHoliday) {
       minOpen = Math.min(minOpen, toMin(biz.open));
-      maxLastStart = Math.max(maxLastStart, toMin(biz.close) - dur);
+      maxClose = Math.max(maxClose, toMin(biz.close));
     }
     days.push({ date: dateStr, w: weekdayJP(dateStr), holiday: biz.isHoliday, avail: slots });
   }
+  // 行は営業時間の全枠を常に表示する(施術時間の長さで行を削らない)。
+  // 合計時間内に収まらない開始時刻はavailに含まれないため、ページ側で×表示になる
   const rows = [];
   if (minOpen !== Infinity) {
-    for (let t = minOpen; t <= maxLastStart; t += settings.slotUnit) rows.push(toHHMM(t));
+    for (let t = minOpen; t <= maxClose - settings.slotUnit; t += settings.slotUnit) rows.push(toHHMM(t));
   }
   return { rows, days, slotUnit: settings.slotUnit, duration: dur };
 }
