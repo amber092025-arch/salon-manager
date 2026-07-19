@@ -91,6 +91,8 @@ function App() {
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState("");
   const [done, setDone] = useState(null);
+  const [known, setKnown] = useState(true); // カルテ連携済みか(未連携の人にだけ電話番号を聞く)
+  const [phone, setPhone] = useState("");
 
   const selMenus = mainMenu ? [mainMenu, ...addons] : [];
   const selIds = selMenus.map(m => m.id);
@@ -112,7 +114,7 @@ function App() {
     setPhase("loadingMenus");
     fetch(`/api/booking-slots?t=${token}`)
       .then(r => r.status === 401 ? Promise.reject("expired") : r.json())
-      .then(d => { if (!d.ok) throw "error"; setMenus(d.menus); setPhase("menus"); loadImages(); })
+      .then(d => { if (!d.ok) throw "error"; setMenus(d.menus); setKnown(d.known !== false); setPhase("menus"); loadImages(); })
       .catch(e => setPhase(e === "expired" ? "expired" : "error"));
   };
   useEffect(loadMenus, []);
@@ -140,11 +142,16 @@ function App() {
 
   const confirm = () => {
     if (!sel || sending) return;
+    const normPhone = phone.replace(/[^0-9]/g, "");
+    if (!known && (normPhone.length < 10 || normPhone.length > 11)) {
+      setNotice("お電話番号をご入力ください（ハイフンなし10〜11桁）");
+      return;
+    }
     setSending(true);
     fetch("/api/booking-confirm", {
       method:"POST",
       headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ t: token, date: sel.date, time: sel.time, message: msg, menuIds: selIds })
+      body: JSON.stringify({ t: token, date: sel.date, time: sel.time, message: msg, menuIds: selIds, phone: known ? "" : normPhone })
     })
     .then(r => r.json().then(d => ({ status:r.status, d })))
     .then(({status, d}) => {
@@ -435,6 +442,18 @@ function App() {
             <span style={{fontWeight:700, fontSize:14}}>約{grid.duration}分</span>
           </div>
         </div>
+
+        {!known && (
+          <div>
+            <div style={{marginTop:16, fontSize:12, fontWeight:700, marginBottom:6}}>お電話番号 <span style={{color:"#c0392b"}}>※必須</span></div>
+            <input type="tel" value={phone} onChange={e=>setPhone(e.target.value)} maxLength={13}
+              placeholder="09012345678（ハイフンなし）"
+              style={{width:"100%", padding:"12px", border:"1px solid var(--border)", borderRadius:10, fontFamily:"inherit", fontSize:15, background:"var(--white)"}}/>
+            <p style={{fontSize:11, color:"var(--muted)", marginTop:4, lineHeight:1.6}}>
+              これまでお電話でご予約いただいていた方は、番号でカルテをお繋ぎします。ご予約内容の確認にも使用します。
+            </p>
+          </div>
+        )}
 
         <div style={{marginTop:16, fontSize:12, fontWeight:700, marginBottom:6}}>一言メッセージ（任意）</div>
         <textarea value={msg} onChange={e=>setMsg(e.target.value)} maxLength={300}
