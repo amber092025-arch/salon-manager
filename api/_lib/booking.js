@@ -278,18 +278,27 @@ async function clearSession(userId) {
 
 // ---------- メニュー一覧（カレンダー予約ページ用） ----------
 async function getMenus() {
-  // photosカラムは無いのでSELECT負荷なし。業務カテゴリ(裏)は除外し表示用のみ
-  const rows = await sbFetch("menus?select=id,name,price,duration,category,sort_order&order=sort_order.asc");
+  // imageカラムは含めない(重いので別API getMenuImages で後追い取得)
+  const rows = await sbFetch("menus?select=id,name,price,duration,category,sort_order,menu_kind,target_customer,is_bookable&order=sort_order.asc");
   return (rows || [])
-    .filter((m) => m.category !== "業務")
+    .filter((m) => m.category !== "業務" && m.is_bookable !== false)
     .map((m) => ({
       id: m.id,
       name: m.name,
       price: m.price || 0,
       duration: Math.max(Number(m.duration) || DEFAULT_DURATION, settingsSlotFloor()),
+      category: m.category || "",
+      kind: m.menu_kind === "coupon" ? "coupon" : "menu",   // クーポン=メイン専用 / メニュー=追加にも使える
+      target: m.target_customer || "all",                    // all | new | repeat (バッジ表示用)
     }));
 }
 function settingsSlotFloor() { return 15; } // 極端に短いdurationの防止
+
+// メニュー画像だけを返す(予約ページが後追いで取得して合流する)
+async function getMenuImages() {
+  const rows = await sbFetch("menus?select=id,image&image=not.is.null");
+  return (rows || []).filter((r) => r.image).map((r) => ({ id: r.id, image: r.image }));
+}
 
 // ---------- カレンダー予約用（booking.html） ----------
 // 14日分の空き状況グリッドを構築: { rows: ["10:00",...], days: [{date, w, holiday, avail: [...]}] }
@@ -345,6 +354,7 @@ module.exports = {
   getSettings,
   saveSetting,
   getMenus,
+  getMenuImages,
   findAvailableDates,
   getSlotsForDate,
   isSlotFree,
