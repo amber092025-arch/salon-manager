@@ -852,6 +852,7 @@ function App() {
         {tab === "expensePinSettings" && <ExpensePinSettingsTab setTab={setTab} notify={notify} expensePin={expensePin} setExpensePin={setExpensePin} saveSetting={saveSetting} />}
         {tab === "goalSettings" && <GoalSettingsTab setTab={setTab} notify={notify} monthlyGoals={monthlyGoals} setMonthlyGoals={setMonthlyGoals} saveSetting={saveSetting} />}
         {tab === "lineBookingSettings" && <LineBookingSettingsTab setTab={setTab} notify={notify} lineBooking={lineBooking} setLineBooking={setLineBooking} saveSetting={saveSetting} />}
+        {tab === "mergeCustomers" && <MergeCustomersTab setTab={setTab} notify={notify} customers={customers} setCustomers={setCustomers} setVisits={setVisits} setAppointments={setAppointments} />}
         {tab === "tagSettings" && <TagSettingsTab setTab={setTab} notify={notify} tagCategories={tagCategories} setTagCategories={setTagCategories} />}
         {tab === "appointments" && <AppointmentsTab appointments={appointments} setAppointments={setAppointmentsW} customers={customers} setCustomers={setCustomers} visits={visits} setVisits={setVisitsW} products={products} menus={menus} notify={notify} setTab={setTab} bizHours={bizHours} closedDaysOfWeek={closedDaysOfWeek} personalHolidays={personalHolidays} openKarteDetail={openKarteDetail} addCustomer={addCustomer} addVisit={addVisit} addAppointment={addAppointment} deleteAppointment={deleteAppointment} pendingCustomerId={pendingCustomerId} setPendingCustomerId={setPendingCustomerId} weekOffset={weekOffset} setWeekOffset={setWeekOffset} viewMode={viewMode} setViewMode={setViewMode} dayOffset={dayOffset} setDayOffset={setDayOffset} monthOffset={monthOffset} setMonthOffset={setMonthOffset} shopCategoryList={shopCategoryList} slotUnit={lineBooking.slotUnit} />}
         {tab === "inventory" && <InventoryTab products={products} setProducts={setProductsW} addProduct={addProduct} updateProduct={updateProduct} deleteProduct={deleteProduct} notify={notify} setTab={setTab} visits={visits} purchaseCosts={purchaseCosts} setPurchaseCosts={setPurchaseCosts} purchaseMakers={purchaseMakers} setPurchaseMakers={setPurchaseMakers} purchasePayMethods={purchasePayMethods} setPurchasePayMethods={setPurchasePayMethods} purchaseCategories={purchaseCategories} setPurchaseCategories={setPurchaseCategories} />}
@@ -3222,6 +3223,11 @@ function MoreTab({ setTab }) {
       iconBg: "#e8f7ec", iconColor: "#06c755",
       svg: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#06c755" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
     },
+    {
+      tab: "mergeCustomers", label: "カルテ統合", sub: "重複したカルテを1つにまとめる",
+      iconBg: "#eef2f7", iconColor: "#4a6b8a",
+      svg: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4a6b8a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+    },
   ];
   return (
     <div style={{ padding: "12px 16px" }}>
@@ -3292,6 +3298,176 @@ function GoalSettingsTab({ setTab, notify, monthlyGoals, setMonthlyGoals, saveSe
             {saving ? "保存中..." : "保存する"}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function MergeCustomersTab({ setTab, notify, customers, setCustomers, setVisits, setAppointments }) {
+  const [step, setStep] = useState("pick");        // pick | preview
+  const [keepId, setKeepId] = useState(null);      // 残すカルテ
+  const [dupId, setDupId] = useState(null);        // 統合される(消える)カルテ
+  const [qKeep, setQKeep] = useState("");
+  const [qDup, setQDup] = useState("");
+  const [detail, setDetail] = useState(null);      // プレビュー用にDBから取り直した2人分の最新データ+件数
+  const [loadingPrev, setLoadingPrev] = useState(false);
+  const [merging, setMerging] = useState(false);
+
+  const findList = (q, excludeId) => {
+    const s = (q || "").trim().toLowerCase();
+    if (!s) return [];
+    return customers
+      .filter(c => c.id !== excludeId && ((c.name||"").toLowerCase().includes(s) || (c.kana||"").toLowerCase().includes(s)))
+      .slice(0, 20);
+  };
+  const keepC = customers.find(c => c.id === keepId) || null;
+  const dupC = customers.find(c => c.id === dupId) || null;
+
+  // プレビュー: 2人分の最新データ(LINE連携含む)と来店・予約件数をDBから取り直す
+  const openPreview = async () => {
+    setLoadingPrev(true);
+    const get1 = async (id) => {
+      const c = await sbRetry(() => sb.from("customers").select("id,name,kana,phone,birthday,notes,line_user_id").eq("id", id));
+      const v = await sbRetry(() => sb.from("visits").select("id").eq("customer_id", id));
+      const a = await sbRetry(() => sb.from("appointments").select("id").eq("customer_id", id));
+      if (c.error || !c.data || !c.data[0] || v.error || a.error) return null;
+      return { ...c.data[0], visitCount: v.data.length, apptCount: a.data.length };
+    };
+    const [k, d] = await Promise.all([get1(keepId), get1(dupId)]);
+    setLoadingPrev(false);
+    if (!k || !d) { notify("データの取得に失敗しました。通信環境を確認してください", "error"); return; }
+    setDetail({ keep: k, dup: d });
+    setStep("preview");
+  };
+
+  // 統合実行: visits移動 → appointments移動 → 残す側の空欄を補完 → 重複カルテを削除(最後)
+  const doMerge = async () => {
+    if (merging || !detail) return;
+    const { keep, dup } = detail;
+    if (!window.confirm(`「${keep.name}」様に「${dup.name}」様の来店記録${dup.visitCount}件・予約${dup.apptCount}件を移動し、「${dup.name}」様のカルテを削除します。\n\nこの操作は取り消せません。実行しますか？`)) return;
+    setMerging(true);
+    // ①来店記録の移動
+    const r1 = await sb.from("visits").update({ customer_id: keep.id }).eq("customer_id", dup.id);
+    if (r1.error) { setMerging(false); return notify("統合に失敗しました(来店記録の移動)。カルテは削除されていません", "error"); }
+    // ②予約の移動
+    const r2 = await sb.from("appointments").update({ customer_id: keep.id }).eq("customer_id", dup.id);
+    if (r2.error) { setMerging(false); return notify("統合が途中で失敗しました(予約の移動)。もう一度実行すると続きから統合されます", "error"); }
+    // ③残す側の空欄を統合される側の情報で補完(既にある情報は上書きしない)
+    const patch = {};
+    if (!keep.kana && dup.kana) patch.kana = dup.kana;
+    if (!keep.phone && dup.phone) patch.phone = dup.phone;
+    if (!keep.birthday && dup.birthday) patch.birthday = dup.birthday;
+    if (!keep.line_user_id && dup.line_user_id) patch.line_user_id = dup.line_user_id;
+    if (dup.notes) patch.notes = [keep.notes, dup.notes].filter(Boolean).join("\n---（統合されたカルテのメモ）---\n");
+    if (Object.keys(patch).length > 0) {
+      const r3 = await sb.from("customers").update(patch).eq("id", keep.id);
+      if (r3.error) { setMerging(false); return notify("統合が途中で失敗しました(情報の補完)。もう一度実行してください", "error"); }
+    }
+    // ④重複カルテの削除(①〜③が全て成功した場合のみ)
+    const r4 = await sb.from("customers").delete().eq("id", dup.id);
+    if (r4.error) { setMerging(false); return notify("記録の移動は完了しましたが、古いカルテの削除に失敗しました。もう一度実行してください", "error"); }
+
+    // 画面側の状態も反映
+    setVisits(p => p.map(v => v.customerId === dup.id ? { ...v, customerId: keep.id } : v));
+    setAppointments(p => p.map(a => a.customerId === dup.id ? { ...a, customerId: keep.id } : a));
+    setCustomers(p => p.filter(c => c.id !== dup.id).map(c => c.id === keep.id ? {
+      ...c,
+      kana: patch.kana !== undefined ? patch.kana : c.kana,
+      phone: patch.phone !== undefined ? patch.phone : c.phone,
+      birthday: patch.birthday !== undefined ? patch.birthday : c.birthday,
+      notes: patch.notes !== undefined ? patch.notes : c.notes,
+    } : c));
+    setMerging(false);
+    notify(`「${keep.name}」様にカルテを統合しました ✓`);
+    setStep("pick"); setKeepId(null); setDupId(null); setQKeep(""); setQDup(""); setDetail(null);
+    setTab("more");
+  };
+
+  const Picker = ({ label, color, q, setQ, selId, setSelId, excludeId }) => (
+    <div style={{ background:"#fff", borderRadius:14, padding:16, marginBottom:14, border:`2px solid ${color}` }}>
+      <div style={{ fontSize:13, fontWeight:800, color, marginBottom:8 }}>{label}</div>
+      {selId ? (
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+          <div>
+            <div style={{ fontWeight:800, fontSize:16 }}>{(customers.find(c=>c.id===selId)||{}).name}</div>
+            <div style={{ fontSize:12, color:C.sub }}>{(customers.find(c=>c.id===selId)||{}).kana}</div>
+          </div>
+          <button onClick={() => { setSelId(null); setQ(""); }} style={{ fontSize:12, color:C.sub, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 12px", background:"#fff", cursor:"pointer" }}>選び直す</button>
+        </div>
+      ) : (
+        <div>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="お名前・カナで検索"
+            style={{ width:"100%", boxSizing:"border-box", border:`1px solid ${C.border}`, borderRadius:10, padding:"11px 14px", fontSize:15, outline:"none" }} />
+          {findList(q, excludeId).map(c => (
+            <button key={c.id} onClick={() => setSelId(c.id)}
+              style={{ display:"block", width:"100%", textAlign:"left", padding:"10px 12px", marginTop:6, border:`1px solid ${C.border}`, borderRadius:10, background:"#fff", cursor:"pointer" }}>
+              <span style={{ fontWeight:700, fontSize:14 }}>{c.name}</span>
+              <span style={{ fontSize:12, color:C.sub, marginLeft:8 }}>{c.kana}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const Row = ({ label, k, d, result }) => (
+    <div style={{ display:"flex", borderTop:`1px solid ${C.border}`, fontSize:12 }}>
+      <div style={{ width:74, flexShrink:0, padding:"10px 8px", background:"#faf7f2", color:C.sub, fontWeight:700 }}>{label}</div>
+      <div style={{ flex:1, padding:"10px 8px", borderLeft:`1px solid ${C.border}` }}>{k || "-"}</div>
+      <div style={{ flex:1, padding:"10px 8px", borderLeft:`1px solid ${C.border}`, color:C.sub }}>{d || "-"}</div>
+      <div style={{ flex:1, padding:"10px 8px", borderLeft:`1px solid ${C.border}`, fontWeight:700 }}>{result || "-"}</div>
+    </div>
+  );
+
+  return (
+    <div style={{ background: C.bg, minHeight: "100vh" }}>
+      <div style={{ background: "#fff", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.border}` }}>
+        <button onClick={() => step === "preview" ? setStep("pick") : setTab("more")} style={{ background: "none", border: "none", color: "#7a6848", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>← {step === "preview" ? "選び直す" : "メニュー"}</button>
+        <div style={{ fontWeight: 800, fontSize: 16 }}>カルテ統合</div>
+        <div style={{ width: 60 }} />
+      </div>
+      <div style={{ padding: 16 }}>
+        {step === "pick" && (
+          <div>
+            <div style={{ background:"#fff", borderRadius:14, padding:14, marginBottom:14, border:`1px solid ${C.border}`, fontSize:12, color:C.sub, lineHeight:1.7 }}>
+              同じお客様のカルテが2つできてしまった場合に1つへまとめます。<br/>
+              来店記録・予約・写真はすべて「残すカルテ」へ移動し、もう一方のカルテは削除されます。
+            </div>
+            <Picker label="残すカルテ（メインのカルテ）" color="#06955f" q={qKeep} setQ={setQKeep} selId={keepId} setSelId={setKeepId} excludeId={dupId} />
+            <Picker label="統合されるカルテ（削除される側）" color="#c0392b" q={qDup} setQ={setQDup} selId={dupId} setSelId={setDupId} excludeId={keepId} />
+            <button onClick={openPreview} disabled={!keepId || !dupId || loadingPrev}
+              style={{ width:"100%", padding:14, borderRadius:12, border:"none", background:(!keepId||!dupId)?C.sub:"#4a6b8a", color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer", opacity: loadingPrev?0.6:1 }}>
+              {loadingPrev ? "確認中..." : "統合内容を確認する"}
+            </button>
+          </div>
+        )}
+        {step === "preview" && detail && (
+          <div>
+            <div style={{ background:"#fff", borderRadius:14, border:`1px solid ${C.border}`, overflow:"hidden", marginBottom:14 }}>
+              <div style={{ display:"flex", fontSize:11, fontWeight:800 }}>
+                <div style={{ width:74, flexShrink:0, padding:"10px 8px", background:"#faf7f2" }}></div>
+                <div style={{ flex:1, padding:"10px 8px", borderLeft:`1px solid ${C.border}`, color:"#06955f" }}>残す</div>
+                <div style={{ flex:1, padding:"10px 8px", borderLeft:`1px solid ${C.border}`, color:"#c0392b" }}>統合される</div>
+                <div style={{ flex:1, padding:"10px 8px", borderLeft:`1px solid ${C.border}` }}>統合後</div>
+              </div>
+              <Row label="氏名" k={detail.keep.name} d={detail.dup.name} result={detail.keep.name} />
+              <Row label="カナ" k={detail.keep.kana} d={detail.dup.kana} result={detail.keep.kana || detail.dup.kana} />
+              <Row label="電話番号" k={detail.keep.phone} d={detail.dup.phone} result={detail.keep.phone || detail.dup.phone} />
+              <Row label="誕生日" k={detail.keep.birthday} d={detail.dup.birthday} result={detail.keep.birthday || detail.dup.birthday} />
+              <Row label="LINE連携" k={detail.keep.line_user_id ? "あり" : ""} d={detail.dup.line_user_id ? "あり" : ""} result={(detail.keep.line_user_id || detail.dup.line_user_id) ? "あり" : ""} />
+              <Row label="来店記録" k={`${detail.keep.visitCount}件`} d={`${detail.dup.visitCount}件`} result={`${detail.keep.visitCount + detail.dup.visitCount}件`} />
+              <Row label="予約" k={`${detail.keep.apptCount}件`} d={`${detail.dup.apptCount}件`} result={`${detail.keep.apptCount + detail.dup.apptCount}件`} />
+              <Row label="メモ" k={detail.keep.notes ? "あり" : ""} d={detail.dup.notes ? "あり" : ""} result={(detail.keep.notes || detail.dup.notes) ? "両方を保持" : ""} />
+            </div>
+            <div style={{ background:"#fdf0ee", border:"1px solid #c0392b", borderRadius:12, padding:"10px 14px", fontSize:12, color:"#c0392b", fontWeight:700, marginBottom:14 }}>
+              「{detail.dup.name}」様のカルテは削除されます。この操作は取り消せません。
+            </div>
+            <button onClick={doMerge} disabled={merging}
+              style={{ width:"100%", padding:14, borderRadius:12, border:"none", background: merging ? C.sub : "#c0392b", color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer" }}>
+              {merging ? "統合中..." : "統合を実行する"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -3690,7 +3866,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.18-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.19-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
