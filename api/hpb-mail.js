@@ -1,15 +1,17 @@
 // ═══════════════════════════════════════════
-// /api/hpb-mail.js  (HPB-v2)
-// HPB(サロンボード)予約通知メール取り込み: CloudMailin → 解析 → appointments INSERT → 通知
+// /api/hpb-mail.js  (HPB-v3)
+// HPB(サロンボード)予約通知メール取り込み: CloudMailin → 解析 → appointments INSERT/DELETE → 通知
 //
 // 経路: HPB予約通知メール → メールの自動転送 → CloudMailin(JSON Normalized)
 //       → POST https://salon-manager-sigma.vercel.app/api/hpb-mail?token=XXXX
 //
-// 方針(Phase 4初期版・設計書どおり):
-//   ・新規予約メールのみ自動登録。キャンセル/変更は通知のみ(手動対応)
-//   ・重複防止: notesに[HPB]予約番号を記録し、INSERT前に存在チェック
-//   ・解析失敗時は本文を添えてオーナーへLINE通知(手動登録できるように)
-//   ・INSERTのみ。UPDATE/DELETEなし(リスクヘッジ原則②)
+// 方針:
+//   ・新規予約メール: 自動登録(INSERT)
+//   ・キャンセル連絡メール: 予約番号が一致する1件だけ自動削除(DELETE)。
+//     複数一致/不一致/番号読み取り不可の場合は削除せず通知のみ(手動対応)
+//   ・変更メール(書式未確認のため): 通知のみ・手動対応
+//   ・重複防止: notesに[HPB]予約番号を記録し、新規登録前に存在チェック
+//   ・解析失敗時は本文を添えてオーナーへLINE通知(手動登録/削除できるように)
 //
 // 必要な環境変数:
 //   HPB_MAIL_TOKEN     … 推測不能なランダム文字列(偽メールPOST対策)。CloudMailinの宛先URLの?token=に同じ値を付ける
@@ -19,12 +21,14 @@
 //   SALON_PHONE        … 任意
 // ═══════════════════════════════════════════
 
-const VERSION = "HPB-v2";
+const VERSION = "HPB-v3";
 const HPB_COLOR = "#f25c05"; // ホットペッパーオレンジ(出所タグ原則④)
 const DEFAULT_DURATION = 120; // 施術時間目安が読めなかった場合の既定(分)
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
+// 来店日時の行: 新規予約メールは半角括弧「(月)」、キャンセル連絡メールは全角括弧「（日）」のため両対応
+const DATETIME_RE = /■来店日時\s*\n\s*(\d{4})年(\d{1,2})月(\d{1,2})日[（(].*?[）)]\s*(\d{1,2}):(\d{2})/;
 
 // ---------- エントリポイント ----------
 module.exports = async (req, res) => {
@@ -96,10 +100,15 @@ async function handleMail(mail) {
     .join("\n");
   const excerpt = (subject ? `件名: ${subject}\n` : "") + text.slice(0, 600);
 
-  // キャンセル・変更メール(書式未確認) → 通知のみ・手動対応
-  if (/キャンセル|取消|取り消し|変更/.test(subject) || /予約(が|を)?(キャンセル|取消|取り消し|変更)/.test(text)) {
-    await notifyOwner(`📩 [${VERSION}] HPBのキャンセル/変更メールを受信しました(自動処理対象外)\n予約表とサロンボードを確認して手動で対応してください。\n\n${excerpt}`);
-    return "cancel-or-change-notified";
+  // キャンセル連絡メール → 予約番号が一致すれば自動削除。曖昧な場合のみ手動対応へ
+  if (/キャンセル連絡/.test(subject) || /■予約番号/.test(text) && /キャンセル/.test(subject + text)) {
+    return handleCancellation(text, subject, excerpt);
+  }
+
+  // 変更メール(書式未確認) → 通知のみ・手動対応
+  if (/変更/.test(subject) || /予約(が|を)?変更/.test(text)) {
+    await notifyOwner(`📩 [${VERSION}] HPBの予約変更メールを受信しました(自動処理対象外)\n予約表とサロンボードを確認して手動で対応してください。\n\n${excerpt}`);
+    return "change-notified";
   }
 
   // 予約通知メールでなければ通知だけして終了
@@ -113,7 +122,7 @@ async function handleMail(mail) {
   const nameM = text.match(/■氏名\s*\n\s*(.+?)[（(](.+?)[）)]/);
   const name = nameM ? nameM[1].trim() : null;
   const kana = nameM ? nameM[2].trim() : null;
-  const dtM = text.match(/■来店日時\s*\n\s*(\d{4})年(\d{1,2})月(\d{1,2})日.*?(\d{1,2}):(\d{2})/);
+  const dtM = text.match(DATETIME_RE);
   const menuName = pick(text, /■メニュー\s*\n\s*(.+)/);
   const totalM = text.match(/お支払い予定金額\s*([\d,]+)\s*円/);
   const durM = text.match(/施術時間目安[：:]\s*(?:(\d+)\s*時間)?\s*(?:(\d+)\s*分)?/);
@@ -176,6 +185,60 @@ async function handleMail(mail) {
 function pick(text, re) {
   const m = text.match(re);
   return m ? m[1].trim() : null;
+}
+
+// ---------- キャンセル連絡メール: 予約番号が一致する1件だけ自動削除 ----------
+async function handleCancellation(text, subject, excerpt) {
+  const bookingNo = pick(text, /■予約番号\s*\n\s*(\S+)/);
+  const nameM = text.match(/■氏名\s*\n\s*(.+?)[（(](.+?)[）)]/);
+  const name = nameM ? nameM[1].trim() : null;
+
+  if (!bookingNo) {
+    await notifyOwner(`⚠️ [${VERSION}] キャンセルメールから予約番号を読み取れませんでした\n予約表を確認し、該当の予約があれば手動で削除してください。\n\n${excerpt}`);
+    return "cancel-parse-failed";
+  }
+
+  // 新規登録時と同じタグ([HPB] 予約番号xxxx)で該当の予約を検索
+  const dupTag = `[HPB] 予約番号${bookingNo}`;
+  const matches = await sbFetch(
+    `appointments?select=id,date,time,notes&notes=like.${encodeURIComponent("*" + dupTag + "*")}`
+  );
+
+  if (!matches || matches.length === 0) {
+    await notifyOwner(`📩 [${VERSION}] HPBキャンセル連絡を受信しましたが、対応する予約が予約表に見つかりませんでした\n(既に削除済み、または手動登録されたものと思われます)\n\n予約番号: ${bookingNo}${name ? `\n氏名: ${name}` : ""}`);
+    return "cancel-no-match";
+  }
+  if (matches.length > 1) {
+    // 同じ予約番号が複数ヒットする状況は本来起きないはずだが、誤削除を避けるため必ず手動対応にする
+    await notifyOwner(`⚠️ [${VERSION}] キャンセル対象の予約が複数見つかったため、安全のため自動削除を見送りました\n予約表から該当の予約を手動で削除してください。\n\n予約番号: ${bookingNo}${name ? `\n氏名: ${name}` : ""}`);
+    return "cancel-multiple-match";
+  }
+
+  const appt = matches[0];
+
+  // 念のための安全弁: この予約に空でないカルテ(来店記録)が紐づいていたら自動削除せず手動対応にする
+  // (通常HPB取り込みの予約に空カルテは作られないが、後から手動で紐付けられていた場合に備える)
+  const visits = await sbFetch(`visits?select=id,paid,total,notes,photo_data,images&appointment_id=eq.${appt.id}`);
+  const visit = visits && visits[0];
+  const visitHasData = visit && (
+    visit.paid || (visit.total && visit.total > 0) || visit.notes ||
+    (visit.photo_data && visit.photo_data !== "{}") ||
+    (visit.images && visit.images.length > 0)
+  );
+  if (visitHasData) {
+    await notifyOwner(`⚠️ [${VERSION}] HPBキャンセル連絡を受信しましたが、該当のカルテに記録があるため自動削除を見送りました\n内容をご確認のうえ、手動で対応してください。\n\n📅 ${formatDateJP(appt.date)} ${appt.time}\n予約番号: ${bookingNo}${name ? `\n氏名: ${name}` : ""}`);
+    return "cancel-visit-not-empty";
+  }
+
+  if (visit) await sbDelete("visits", visit.id);
+  await sbDelete("appointments", appt.id);
+
+  await notifyOwner(`🗑️ [${VERSION}] HPBキャンセル連絡により予約表から削除しました\n\n📅 ${formatDateJP(appt.date)} ${appt.time}\n予約番号: ${bookingNo}${name ? `\n氏名: ${name}` : ""}\n\n★サロンボード側は既にキャンセル済みのはずですが念のためご確認ください`);
+  return "cancelled";
+}
+
+async function sbDelete(table, id) {
+  await sbFetch(`${table}?id=eq.${id}`, { method: "DELETE" });
 }
 
 // ---------- 顧客照合 ----------
