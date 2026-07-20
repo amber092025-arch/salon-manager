@@ -3866,7 +3866,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.19-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.19-b"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -3909,6 +3909,7 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
   const [tapMenu, setTapMenu] = useState(null);
   const [showKarteAppt, setShowKarteAppt] = useState(null); // appt to show karte for
   const [showCheckoutAppt, setShowCheckoutAppt] = useState(null); // appt to checkout
+  const [confirmForm, setConfirmForm] = useState(null); // 来店確定→空カルテ作成の情報入力フォーム(アプリ内に未登録の方のみ)
   const [form, setForm] = useState({ customerId: initialCustomer ? initialCustomer.id : (pendingCustomerId || ""), date: todayStr(), time: "10:00", endTime: "11:00", duration: 60, menuIds: [], notes: "", paid: false, shimeika: "shimeika", customerType: "existing" });
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
   const [custSearch, setCustSearch] = useState("");
@@ -4005,6 +4006,58 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
   const handleEditOpen = (appt) => {
     setShowEdit({ ...appt, menuIds: appt.menuIds || [] });
     closeTapMenu();
+  };
+
+  // ── 来店確定 → 空カルテ作成(HPB等・INSERT元の予約でカルテが未作成のもの用) ──
+  const createEmptyVisitFromAppt = async (a, extra) => {
+    const emptyVisit = {
+      customerId: a.customerId,
+      date: a.date,
+      time: a.time,
+      duration: a.duration || 60,
+      menus: (a.menuIds || []).map(id => { const m = menus.find(x => x.id === Number(id)); return m ? { menuId: m.id, name: m.name, price: m.price } : null; }).filter(Boolean),
+      total: 0,
+      notes: "",
+      beforeImgs: [], afterImgs: [], otherImgs: [],
+      products: [],
+      appointmentId: a.id,
+      customerType: (extra && extra.customerType) || "existing",
+    };
+    if (typeof addVisit === "function") await addVisit(emptyVisit);
+    else setVisits(p => [...p, { ...emptyVisit, id: Date.now() + 1 }]);
+  };
+  const handleConfirmKarte = (a) => {
+    closeTapMenu();
+    // アプリ内に既に来店記録(カルテ)がある方 = 情報入力なしでそのまま空カルテを作成
+    const priorVisits = visits.filter(v => v.customerId === a.customerId).length;
+    if (priorVisits > 0) {
+      createEmptyVisitFromAppt(a, { customerType: "existing" });
+      notify("空のカルテを作成しました ✓");
+      return;
+    }
+    // アプリ内にカルテが無い方 = お客様情報を入力してから空カルテを作成
+    const cust = customers.find(c => c.id === a.customerId);
+    setConfirmForm({
+      apptId: a.id,
+      name: cust?.name || "",
+      kana: cust?.kana || "",
+      phone: cust?.phone || "",
+      birthday: bdayDigits(cust?.birthday) || "",
+      gender: cust?.gender || "female",
+      notes: cust?.notes || "",
+      customerType: "new",
+    });
+  };
+  const saveConfirmForm = async () => {
+    if (!confirmForm.name) return notify("氏名を入力してください", "error");
+    const appt = appointments.find(a => a.id === confirmForm.apptId);
+    if (!appt) { setConfirmForm(null); return; }
+    const bd = bdayToStored(confirmForm.birthday);
+    await sb.from("customers").update({ name: confirmForm.name, kana: confirmForm.kana, phone: confirmForm.phone, birthday: bd, gender: confirmForm.gender, notes: confirmForm.notes }).eq("id", appt.customerId);
+    setCustomers(p => p.map(c => c.id === appt.customerId ? { ...c, name: confirmForm.name, kana: confirmForm.kana, phone: confirmForm.phone, birthday: bd, gender: confirmForm.gender, notes: confirmForm.notes } : c));
+    await createEmptyVisitFromAppt(appt, { customerType: confirmForm.customerType });
+    setConfirmForm(null);
+    notify("カルテを作成しました ✓");
   };
   const handleEditSave = async () => {
     await sb.from("appointments").update(toDb.appointment(showEdit)).eq("id", showEdit.id);
@@ -4488,8 +4541,17 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
               <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
             </svg>
           ),
+          "確定を確認": (
+            <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#06955f" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="9"/>
+              <path d="M8 12.5l2.5 2.5L16 9.5"/>
+            </svg>
+          ),
         };
+        // このアプリ内にまだカルテ(来店記録)が作られていない予約(HPB取り込み等)にのみ「確定を確認」を出す
+        const hasLinkedVisit = visits.some(v => v.appointmentId === a.id);
         const actions = [
+          ...(hasLinkedVisit ? [] : [{ label: "確定を確認", color: "#06955f", action: () => handleConfirmKarte(a) }]),
           { label: "お会計", color: "#7a6848", action: () => { setShowCheckoutAppt(a); closeTapMenu(); } },
           { label: "カルテ詳細", color: "#7a6848", action: () => { setShowKarteAppt(a); closeTapMenu(); } },
           { label: "予約編集", color: "#7a6848", action: () => handleEditOpen(a) },
@@ -4559,6 +4621,58 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
           </div>
         );
       })()}
+
+      {/* ── 来店確定 → お客様情報入力(アプリ内にカルテが無い方のみ) ── */}
+      {confirmForm && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 950, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px 16px" }}
+          onClick={e => { if (e.target === e.currentTarget) setConfirmForm(null); }}>
+          <div style={{ background: C.card, borderRadius: 20, padding: "20px 16px", width: "100%", maxWidth: 440, maxHeight: "85vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+              <div style={{ fontWeight: 800, fontSize: 17 }}>来店確定 - お客様情報</div>
+              <button onClick={() => setConfirmForm(null)} style={{ background: "none", border: "none", fontSize: 22, color: C.sub, cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ fontSize: 12, color: C.sub, marginBottom: 16, lineHeight: 1.6 }}>
+              まだアプリ内にカルテがない方です。内容を確認・補完してカルテを作成してください。
+            </div>
+            {[["name","氏名 *","text"],["kana","ふりがな","text"],["phone","電話番号","tel"],["birthday","生年月日","date"]].map(([k,l,t]) => (
+              <div key={k} style={{ marginBottom: 12 }}>
+                <label style={css.label}>{l}</label>
+                {k === "birthday"
+                  ? <input type="tel" inputMode="numeric" maxLength={8} placeholder="例：19900315" value={bdayDigits(confirmForm[k])} onChange={e => setConfirmForm(p => ({...p,[k]:e.target.value.replace(/[^0-9]/g,"").slice(0,8)}))} style={css.input} />
+                  : k === "kana"
+                    ? <input type={t} value={confirmForm[k]} onChange={e => setConfirmForm(p => ({...p,[k]:e.target.value}))} onCompositionEnd={e => { const v = kataToHira(e.target.value); setConfirmForm(p => ({...p,[k]:v})); }} onBlur={e => { const v = kataToHira(e.target.value); setConfirmForm(p => ({...p,[k]:v})); }} style={css.input} />
+                    : <input type={t} value={confirmForm[k]} onChange={e => setConfirmForm(p => ({...p,[k]:e.target.value}))} style={css.input} />}
+              </div>
+            ))}
+            <div style={{ marginBottom: 12 }}>
+              <label style={css.label}>性別</label>
+              <div style={{ display: "flex", gap: 8 }}>
+                {[["female","女性"],["male","男性"],["other","その他"]].map(([v,l]) => (
+                  <button key={v} onClick={() => setConfirmForm(p => ({...p,gender:v}))} style={{ ...css.btn(GEN_COLOR[v], confirmForm.gender===v), flex:1, padding:"9px 4px", fontSize:13 }}>{l}</button>
+                ))}
+              </div>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={css.label}>備考・アレルギー等</label>
+              <textarea value={confirmForm.notes} onChange={e => setConfirmForm(p => ({...p,notes:e.target.value}))} rows={2} style={{...css.input, resize:"vertical"}} />
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={css.label}>新規 / 既存</label>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => setConfirmForm(p => ({...p, customerType: "new"}))}
+                  style={{ flex: 1, padding: "11px 8px", borderRadius: 10, border: `2px solid ${confirmForm.customerType === "new" ? C.orange : C.border}`, background: confirmForm.customerType === "new" ? "#fff3e0" : C.card, color: confirmForm.customerType === "new" ? C.orange : C.sub, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                  新規
+                </button>
+                <button onClick={() => setConfirmForm(p => ({...p, customerType: "existing"}))}
+                  style={{ flex: 1, padding: "11px 8px", borderRadius: 10, border: `2px solid ${confirmForm.customerType === "existing" ? "#7a6848" : C.border}`, background: confirmForm.customerType === "existing" ? "#f5ede0" : C.card, color: confirmForm.customerType === "existing" ? "#7a6848" : C.sub, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                  既存
+                </button>
+              </div>
+            </div>
+            <button onClick={saveConfirmForm} style={{...css.btn("#06955f"), width:"100%", fontSize:15}}>カルテを作成する</button>
+          </div>
+        </div>
+      )}
 
       {/* ── Edit form — LiME style full screen ── */}
       {showEdit && (
