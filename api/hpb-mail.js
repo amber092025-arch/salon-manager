@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════
-// /api/hpb-mail.js  (HPB-v4)
+// /api/hpb-mail.js  (HPB-v5)
 // HPB(サロンボード)予約通知メール取り込み: CloudMailin → 解析 → appointments INSERT/DELETE → 通知
 //
 // 経路: HPB予約通知メール → メールの自動転送 → CloudMailin(JSON Normalized)
@@ -22,7 +22,7 @@
 //   SALON_PHONE        … 任意
 // ═══════════════════════════════════════════
 
-const VERSION = "HPB-v4";
+const VERSION = "HPB-v5";
 const HPB_COLOR = "#f25c05"; // ホットペッパーオレンジ(出所タグ原則④)
 const DEFAULT_DURATION = 120; // 施術時間目安が読めなかった場合の既定(分)
 
@@ -157,14 +157,21 @@ async function handleMail(mail) {
   // ---------- 顧客照合(ふりがな→ひらがな正規化して一意に一致した場合のみ紐付け) ----------
   const { customerId, isNew, matchedName } = await matchOrCreateCustomer(name, kana);
 
-  // ---------- メニュー照合(HPBの表記「カット＋カラー」等を「+」で分解し、登録済みメニューと名称一致するものだけ紐付け) ----------
-  const { resolved, unresolved } = await resolveMenus(menuName);
+  // ---------- メニュー照合 ----------
+  // 精度優先: まず「■ご利用クーポン」のクーポン名を丸ごと登録メニューと照合(メニュー名はHPBと揃えてある前提)。
+  // クーポンで一致しなければ従来どおり「■メニュー」を+で分解して個別照合
+  const couponName = extractCouponName(text);
+  const pointM = text.match(/今回の利用ポイント\s*([\d,]+)\s*ポイント/);
+  const hpbPoint = pointM ? Number(pointM[1].replace(/,/g, "")) : 0;
+  const { resolved, unresolved, via } = await resolveMenus(menuName, couponName);
   const menuIds = resolved.map((m) => m.id);
 
   // ---------- appointments INSERT(出所タグ: notesに[HPB]+予約番号、HPBオレンジ) ----------
   let notes = `${dupTag}\n${name || "氏名不明"}${kana ? `（${kana}）` : ""}`;
+  if (couponName) notes += `\nクーポン: ${couponName}`;
   if (menuName) notes += `\nメニュー: ${menuName}`;
   if (total !== null) notes += `\n金額: ${total.toLocaleString()}円`;
+  if (hpbPoint > 0) notes += `\nHPBポイント利用: ${hpbPoint.toLocaleString()}pt`;
   if (unresolved.length > 0) notes += `\n⚠️未登録メニュー(要手動確認): ${unresolved.join("、")}`;
   notes += `\n(HPBメール自動取り込み)`;
 
@@ -180,14 +187,15 @@ async function handleMail(mail) {
     paid: false,
     shimeika: "shimeika",
     customer_type: isNew ? "new" : "existing",
+    hpb_point: hpbPoint,
   });
 
   const menuLine = resolved.length > 0
-    ? resolved.map((m) => m.name).join("、") + (unresolved.length > 0 ? `　+未登録: ${unresolved.join("、")}` : "")
-    : (menuName || "メニュー不明") + (menuName ? "（登録メニューと一致せず・要手動設定）" : "");
+    ? resolved.map((m) => m.name).join("、") + (via === "coupon" ? "（クーポン名で一致）" : "") + (unresolved.length > 0 ? `　+未登録: ${unresolved.join("、")}` : "")
+    : (couponName || menuName || "メニュー不明") + "（登録メニューと一致せず・要手動設定）";
 
   await notifyOwner(
-    `🟠 [${VERSION}] HPB予約を予約表に自動登録しました\n\n📅 ${formatDateJP(dateStr)} ${time}〜${endTime}\n👤 ${name || "氏名不明"}${kana ? `（${kana}）` : ""}${isNew ? "（新規・仮カルテ自動作成）" : matchedName ? `（既存カルテ: ${matchedName}）` : ""}\n💇 ${menuLine}${total !== null ? `\n💰 ${total.toLocaleString()}円` : ""}\n予約番号: ${bookingNo}`
+    `🟠 [${VERSION}] HPB予約を予約表に自動登録しました\n\n📅 ${formatDateJP(dateStr)} ${time}〜${endTime}\n👤 ${name || "氏名不明"}${kana ? `（${kana}）` : ""}${isNew ? "（新規・仮カルテ自動作成）" : matchedName ? `（既存カルテ: ${matchedName}）` : ""}\n💇 ${menuLine}${total !== null ? `\n💰 ${total.toLocaleString()}円` : ""}${hpbPoint > 0 ? `\n🅿️ ポイント利用 ${hpbPoint.toLocaleString()}pt（確定確認時にカルテへ自動転記）` : ""}\n予約番号: ${bookingNo}`
   );
   return "inserted";
 }
@@ -198,36 +206,66 @@ function pick(text, re) {
 }
 
 // ---------- メニュー照合 ----------
-// HPBの「■メニュー」欄(例: "カット＋ダメージケアカラー")を+/＋/、/,で分解し、
-// 登録済みメニュー(menusテーブル)と名称が一意に一致する項目だけを紐付ける。
-// 曖昧・複数候補・不一致の項目は紐付けず、通知とnotesに残して手動確認を促す(誤った価格・時間の混入を防ぐ)
+// 「■ご利用クーポン」ブロックからクーポン名を1行取り出す([全員]等の対象行と説明行は除外、末尾の価格表記は除去)
+function extractCouponName(text) {
+  const m = text.match(/■ご利用クーポン\s*\n([\s\S]*?)(?=\n\s*\n|\n■|$)/);
+  if (!m) return null;
+  const lines = m[1].split("\n").map((s) => s.trim()).filter(Boolean);
+  for (const line of lines) {
+    if (/^[\[［].*[\]］]$/.test(line)) continue; // [全員][新規]等の対象行はスキップ
+    return line.replace(/[\\￥¥]\s*[\d,]+円?\s*$/, "").trim();
+  }
+  return null;
+}
+
+// 照合用の正規化: 括弧書き・空白・価格表記(\19000 / ¥13,500 / 13500円)を除去して比較
+// ※「ヘッドスパ25分」のような時間表記の数字は消さない(価格の形をした数字だけ除去)
 function normalizeMenuText(s) {
   return String(s || "")
-    .replace(/[（(].*?[）)]/g, "") // 括弧書き(シャンプー.ブロー込み 等)は照合から除外
+    .replace(/[（(].*?[）)]/g, "")
+    .replace(/[\\￥¥]\s*[\d,]{3,}/g, "")
+    .replace(/[\d,]{4,}円/g, "")
     .replace(/[\s　]/g, "")
     .toLowerCase();
 }
-async function resolveMenus(menuName) {
-  if (!menuName) return { resolved: [], unresolved: [] };
+
+async function resolveMenus(menuName, couponName) {
   let catalog = [];
   try {
     const rows = await sbFetch("menus?select=id,name,price,duration,category&order=sort_order.asc");
     catalog = (rows || []).filter((m) => m.category !== "業務");
   } catch (e) {
     console.error(`[${VERSION}] menu catalog fetch error:`, e);
-    return { resolved: [], unresolved: [menuName] };
+    return { resolved: [], unresolved: [couponName || menuName].filter(Boolean), via: null };
   }
+
+  // ①クーポン名の丸ごと照合を最優先(メニュー名をHPBのクーポン名と揃えてある前提で最も精度が高い)
+  if (couponName) {
+    const normC = normalizeMenuText(couponName);
+    if (normC) {
+      const exact = catalog.filter((m) => normalizeMenuText(m.name) === normC);
+      if (exact.length === 1) return { resolved: [exact[0]], unresolved: [], via: "coupon" };
+      if (exact.length === 0) {
+        const partial = catalog.filter((m) => {
+          const mn = normalizeMenuText(m.name);
+          return mn && (mn.includes(normC) || normC.includes(mn));
+        });
+        if (partial.length === 1) return { resolved: [partial[0]], unresolved: [], via: "coupon" };
+      }
+    }
+  }
+
+  // ②フォールバック: ■メニュー欄を+/＋/、で分解して個別照合(完全一致優先→候補1件のみの部分一致)
+  if (!menuName) return { resolved: [], unresolved: [couponName].filter(Boolean), via: null };
   const parts = menuName.split(/[+＋、,]/).map((s) => s.trim()).filter(Boolean);
   const resolved = [];
   const unresolved = [];
   for (const part of parts) {
     const norm = normalizeMenuText(part);
     if (!norm) continue;
-    // ①完全一致を優先(例:「カット」は「前髪カット」等の部分一致より完全一致のカットを正として選ぶ)
     const exactHits = catalog.filter((m) => normalizeMenuText(m.name) === norm);
     if (exactHits.length === 1) { resolved.push(exactHits[0]); continue; }
-    if (exactHits.length > 1) { unresolved.push(part); continue; } // 同名が複数登録されている場合は手動確認へ
-    // ②完全一致が無い場合のみ部分一致を試す(候補が1件に絞れる時だけ採用)
+    if (exactHits.length > 1) { unresolved.push(part); continue; }
     const hits = catalog.filter((m) => {
       const mn = normalizeMenuText(m.name);
       return mn && (mn.includes(norm) || norm.includes(mn));
@@ -235,7 +273,7 @@ async function resolveMenus(menuName) {
     if (hits.length === 1) resolved.push(hits[0]);
     else unresolved.push(part);
   }
-  return { resolved, unresolved };
+  return { resolved, unresolved, via: "menu" };
 }
 
 // ---------- キャンセル連絡メール: 予約番号が一致する1件だけ自動削除 ----------
