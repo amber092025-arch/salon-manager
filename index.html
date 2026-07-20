@@ -3921,7 +3921,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.20-c"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.20-d"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -4131,8 +4131,13 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
   const cellLongPressTimer = useRef(null);
 
   const onCellPointerDown = (e, date, hour) => {
+    // 長押し位置(セル内の縦位置)から分を算出(枠単位で刻む。例:30分設定でセル下半分→◯時30分)
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ratio = Math.min(Math.max((e.clientY - rect.top) / rect.height, 0), 0.999);
+    const unit = slotUnit === 15 ? 15 : 30;
+    const minute = Math.floor(ratio * 60 / unit) * unit;
     cellLongPressTimer.current = setTimeout(() => {
-      const timeStr = `${String(hour).padStart(2,"0")}:00`;
+      const timeStr = `${String(hour).padStart(2,"0")}:${String(minute).padStart(2,"0")}`;
       const endStr = calcEndTime(timeStr, 60);
       setForm(p => ({ ...p, date, time: timeStr, endTime: endStr, duration: 60, menuIds: [], customerId: "", shimeika: "shimeika" }));
       setShowAdd(true);
