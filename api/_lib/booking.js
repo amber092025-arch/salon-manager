@@ -96,6 +96,7 @@ async function getSettings() {
     slotUnit: Number(map.bookingSlotUnit) || 30,   // 未設定なら30分
     capacity: Number(map.bookingCapacity) || 1,    // 未設定なら1（1人サロン）
     liffBookingId: map.liffBookingId || null,      // LIFF登録済みならモーダル表示に使う
+    lineBookingConfirmMode: map.lineBookingConfirmMode === "manual" ? "manual" : "auto", // LINE予約の確定方法(auto=即確定/manual=仮予約)
     lineBookingEnabled: map.lineBookingEnabled,    // 受付停止スイッチ（未設定undefined=受付中扱い）
   };
 }
@@ -235,7 +236,7 @@ async function findOrCreateCustomer(userId, displayName, phone) {
 // ---------- 予約INSERT（appointments + 空カルテvisits） ----------
 // リスクヘッジ原則②: INSERTのみ。UPDATE/DELETEは行わない
 // menus(複数)対応。menu(単数)も従来どおり受け付ける(line-webhook.jsとの互換維持)
-async function createBooking({ customerId, dateStr, time, userId, displayName, isNew, customerMessage, menu, menus }) {
+async function createBooking({ customerId, dateStr, time, userId, displayName, isNew, customerMessage, menu, menus, pending }) {
   const list = (menus && menus.length) ? menus : (menu ? [menu] : []);
   const dur = list.reduce((s, m) => s + (Number(m.duration) > 0 ? Number(m.duration) : 0), 0) || DEFAULT_DURATION;
   const totalPrice = list.reduce((s, m) => s + (m.price || 0), 0);
@@ -258,6 +259,7 @@ async function createBooking({ customerId, dateStr, time, userId, displayName, i
     paid: false,
     shimeika: "shimeika",
     customer_type: customerType,
+    booking_status: pending ? "pending" : "confirmed", // 手動確定モードでは仮予約として登録
   });
 
   // UI予約と同じく空カルテを自動作成（appointment_idで紐付け・toDb.visitと同じ形）
