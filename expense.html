@@ -43,6 +43,7 @@ const DEFAULT_CATS = [
 ];
 const DEFAULT_MAKERS = [{ id:1, name:"フユヒロ" },{ id:2, name:"WHELM" }];
 const DEFAULT_PAYS = [{ id:1, name:"現金" },{ id:2, name:"預金" },{ id:3, name:"クレジットカード" }];
+const DEFAULT_TXNTYPES = []; // 取引分類（ユーザーが自由に追加・編集・削除）
 
 const todayStr = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); };
 const yen = n => "¥" + (n||0).toLocaleString();
@@ -74,7 +75,7 @@ const parseReceiptText = (text, makers) => {
 
 // ── settings 読み込み（4キー一括） ──
 async function loadSettings() {
-  const url = SUPABASE_URL + "/rest/v1/settings?select=key,value&key=in.(purchaseCosts,purchaseMakers,purchasePayMethods,purchaseCategories)";
+  const url = SUPABASE_URL + "/rest/v1/settings?select=key,value&key=in.(purchaseCosts,purchaseMakers,purchasePayMethods,purchaseCategories,purchaseTxnTypes)";
   const res = await fetch(url, { headers: HDRS });
   if (!res.ok) throw new Error(await res.text());
   const rows = await res.json();
@@ -131,6 +132,24 @@ async function saveCatsRMW(mutator) {
 }
 
 // ── purchaseMakers の read-modify-write 保存 ──
+// ── purchaseTxnTypes(取引分類) の read-modify-write 保存 ──
+async function saveTxnTypesRMW(mutator) {
+  const res = await fetch(SUPABASE_URL + "/rest/v1/settings?select=value&key=eq.purchaseTxnTypes", { headers: HDRS });
+  const rows = res.ok ? await res.json() : [];
+  let base = DEFAULT_TXNTYPES;
+  if (rows[0] && rows[0].value) { try { base = JSON.parse(rows[0].value) || DEFAULT_TXNTYPES; } catch(e) {} }
+  const nextVal = mutator(base);
+  const valueStr = JSON.stringify(nextVal);
+  let saveRes;
+  if (rows.length > 0) {
+    saveRes = await fetch(SUPABASE_URL + "/rest/v1/settings?key=eq.purchaseTxnTypes", { method:"PATCH", headers: HDRS, body: JSON.stringify({ value: valueStr }) });
+  } else {
+    saveRes = await fetch(SUPABASE_URL + "/rest/v1/settings", { method:"POST", headers: HDRS, body: JSON.stringify({ key:"purchaseTxnTypes", value: valueStr }) });
+  }
+  if (!saveRes.ok) throw new Error("save failed");
+  return nextVal;
+}
+
 async function saveMakersRMW(mutator) {
   const res = await fetch(SUPABASE_URL + "/rest/v1/settings?select=value&key=eq.purchaseMakers", { headers: HDRS });
   if (!res.ok) throw new Error(await res.text());
@@ -149,7 +168,7 @@ async function saveMakersRMW(mutator) {
   return next;
 }
 
-function PurchaseForm({ form, setForm, cats, makers, pays, onManageCats, onManageMakers }) {
+function PurchaseForm({ form, setForm, cats, makers, pays, txnTypes, onManageCats, onManageMakers, onManageTxnTypes }) {
   const chip = (active) => ({ padding:"8px 14px", borderRadius:20, border:"1.5px solid "+(active?C.accent:C.border), background:active?C.accent:"#fff", color:active?"#fff":C.text, fontWeight:700, fontSize:13, cursor:"pointer" });
   return (
     <div>
@@ -190,6 +209,18 @@ function PurchaseForm({ form, setForm, cats, makers, pays, onManageCats, onManag
         </div>
       </div>
       <div style={{ marginBottom:14 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+          <div style={css.label}>取引分類（任意）</div>
+          {onManageTxnTypes && <button onClick={onManageTxnTypes} style={{ background:"none", border:"none", color:C.accent, fontWeight:700, fontSize:12, cursor:"pointer", textDecoration:"underline" }}>管理</button>}
+        </div>
+        <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+          <button onClick={() => setForm(p=>({...p,txnType:""}))} style={chip(!form.txnType)}>未設定</button>
+          {(txnTypes||[]).map(t => (
+            <button key={t.id} onClick={() => setForm(p=>({...p,txnType:t.name}))} style={chip(form.txnType===t.name)}>{t.name}</button>
+          ))}
+        </div>
+      </div>
+      <div style={{ marginBottom:14 }}>
         <div style={css.label}>金額</div>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           <input type="number" inputMode="numeric" value={form.amount} onChange={e=>setForm(p=>({...p,amount:e.target.value}))}
@@ -222,9 +253,10 @@ function App() {
   const [cats, setCats] = useState(DEFAULT_CATS);
   const [makers, setMakers] = useState(DEFAULT_MAKERS);
   const [pays, setPays] = useState(DEFAULT_PAYS);
+  const [txnTypes, setTxnTypes] = useState(DEFAULT_TXNTYPES);
 
   const emptyForm = () => ({ category:(cats[0]&&cats[0].key)||"material", date:todayStr(), payMethod:"", maker:"", amount:"", memo:"" });
-  const [form, setForm] = useState({ category:"material", date:todayStr(), payMethod:"", maker:"", amount:"", memo:"" });
+  const [form, setForm] = useState({ category:"material", date:todayStr(), payMethod:"", maker:"", amount:"", memo:"", txnType:"" });
 
   const [viewMonth, setViewMonth] = useState(todayStr().slice(0,7));
   const [viewYear, setViewYear] = useState(new Date().getFullYear());
@@ -237,6 +269,11 @@ function App() {
   const [editingCat, setEditingCat] = useState(null); // { key, label }
   const [makerForm, setMakerForm] = useState({ name:"" });
   const [editingMaker, setEditingMaker] = useState(null); // { id, name }
+  const [showTxnManage, setShowTxnManage] = useState(false);
+  const [txnForm, setTxnForm] = useState({ name:"" });
+  const [editingTxn, setEditingTxn] = useState(null); // { id, name }
+  const [searchQ, setSearchQ] = useState("");            // 明細の文言検索
+  const [sortKey, setSortKey] = useState("dateAsc");     // 明細の並び順
 
   const notify = (msg, type) => { setToast({ msg, type }); setTimeout(() => setToast(null), 2000); };
 
@@ -247,6 +284,7 @@ function App() {
       if (map.purchaseCosts) { try { setCosts(JSON.parse(map.purchaseCosts)||{}); } catch(e) { setCosts({}); } }
       else setCosts({});
       if (map.purchaseCategories) { try { setCats(JSON.parse(map.purchaseCategories)); } catch(e) {} }
+      if (map.purchaseTxnTypes) { try { setTxnTypes(JSON.parse(map.purchaseTxnTypes)||[]); } catch(e) {} }
       if (map.purchaseMakers) { try { setMakers(JSON.parse(map.purchaseMakers)); } catch(e) {} }
       if (map.purchasePayMethods) { try { setPays(JSON.parse(map.purchasePayMethods)); } catch(e) {} }
     } catch(e) {
@@ -289,7 +327,7 @@ function App() {
     const amt = parseInt(form.amount);
     if (!amt || amt <= 0) return notify("金額を入力してください","error");
     const mKey = dt.slice(0,7);
-    const item = { id:Date.now(), category:form.category, maker:form.maker, amount:amt, date:dt, payMethod:form.payMethod, memo:(form.memo||"").trim() };
+    const item = { id:Date.now(), category:form.category, maker:form.maker, amount:amt, date:dt, payMethod:form.payMethod, memo:(form.memo||"").trim(), txnType:form.txnType||"" };
     setSaving(true);
     try {
       const next = await saveCostsRMW(base => {
@@ -313,7 +351,7 @@ function App() {
     if (!amt || amt <= 0) return notify("金額を入力してください","error");
     const oldKey = editTarget.monthKey;
     const newKey = dt.slice(0,7);
-    const upd = { ...editTarget.item, category:editForm.category, maker:editForm.maker, amount:amt, date:dt, payMethod:editForm.payMethod, memo:(editForm.memo||"").trim() };
+    const upd = { ...editTarget.item, category:editForm.category, maker:editForm.maker, amount:amt, date:dt, payMethod:editForm.payMethod, memo:(editForm.memo||"").trim(), txnType:editForm.txnType||"" };
     setSaving(true);
     try {
       const next = await saveCostsRMW(base => {
@@ -350,10 +388,25 @@ function App() {
   const catLabel = k => { const c = cats.find(x => x.key === k); return c ? c.label : k; };
   const monthItems = useMemo(() => {
     const v = costs[viewMonth];
-    const arr = Array.isArray(v) ? [...v] : [];
-    arr.sort((a,b) => ((a.date||"9999").localeCompare(b.date||"9999")) || ((a.id||0)-(b.id||0)));
+    let arr = Array.isArray(v) ? [...v] : [];
+    // 文言検索(取引先・摘要・科目・取引分類・取引手段・日付・金額のどれかに一致)
+    const q = searchQ.trim().toLowerCase();
+    if (q) {
+      arr = arr.filter(i => {
+        const hay = [i.maker, i.memo, catLabel(i.category), i.txnType, i.payMethod, i.date, String(i.amount)]
+          .filter(Boolean).join(" ").toLowerCase();
+        return hay.includes(q);
+      });
+    }
+    // 並び替え
+    const byDate = (a,b) => ((a.date||"9999").localeCompare(b.date||"9999")) || ((a.id||0)-(b.id||0));
+    if (sortKey === "dateAsc") arr.sort(byDate);
+    else if (sortKey === "dateDesc") arr.sort((a,b) => -byDate(a,b));
+    else if (sortKey === "amountDesc") arr.sort((a,b) => (b.amount||0)-(a.amount||0) || byDate(a,b));
+    else if (sortKey === "amountAsc") arr.sort((a,b) => (a.amount||0)-(b.amount||0) || byDate(a,b));
+    else if (sortKey === "maker") arr.sort((a,b) => String(a.maker||"").localeCompare(String(b.maker||""), "ja") || byDate(a,b));
     return arr;
-  }, [costs, viewMonth]);
+  }, [costs, viewMonth, searchQ, sortKey, cats]);
 
   const monthTotals = useMemo(() => {
     const t = {};
@@ -453,7 +506,7 @@ function App() {
                 解析してフォームに反映
               </button>
             </div>
-            <PurchaseForm form={form} setForm={setForm} cats={cats} makers={makers} pays={pays} onManageCats={()=>setShowCatManage(true)} onManageMakers={()=>setShowMakerManage(true)} />
+            <PurchaseForm form={form} setForm={setForm} cats={cats} makers={makers} pays={pays} txnTypes={txnTypes} onManageCats={()=>setShowCatManage(true)} onManageMakers={()=>setShowMakerManage(true)} onManageTxnTypes={()=>setShowTxnManage(true)} />
             <button onClick={addItem} disabled={saving}
               style={{ width:"100%", marginTop:14, padding:14, borderRadius:12, border:"none", background:saving?C.sub:C.accent, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer" }}>
               {saving ? "保存中..." : "追加する"}
@@ -470,6 +523,20 @@ function App() {
               <button style={navBtn} onClick={() => { const d = new Date(viewMonth+"-01T00:00:00"); d.setMonth(d.getMonth()+1); setViewMonth(d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")); }}>{">"}</button>
             </div>
 
+            {/* 検索・並び替え */}
+            <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+              <input type="search" value={searchQ} onChange={e=>setSearchQ(e.target.value)} placeholder="検索（取引先・摘要・分類など）"
+                style={{ flex:1, minWidth:0, border:"1px solid "+C.border, borderRadius:10, padding:"9px 12px", fontSize:14, background:"#fff", outline:"none" }} />
+              <select value={sortKey} onChange={e=>setSortKey(e.target.value)}
+                style={{ border:"1px solid "+C.border, borderRadius:10, padding:"9px 8px", fontSize:13, background:"#fff", color:C.text, fontWeight:700 }}>
+                <option value="dateAsc">日付 古い順</option>
+                <option value="dateDesc">日付 新しい順</option>
+                <option value="amountDesc">金額 高い順</option>
+                <option value="amountAsc">金額 低い順</option>
+                <option value="maker">取引先別</option>
+              </select>
+            </div>
+
             <div style={{ ...css.card, background:"#fdfcf9" }}>
               {cats.map(c => (
                 <div key={c.key} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:"1px solid "+C.border, fontSize:13 }}>
@@ -483,7 +550,7 @@ function App() {
             </div>
 
             <div style={css.card}>
-              {monthItems.length === 0 && <div style={{ textAlign:"center", color:C.sub, fontSize:13, padding:"16px 0" }}>この月の明細はありません</div>}
+              {monthItems.length === 0 && <div style={{ textAlign:"center", color:C.sub, fontSize:13, padding:"16px 0" }}>{searchQ.trim() ? "検索に一致する明細がありません" : "この月の明細はありません"}</div>}
               {monthItems.map(item => (
                 <div key={item.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 0", borderBottom:"1px solid "+C.border }}>
                   <div style={{ minWidth:0, flex:1, paddingRight:8 }}>
@@ -491,12 +558,12 @@ function App() {
                       {item.date && <span style={{ color:C.accent, marginRight:6 }}>{parseInt(item.date.slice(5,7))+"/"+parseInt(item.date.slice(8,10))}</span>}
                       {item.maker}
                     </div>
-                    <div style={{ fontSize:12, color:C.sub }}>{catLabel(item.category)+(item.payMethod?"・"+item.payMethod:"")}</div>
+                    <div style={{ fontSize:12, color:C.sub }}>{catLabel(item.category)+(item.txnType?"・"+item.txnType:"")+(item.payMethod?"・"+item.payMethod:"")}</div>
                     {item.memo && <div style={{ fontSize:11, color:C.sub, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.memo}</div>}
                   </div>
                   <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
                     <span style={{ fontSize:14, fontWeight:800 }}>{yen(item.amount)}</span>
-                    <button onClick={() => { setEditTarget({ monthKey:viewMonth, item }); setEditForm({ category:item.category, date:item.date||"", payMethod:item.payMethod||"", maker:item.maker, amount:String(item.amount), memo:item.memo||"" }); }}
+                    <button onClick={() => { setEditTarget({ monthKey:viewMonth, item }); setEditForm({ category:item.category, date:item.date||"", payMethod:item.payMethod||"", maker:item.maker, amount:String(item.amount), memo:item.memo||"", txnType:item.txnType||"" }); }}
                       style={{ fontSize:12, color:C.accent, background:"none", border:"1px solid "+C.accent, borderRadius:8, padding:"4px 10px", cursor:"pointer" }}>編集</button>
                     <button onClick={() => deleteItem(viewMonth, item)}
                       style={{ fontSize:12, color:C.red, background:"none", border:"1px solid "+C.red, borderRadius:8, padding:"4px 10px", cursor:"pointer" }}>削除</button>
@@ -560,7 +627,7 @@ function App() {
               <button onClick={() => { setEditTarget(null); setEditForm(null); }}
                 style={{ background:"none", border:"none", fontSize:22, color:C.sub, cursor:"pointer", padding:"0 4px" }}>✕</button>
             </div>
-            <PurchaseForm form={editForm} setForm={setEditForm} cats={cats} makers={makers} pays={pays} onManageCats={()=>setShowCatManage(true)} onManageMakers={()=>setShowMakerManage(true)} />
+            <PurchaseForm form={editForm} setForm={setEditForm} cats={cats} makers={makers} pays={pays} txnTypes={txnTypes} onManageCats={()=>setShowCatManage(true)} onManageMakers={()=>setShowMakerManage(true)} onManageTxnTypes={()=>setShowTxnManage(true)} />
             <button onClick={updateItem} disabled={saving}
               style={{ width:"100%", marginTop:14, padding:14, borderRadius:12, border:"none", background:saving?C.sub:C.accent, color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer" }}>
               {saving ? "保存中..." : "更新する"}
@@ -630,6 +697,68 @@ function App() {
             ))}
             <div style={{ fontSize:11, color:C.sub, marginTop:12, lineHeight:1.6 }}>
               「分析用」の科目は経費率の計算（材料費＝対技術売上、店販仕入れ＝対店販売上）に使うため削除できません。名前の変更は可能です。
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 取引分類管理モーダル ── */}
+      {showTxnManage && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:950, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px 16px" }}
+          onClick={e => { if (e.target === e.currentTarget) { setShowTxnManage(false); setEditingTxn(null); } }}>
+          <div style={{ background:C.card, borderRadius:20, width:"100%", maxWidth:440, maxHeight:"85vh", overflowY:"auto", padding:20, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+              <div style={{ fontWeight:800, fontSize:16 }}>取引分類管理</div>
+              <button onClick={() => { setShowTxnManage(false); setEditingTxn(null); }}
+                style={{ background:"none", border:"none", fontSize:22, color:C.sub, cursor:"pointer", padding:"0 4px" }}>✕</button>
+            </div>
+            <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+              <input type="text" value={txnForm.name} onChange={e=>setTxnForm({name:e.target.value})} placeholder="分類名を入力（例：定期仕入）"
+                style={{ ...css.input, flex:1 }} />
+              <button onClick={async()=>{
+                  if (!txnForm.name.trim()) return;
+                  try {
+                    const next = await saveTxnTypesRMW(base => [...(base||[]), { id:Date.now(), name:txnForm.name.trim() }]);
+                    setTxnTypes(next); setTxnForm({name:""}); notify("追加しました ✓");
+                  } catch(e) { notify("追加に失敗しました","error"); }
+                }}
+                style={{ padding:"0 20px", borderRadius:10, border:"none", background:C.accent, color:"#fff", fontWeight:800, fontSize:14, cursor:"pointer" }}>追加</button>
+            </div>
+            {txnTypes.length === 0 && <div style={{ fontSize:13, color:C.sub, padding:"6px 0 10px" }}>まだ分類がありません。上の欄から追加してください。</div>}
+            {txnTypes.map(t => (
+              <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 0", borderBottom:"1px solid "+C.border }}>
+                {editingTxn && editingTxn.id===t.id ? (
+                  <input type="text" value={editingTxn.name} onChange={e=>setEditingTxn({...editingTxn,name:e.target.value})}
+                    style={{ ...css.input, flex:1, marginRight:8 }} autoFocus />
+                ) : (
+                  <span style={{ fontSize:14, fontWeight:700 }}>{t.name}</span>
+                )}
+                <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+                  {editingTxn && editingTxn.id===t.id ? (
+                    <button onClick={async()=>{
+                        if (!editingTxn.name.trim()) return;
+                        try {
+                          const next = await saveTxnTypesRMW(base => (base||[]).map(x=>x.id===t.id?{...x,name:editingTxn.name.trim()}:x));
+                          setTxnTypes(next); setEditingTxn(null); notify("更新しました ✓");
+                        } catch(e) { notify("更新に失敗しました","error"); }
+                      }}
+                      style={{ fontSize:12, color:"#fff", background:C.accent, border:"none", borderRadius:8, padding:"4px 10px", cursor:"pointer" }}>保存</button>
+                  ) : (
+                    <button onClick={()=>setEditingTxn({id:t.id,name:t.name})}
+                      style={{ fontSize:12, color:C.accent, background:"none", border:"1px solid "+C.accent, borderRadius:8, padding:"4px 10px", cursor:"pointer" }}>編集</button>
+                  )}
+                  <button onClick={async()=>{
+                      try {
+                        const next = await saveTxnTypesRMW(base => (base||[]).filter(x=>x.id!==t.id));
+                        setTxnTypes(next); notify("削除しました");
+                      } catch(e) { notify("削除に失敗しました","error"); }
+                    }}
+                    style={{ fontSize:12, color:C.red, background:"none", border:"1px solid "+C.red, borderRadius:8, padding:"4px 10px", cursor:"pointer" }}>削除</button>
+                </div>
+              </div>
+            ))}
+            <div style={{ fontSize:11, color:C.sub, marginTop:12, lineHeight:1.6 }}>
+              分類を削除・改名しても、登録済みの明細に付いた分類名はそのまま残ります（明細の編集から付け替えできます）。
             </div>
           </div>
         </div>
