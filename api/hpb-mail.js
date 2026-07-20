@@ -1,12 +1,13 @@
 // ═══════════════════════════════════════════
-// /api/hpb-mail.js  (HPB-v3)
+// /api/hpb-mail.js  (HPB-v4)
 // HPB(サロンボード)予約通知メール取り込み: CloudMailin → 解析 → appointments INSERT/DELETE → 通知
 //
 // 経路: HPB予約通知メール → メールの自動転送 → CloudMailin(JSON Normalized)
 //       → POST https://salon-manager-sigma.vercel.app/api/hpb-mail?token=XXXX
 //
 // 方針:
-//   ・新規予約メール: 自動登録(INSERT)
+//   ・新規予約メール: 自動登録(INSERT)。メニューは登録済みメニュー(menusテーブル)と
+//     名称照合し、一意に一致した項目だけmenu_idsに紐付ける(確定確認時にカルテへ反映される)
 //   ・キャンセル連絡メール: 予約番号が一致する1件だけ自動削除(DELETE)。
 //     複数一致/不一致/番号読み取り不可の場合は削除せず通知のみ(手動対応)
 //   ・変更メール(書式未確認のため): 通知のみ・手動対応
@@ -21,7 +22,7 @@
 //   SALON_PHONE        … 任意
 // ═══════════════════════════════════════════
 
-const VERSION = "HPB-v3";
+const VERSION = "HPB-v4";
 const HPB_COLOR = "#f25c05"; // ホットペッパーオレンジ(出所タグ原則④)
 const DEFAULT_DURATION = 120; // 施術時間目安が読めなかった場合の既定(分)
 
@@ -156,10 +157,15 @@ async function handleMail(mail) {
   // ---------- 顧客照合(ふりがな→ひらがな正規化して一意に一致した場合のみ紐付け) ----------
   const { customerId, isNew, matchedName } = await matchOrCreateCustomer(name, kana);
 
+  // ---------- メニュー照合(HPBの表記「カット＋カラー」等を「+」で分解し、登録済みメニューと名称一致するものだけ紐付け) ----------
+  const { resolved, unresolved } = await resolveMenus(menuName);
+  const menuIds = resolved.map((m) => m.id);
+
   // ---------- appointments INSERT(出所タグ: notesに[HPB]+予約番号、HPBオレンジ) ----------
   let notes = `${dupTag}\n${name || "氏名不明"}${kana ? `（${kana}）` : ""}`;
   if (menuName) notes += `\nメニュー: ${menuName}`;
   if (total !== null) notes += `\n金額: ${total.toLocaleString()}円`;
+  if (unresolved.length > 0) notes += `\n⚠️未登録メニュー(要手動確認): ${unresolved.join("、")}`;
   notes += `\n(HPBメール自動取り込み)`;
 
   await sbInsert("appointments", {
@@ -168,7 +174,7 @@ async function handleMail(mail) {
     time: time,
     end_time: endTime,
     duration: duration,
-    menu_ids: [],
+    menu_ids: menuIds,
     notes: notes,
     color: HPB_COLOR,
     paid: false,
@@ -176,8 +182,12 @@ async function handleMail(mail) {
     customer_type: isNew ? "new" : "existing",
   });
 
+  const menuLine = resolved.length > 0
+    ? resolved.map((m) => m.name).join("、") + (unresolved.length > 0 ? `　+未登録: ${unresolved.join("、")}` : "")
+    : (menuName || "メニュー不明") + (menuName ? "（登録メニューと一致せず・要手動設定）" : "");
+
   await notifyOwner(
-    `🟠 [${VERSION}] HPB予約を予約表に自動登録しました\n\n📅 ${formatDateJP(dateStr)} ${time}〜${endTime}\n👤 ${name || "氏名不明"}${kana ? `（${kana}）` : ""}${isNew ? "（新規・仮カルテ自動作成）" : matchedName ? `（既存カルテ: ${matchedName}）` : ""}\n💇 ${menuName || "メニュー不明"}${total !== null ? `\n💰 ${total.toLocaleString()}円` : ""}\n予約番号: ${bookingNo}`
+    `🟠 [${VERSION}] HPB予約を予約表に自動登録しました\n\n📅 ${formatDateJP(dateStr)} ${time}〜${endTime}\n👤 ${name || "氏名不明"}${kana ? `（${kana}）` : ""}${isNew ? "（新規・仮カルテ自動作成）" : matchedName ? `（既存カルテ: ${matchedName}）` : ""}\n💇 ${menuLine}${total !== null ? `\n💰 ${total.toLocaleString()}円` : ""}\n予約番号: ${bookingNo}`
   );
   return "inserted";
 }
@@ -185,6 +195,47 @@ async function handleMail(mail) {
 function pick(text, re) {
   const m = text.match(re);
   return m ? m[1].trim() : null;
+}
+
+// ---------- メニュー照合 ----------
+// HPBの「■メニュー」欄(例: "カット＋ダメージケアカラー")を+/＋/、/,で分解し、
+// 登録済みメニュー(menusテーブル)と名称が一意に一致する項目だけを紐付ける。
+// 曖昧・複数候補・不一致の項目は紐付けず、通知とnotesに残して手動確認を促す(誤った価格・時間の混入を防ぐ)
+function normalizeMenuText(s) {
+  return String(s || "")
+    .replace(/[（(].*?[）)]/g, "") // 括弧書き(シャンプー.ブロー込み 等)は照合から除外
+    .replace(/[\s　]/g, "")
+    .toLowerCase();
+}
+async function resolveMenus(menuName) {
+  if (!menuName) return { resolved: [], unresolved: [] };
+  let catalog = [];
+  try {
+    const rows = await sbFetch("menus?select=id,name,price,duration,category&order=sort_order.asc");
+    catalog = (rows || []).filter((m) => m.category !== "業務");
+  } catch (e) {
+    console.error(`[${VERSION}] menu catalog fetch error:`, e);
+    return { resolved: [], unresolved: [menuName] };
+  }
+  const parts = menuName.split(/[+＋、,]/).map((s) => s.trim()).filter(Boolean);
+  const resolved = [];
+  const unresolved = [];
+  for (const part of parts) {
+    const norm = normalizeMenuText(part);
+    if (!norm) continue;
+    // ①完全一致を優先(例:「カット」は「前髪カット」等の部分一致より完全一致のカットを正として選ぶ)
+    const exactHits = catalog.filter((m) => normalizeMenuText(m.name) === norm);
+    if (exactHits.length === 1) { resolved.push(exactHits[0]); continue; }
+    if (exactHits.length > 1) { unresolved.push(part); continue; } // 同名が複数登録されている場合は手動確認へ
+    // ②完全一致が無い場合のみ部分一致を試す(候補が1件に絞れる時だけ採用)
+    const hits = catalog.filter((m) => {
+      const mn = normalizeMenuText(m.name);
+      return mn && (mn.includes(norm) || norm.includes(mn));
+    });
+    if (hits.length === 1) resolved.push(hits[0]);
+    else unresolved.push(part);
+  }
+  return { resolved, unresolved };
 }
 
 // ---------- キャンセル連絡メール: 予約番号が一致する1件だけ自動削除 ----------
