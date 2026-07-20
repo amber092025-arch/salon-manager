@@ -282,7 +282,7 @@ function App() {
   ]);
   const [expensePin, setExpensePin] = useState("");
   const [monthlyGoals, setMonthlyGoals] = useState({ techRev:"", visitCount:"", avgPrice:"", shopRev:"" });
-  const [lineBooking, setLineBooking] = useState({ slotUnit: 30, capacity: 1, enabled: true }); // LINE予約設定（枠単位・同時受入数・受付ON/OFF）
+  const [lineBooking, setLineBooking] = useState({ slotUnit: 30, capacity: 1, enabled: true, notifyBooked: { enabled: true, text: "" }, remind: { enabled: true, text: "" } }); // LINE予約設定（枠単位・同時受入数・受付ON/OFF・自動メッセージ2種）
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false); // 初回読み込み失敗フラグ（バナー表示用）
@@ -374,7 +374,8 @@ function App() {
           const lbCap = parseNum(settingsMap.bookingCapacity, 1);
           let lbEnabled = true;
           if (settingsMap.lineBookingEnabled !== undefined) { try { lbEnabled = JSON.parse(settingsMap.lineBookingEnabled) !== false; } catch(e) { lbEnabled = String(settingsMap.lineBookingEnabled) !== "false"; } }
-          setLineBooking({ slotUnit: (lbSlot === 15 ? 15 : 30), capacity: Math.min(Math.max(lbCap, 1), 9), enabled: lbEnabled });
+          const parseMsg = (raw) => { if (!raw) return { enabled: true, text: "" }; try { const v = JSON.parse(raw); return { enabled: v.enabled !== false, text: v.text || "" }; } catch(e) { return { enabled: true, text: "" }; } };
+          setLineBooking({ slotUnit: (lbSlot === 15 ? 15 : 30), capacity: Math.min(Math.max(lbCap, 1), 9), enabled: lbEnabled, notifyBooked: parseMsg(settingsMap.lineNotifyBooked), remind: parseMsg(settingsMap.lineRemind) });
         }
         if (settingsMap.blogPrompt && !settingsMap.blogPrompt.includes("ここに")) { try { localStorage.setItem("blogPrompt", settingsMap.blogPrompt); } catch(e) {} }
         if (settingsMap.stylupPrompt && !settingsMap.stylupPrompt.includes("ここに")) { try { localStorage.setItem("stylupPrompt", settingsMap.stylupPrompt); } catch(e) {} }
@@ -636,6 +637,8 @@ function App() {
     if (error) return notify("保存に失敗しました", "error");
     const saved = fromDb.appointment(data[0]);
     setAppointments(p => [...p, saved]);
+    // 次回予約メモのLINE自動送信(連携済みのお客様のみサーバー側で判定・送信。失敗しても予約登録には影響しない)
+    fetch("/api/line-notify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apptId: saved.id }) }).catch(() => {});
     return saved;
   }, []);
 
@@ -3493,17 +3496,50 @@ function MergeCustomersTab({ setTab, notify, customers, setCustomers, setVisits,
 }
 
 function LineBookingSettingsTab({ setTab, notify, lineBooking, setLineBooking, saveSetting }) {
-  const [form, setForm] = useState({ slotUnit: lineBooking.slotUnit, capacity: lineBooking.capacity, enabled: lineBooking.enabled });
+  const [form, setForm] = useState({
+    slotUnit: lineBooking.slotUnit, capacity: lineBooking.capacity, enabled: lineBooking.enabled,
+    notifyBooked: { enabled: lineBooking.notifyBooked?.enabled !== false, text: lineBooking.notifyBooked?.text || "" },
+    remind: { enabled: lineBooking.remind?.enabled !== false, text: lineBooking.remind?.text || "" },
+  });
   const [saving, setSaving] = useState(false);
   const save = async () => {
     setSaving(true);
     await saveSetting("bookingSlotUnit", form.slotUnit);
     await saveSetting("bookingCapacity", form.capacity);
     await saveSetting("lineBookingEnabled", form.enabled);
+    await saveSetting("lineNotifyBooked", { enabled: form.notifyBooked.enabled, text: form.notifyBooked.text });
+    await saveSetting("lineRemind", { enabled: form.remind.enabled, text: form.remind.text });
     setLineBooking({ ...form });
     setSaving(false);
     notify("LINE予約設定を保存しました ✓");
   };
+  const DEFAULT_NOTIFY_TEXT = "{お名前}様\nご予約ありがとうございます✂️\n\n📅 {日付} {時間}〜\nメニュー: {メニュー}\n\nご来店お待ちしております！";
+  const DEFAULT_REMIND_TEXT = "{お名前}様\n明日 {日付} {時間}〜 ご予約をお受けしております✂️\nご来店お待ちしております！\n\n変更・キャンセルの際はお電話にてご連絡ください。";
+  const renderMsgSection = (title, desc, confKey, defText) => (
+    <div style={{ marginBottom: 18, borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <div style={{ fontSize: 12, color: C.sub, fontWeight: 700 }}>{title}</div>
+        <div onClick={() => setForm(p => ({ ...p, [confKey]: { ...p[confKey], enabled: !p[confKey].enabled } }))}
+          style={{ width: 48, height: 28, borderRadius: 14, background: form[confKey].enabled ? "#06c755" : "#ccc", position: "relative", cursor: "pointer", transition: "background 0.2s", flexShrink: 0 }}>
+          <div style={{ position: "absolute", top: 2, left: form[confKey].enabled ? 22 : 2, width: 24, height: 24, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
+        </div>
+      </div>
+      <div style={{ fontSize: 11, color: C.sub, marginBottom: 8 }}>{desc}</div>
+      {form[confKey].enabled && (
+        <div>
+          <textarea value={form[confKey].text}
+            onChange={e => { const v = e.target.value; setForm(p => ({ ...p, [confKey]: { ...p[confKey], text: v } })); }}
+            placeholder={defText}
+            rows={6}
+            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 13, lineHeight: 1.6, fontFamily: "inherit", resize: "vertical", background: "#fff", outline: "none" }} />
+          <div style={{ fontSize: 11, color: C.sub, marginTop: 4, lineHeight: 1.7 }}>
+            空欄のままなら上のグレーの文面(初期文面)で送信されます。<br/>
+            使えるタグ: {"{お名前} {日付} {時間} {メニュー}"} → 送信時に実際の内容へ置き換わります
+          </div>
+        </div>
+      )}
+    </div>
+  );
   return (
     <div style={{ background: C.bg, minHeight: "100vh" }}>
       <div style={{ background: "#fff", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.border}` }}>
@@ -3547,6 +3583,8 @@ function LineBookingSettingsTab({ setTab, notify, lineBooking, setLineBooking, s
             </button>
             <div style={{ fontSize: 11, color: C.sub, marginTop: 6 }}>緊急停止スイッチ。停止中はLINEで「現在ご予約を停止しています」と自動返信されます</div>
           </div>
+          {renderMsgSection("次回予約メモ（予約登録時に自動送信）", "アプリで予約を登録した瞬間、LINE連携済みのお客様へ予約内容の確認メッセージを自動送信します", "notifyBooked", DEFAULT_NOTIFY_TEXT)}
+          {renderMsgSection("前日リマインダー（毎日19時ごろ自動送信）", "翌日に予約があるLINE連携済みのお客様へ、確認メッセージを自動送信します", "remind", DEFAULT_REMIND_TEXT)}
           <button onClick={save} disabled={saving}
             style={{ width: "100%", marginTop: 4, padding: 14, borderRadius: 12, border: "none", background: saving ? C.sub : "#06c755", color: "#fff", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>
             {saving ? "保存中..." : "保存する"}
@@ -3885,7 +3923,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.20-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.20-b"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
