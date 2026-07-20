@@ -111,7 +111,7 @@ const fromDb = {
   menu: (r) => ({ id:r.id, name:r.name, price:r.price||0, category:r.category||"", duration:r.duration||60, showTilde:r.show_tilde||false, tags:r.tags||[], sortOrder:r.sort_order||0, menuKind:r.menu_kind||"menu", targetCustomer:r.target_customer||"all", isBookable:r.is_bookable!==false }),
   product: (r) => ({ id:r.id, name:r.name, price:r.price||0, cost:r.cost||0, stock:r.stock||0, minStock:r.min_stock||3, category:r.category||"", subCategory:r.sub_category||"", placeholder:r.placeholder||false, photos:r.photos||[], description:r.description||"", isPublic:r.is_public||false, sortOrder:r.sort_order||0 }),
   visit: (r) => { var pd={}; try{pd=r.photo_data?JSON.parse(r.photo_data):{};}catch(e){} return { id:r.id, customerId:r.customer_id, date:r.date, time:r.time||"", menus:r.menus||[], products:r.products||[], drugCost:r.drug_cost||0, paymentMethod:r.payment_method||"cash", total:r.total||0, notes:r.notes||"", images:r.images||[], beforeImgs:pd.before||[], afterImgs:pd.after||[], otherImgs:pd.other||[], customerType:r.customer_type||"existing", hpbPoint:r.hpb_point||0, paid:r.paid||false, duration:r.duration||60, appointmentId:r.appointment_id||null, tags:r.tags||[], styleName:r.style_name||"", styleComment:r.style_comment||"", isPublic:r.is_public||false, paidAt:r.paid_at||null }; },
-  appointment: (r) => ({ id:r.id, customerId:r.customer_id, date:r.date, time:r.time||"", endTime:r.end_time||"", duration:r.duration||60, menuIds:r.menu_ids||[], notes:r.notes||"", color:r.color||"#00b4a6", paid:r.paid||false, shimeika:r.shimeika||"shimeika", customerType:r.customer_type||"existing" }),
+  appointment: (r) => ({ id:r.id, customerId:r.customer_id, date:r.date, time:r.time||"", endTime:r.end_time||"", duration:r.duration||60, menuIds:r.menu_ids||[], notes:r.notes||"", color:r.color||"#00b4a6", paid:r.paid||false, shimeika:r.shimeika||"shimeika", customerType:r.customer_type||"existing", hpbPoint:r.hpb_point||0, bookingStatus:r.booking_status||"confirmed" }),
 };
 
 const SEED_MENUS = [
@@ -282,7 +282,7 @@ function App() {
   ]);
   const [expensePin, setExpensePin] = useState("");
   const [monthlyGoals, setMonthlyGoals] = useState({ techRev:"", visitCount:"", avgPrice:"", shopRev:"" });
-  const [lineBooking, setLineBooking] = useState({ slotUnit: 30, capacity: 1, enabled: true, notifyBooked: { enabled: true, text: "" }, remind: { enabled: true, text: "" } }); // LINE予約設定（枠単位・同時受入数・受付ON/OFF・自動メッセージ2種）
+  const [lineBooking, setLineBooking] = useState({ slotUnit: 30, capacity: 1, enabled: true, notifyBooked: { enabled: true, text: "" }, remind: { enabled: true, text: "" }, confirmMode: "auto" }); // LINE予約設定（枠単位・同時受入数・受付ON/OFF・自動メッセージ2種・確定方法）
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false); // 初回読み込み失敗フラグ（バナー表示用）
@@ -375,7 +375,9 @@ function App() {
           let lbEnabled = true;
           if (settingsMap.lineBookingEnabled !== undefined) { try { lbEnabled = JSON.parse(settingsMap.lineBookingEnabled) !== false; } catch(e) { lbEnabled = String(settingsMap.lineBookingEnabled) !== "false"; } }
           const parseMsg = (raw) => { if (!raw) return { enabled: true, text: "" }; try { const v = JSON.parse(raw); return { enabled: v.enabled !== false, text: v.text || "" }; } catch(e) { return { enabled: true, text: "" }; } };
-          setLineBooking({ slotUnit: (lbSlot === 15 ? 15 : 30), capacity: Math.min(Math.max(lbCap, 1), 9), enabled: lbEnabled, notifyBooked: parseMsg(settingsMap.lineNotifyBooked), remind: parseMsg(settingsMap.lineRemind) });
+          let lbMode = "auto";
+          if (settingsMap.lineBookingConfirmMode) { try { lbMode = JSON.parse(settingsMap.lineBookingConfirmMode); } catch(e) { lbMode = settingsMap.lineBookingConfirmMode; } }
+          setLineBooking({ slotUnit: (lbSlot === 15 ? 15 : 30), capacity: Math.min(Math.max(lbCap, 1), 9), enabled: lbEnabled, notifyBooked: parseMsg(settingsMap.lineNotifyBooked), remind: parseMsg(settingsMap.lineRemind), confirmMode: lbMode === "manual" ? "manual" : "auto" });
         }
         if (settingsMap.blogPrompt && !settingsMap.blogPrompt.includes("ここに")) { try { localStorage.setItem("blogPrompt", settingsMap.blogPrompt); } catch(e) {} }
         if (settingsMap.stylupPrompt && !settingsMap.stylupPrompt.includes("ここに")) { try { localStorage.setItem("stylupPrompt", settingsMap.stylupPrompt); } catch(e) {} }
@@ -3498,6 +3500,7 @@ function LineBookingSettingsTab({ setTab, notify, lineBooking, setLineBooking, s
     slotUnit: lineBooking.slotUnit, capacity: lineBooking.capacity, enabled: lineBooking.enabled,
     notifyBooked: { enabled: lineBooking.notifyBooked?.enabled !== false, text: lineBooking.notifyBooked?.text || "" },
     remind: { enabled: lineBooking.remind?.enabled !== false, text: lineBooking.remind?.text || "" },
+    confirmMode: lineBooking.confirmMode === "manual" ? "manual" : "auto",
   });
   const [saving, setSaving] = useState(false);
   const save = async () => {
@@ -3507,6 +3510,7 @@ function LineBookingSettingsTab({ setTab, notify, lineBooking, setLineBooking, s
     await saveSetting("lineBookingEnabled", form.enabled);
     await saveSetting("lineNotifyBooked", { enabled: form.notifyBooked.enabled, text: form.notifyBooked.text });
     await saveSetting("lineRemind", { enabled: form.remind.enabled, text: form.remind.text });
+    await saveSetting("lineBookingConfirmMode", form.confirmMode);
     setLineBooking({ ...form });
     setSaving(false);
     notify("LINE予約設定を保存しました ✓");
@@ -3580,6 +3584,22 @@ function LineBookingSettingsTab({ setTab, notify, lineBooking, setLineBooking, s
               {form.enabled ? "受付中（タップで停止）" : "停止中（タップで再開）"}
             </button>
             <div style={{ fontSize: 11, color: C.sub, marginTop: 6 }}>緊急停止スイッチ。停止中はLINEで「現在ご予約を停止しています」と自動返信されます</div>
+          </div>
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 8 }}>LINE予約の確定方法</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setForm(p => ({ ...p, confirmMode: "auto" }))}
+                style={{ flex: 1, padding: "12px 4px", borderRadius: 10, border: form.confirmMode !== "manual" ? "2px solid #06c755" : `1px solid ${C.border}`, background: form.confirmMode !== "manual" ? "#e8f7ec" : "#fff", color: form.confirmMode !== "manual" ? "#06955f" : C.sub, fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+                自動確定
+              </button>
+              <button onClick={() => setForm(p => ({ ...p, confirmMode: "manual" }))}
+                style={{ flex: 1, padding: "12px 4px", borderRadius: 10, border: form.confirmMode === "manual" ? "2px solid #e8a13a" : `1px solid ${C.border}`, background: form.confirmMode === "manual" ? "#fdf4e5" : "#fff", color: form.confirmMode === "manual" ? "#b57a00" : C.sub, fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+                手動確定（仮予約）
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: C.sub, marginTop: 6, lineHeight: 1.7 }}>
+              自動確定＝受付と同時に予約確定（従来どおり）。手動確定＝いったん仮予約として受け付け、予約表から「確定」または「別の日時を促す」を選べます（HPB併用サロン向け）
+            </div>
           </div>
           {renderMsgSection("次回予約メモ（予約登録時に自動送信）", "アプリで予約を登録した瞬間、LINE連携済みのお客様へ予約内容の確認メッセージを自動送信します", "notifyBooked", DEFAULT_NOTIFY_TEXT)}
           {renderMsgSection("前日リマインダー（毎日19時ごろ自動送信）", "翌日に予約があるLINE連携済みのお客様へ、確認メッセージを自動送信します", "remind", DEFAULT_REMIND_TEXT)}
@@ -3921,7 +3941,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.20-d"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.21-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -4077,6 +4097,7 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
       products: [],
       appointmentId: a.id,
       customerType: (extra && extra.customerType) || "existing",
+      hpbPoint: a.hpbPoint || 0, // HPB取り込み予約のポイント利用をカルテのHPBポイント欄へ自動転記
     };
     if (typeof addVisit === "function") await addVisit(emptyVisit);
     else setVisits(p => [...p, { ...emptyVisit, id: Date.now() + 1 }]);
@@ -4103,6 +4124,30 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
       customerType: "new",
     });
   };
+  // ── 仮予約(LINE手動確定モード)の確定 / 別日時の促し ──
+  const handleConfirmBooking = async (a) => {
+    closeTapMenu();
+    if (!window.confirm("この仮予約を確定しますか？\n(お客様のLINEへ「ご予約が確定しました」と送信されます)")) return;
+    try {
+      const r = await fetch("/api/line-notify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apptId: a.id, action: "confirm" }) });
+      const d = await r.json();
+      if (!d.ok) throw new Error("api");
+      setAppointments(p => p.map(x => x.id === a.id ? { ...x, bookingStatus: "confirmed" } : x));
+      notify(d.sent ? "予約を確定し、お客様へLINEを送信しました ✓" : "予約を確定しました(お客様はLINE未連携のため通知なし)");
+    } catch(e) { notify("確定に失敗しました。通信環境を確認してください", "error"); }
+  };
+  const handlePromptReschedule = async (a) => {
+    closeTapMenu();
+    if (!window.confirm("この仮予約をお断りし、別の日時でのご予約をお願いするLINEを送信します。\nこの仮予約は予約表から削除されます。よろしいですか？")) return;
+    try {
+      const r = await fetch("/api/line-notify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apptId: a.id, action: "reschedule" }) });
+      const d = await r.json();
+      if (!d.ok) throw new Error("api");
+      await deleteAppointment(a.id);
+      notify(d.sent ? "お客様へ日時変更のお願いを送信し、仮予約を削除しました ✓" : "仮予約を削除しました(お客様はLINE未連携のため通知なし)");
+    } catch(e) { notify("処理に失敗しました。通信環境を確認してください", "error"); }
+  };
+
   const saveConfirmForm = async () => {
     if (!confirmForm.name) return notify("氏名を入力してください", "error");
     const appt = appointments.find(a => a.id === confirmForm.apptId);
@@ -4348,7 +4393,7 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
               return (
                 <div key={a.id} onClick={(e) => { openTapMenu(e, a); }}
                   style={{ position: "absolute", top, left: 52, right: 8, height, borderRadius: 10, background: color, padding: "6px 10px", overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.15)", zIndex: 2, cursor: "pointer" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#fff", marginBottom: 3 }}>{a.time}-{endT}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#fff", marginBottom: 3 }}>{a.time}-{endT}{a.bookingStatus === "pending" && <span style={{ background: "#fff", color: "#b57a00", fontSize: 9, fontWeight: 800, borderRadius: 4, padding: "1px 6px", marginLeft: 6 }}>仮</span>}</div>
                   {a.paid && <span style={{ background: "rgba(0,0,0,0.5)", color: "#fff", fontSize: 9, fontWeight: 700, borderRadius: 4, padding: "1px 6px", marginRight: 6 }}>会計済</span>}
                   <div style={{ fontSize: 14, fontWeight: 800, color: "#fff" }}>{cust?.name || "不明"}様</div>
                   {height > 60 && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.9)", marginTop: 3 }}>
@@ -4424,6 +4469,7 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
                       <div key={a.id}
                         style={{ position: "absolute", top: top+1, left: 2, right: 2, height, borderRadius: 8, background: color, padding: "4px 5px", overflow: "hidden", boxShadow: "0 2px 6px rgba(0,0,0,0.18)", zIndex: 2, cursor: "grab", userSelect: "none", WebkitUserSelect: "none" }}
                         onClick={(e) => { openTapMenu(e, a); }}>
+                        {a.bookingStatus === "pending" && <div style={{ background: "#fff", color: "#b57a00", fontSize: 9, fontWeight: 800, borderRadius: 4, padding: "1px 5px", display: "inline-block", marginBottom: 2, marginRight: 3 }}>仮</div>}
                         {a.paid && <div style={{ background: "rgba(0,0,0,0.55)", color: "#fff", fontSize: 9, fontWeight: 700, borderRadius: 4, padding: "1px 5px", display: "inline-block", marginBottom: 2 }}>会計済</div>}
                         <div style={{ fontSize: 11, fontWeight: 700, color: "#fff", lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{cust?.name || "不明"}様</div>
                         {height > 42 && <div style={{ display: "flex", gap: 3, marginTop: 3, flexWrap: "wrap" }}>{am.slice(0,5).map((m,i) => <div key={i} style={{ width: 9, height: 9, borderRadius: "50%", background: "rgba(255,255,255,0.75)" }} />)}</div>}
@@ -4624,11 +4670,29 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
               <path d="M8 12.5l2.5 2.5L16 9.5"/>
             </svg>
           ),
+          "予約を確定": (
+            <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#06c755" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+              <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+          ),
+          "別日時を促す": (
+            <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#e8a13a" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="9"/>
+              <polyline points="12 7 12 12 15.5 14"/>
+              <path d="M5 3L2 6M19 3l3 3"/>
+            </svg>
+          ),
         };
         // このアプリ内にまだカルテ(来店記録)が作られていない予約(HPB取り込み等)にのみ「確定を確認」を出す
         const hasLinkedVisit = visits.some(v => v.appointmentId === a.id);
+        const isPending = a.bookingStatus === "pending";
         const actions = [
-          ...(hasLinkedVisit ? [] : [{ label: "確定を確認", color: "#06955f", action: () => handleConfirmKarte(a) }]),
+          ...(isPending ? [
+            { label: "予約を確定", color: "#06c755", action: () => handleConfirmBooking(a) },
+            { label: "別日時を促す", color: "#e8a13a", action: () => handlePromptReschedule(a) },
+          ] : []),
+          ...(hasLinkedVisit || isPending ? [] : [{ label: "確定を確認", color: "#06955f", action: () => handleConfirmKarte(a) }]),
           { label: "お会計", color: "#7a6848", action: () => { setShowCheckoutAppt(a); closeTapMenu(); } },
           { label: "カルテ詳細", color: "#7a6848", action: () => { setShowKarteAppt(a); closeTapMenu(); } },
           { label: "予約編集", color: "#7a6848", action: () => handleEditOpen(a) },
