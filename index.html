@@ -637,8 +637,6 @@ function App() {
     if (error) return notify("保存に失敗しました", "error");
     const saved = fromDb.appointment(data[0]);
     setAppointments(p => [...p, saved]);
-    // 次回予約メモのLINE自動送信(連携済みのお客様のみサーバー側で判定・送信。失敗しても予約登録には影響しない)
-    fetch("/api/line-notify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apptId: saved.id }) }).catch(() => {});
     return saved;
   }, []);
 
@@ -3923,7 +3921,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.20-b"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.20-c"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -4143,8 +4141,14 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
   const onCellPointerUp = () => { clearTimeout(cellLongPressTimer.current); };
   const onCellPointerCancel = () => { clearTimeout(cellLongPressTimer.current); };
 
-  const addAppt = async () => {
+  const addAppt = async (sendLine) => {
     if (!form.customerId || !form.date || !form.time) return notify("必須項目を入力してください", "error");
+    // 次回予約ボタン経由の場合はLINE送信の確認をとる(どちらを選んでも予約は作成される)
+    let doSendLine = false;
+    if (sendLine === true) {
+      const cust = customers.find(c => c.id === parseInt(form.customerId));
+      doSendLine = window.confirm(`予約を作成し、${cust ? cust.name + "様" : "お客様"}のLINEへ予約内容をお送りします。送信してよろしいですか？\n\n（キャンセル＝LINEは送信せず予約のみ作成）`);
+    }
     const custIdx = customers.findIndex(c => c.id === parseInt(form.customerId));
     const color = APPT_COLORS[custIdx % APPT_COLORS.length];
     const apptData = { ...form, customerId: parseInt(form.customerId), menuIds: form.menuIds.map(Number), color, duration: parseInt(form.duration) || 60, customerType: form.customerType || "existing" };
@@ -4157,6 +4161,17 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
       // フォールバック：ローカルのみ
       savedAppt = { ...apptData, id: Date.now() };
       setAppointments(p => [...p, savedAppt]);
+    }
+    // 次回予約メモのLINE送信(送信可否・連携有無はサーバー側でも判定。失敗しても予約作成には影響しない)
+    if (doSendLine && savedAppt && savedAppt.id) {
+      fetch("/api/line-notify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apptId: savedAppt.id }) })
+        .then(r => r.json())
+        .then(d => {
+          if (d && d.sent) notify("お客様のLINEへ予約内容を送信しました ✓");
+          else if (d && d.reason === "no_line") notify("このお客様はLINE未連携のため送信されませんでした", "error");
+          else if (d && d.reason === "disabled") notify("次回予約メモの送信がOFFのため送信されませんでした", "error");
+        })
+        .catch(() => {});
     }
     // 空カルテを自動作成（DBのappointment idで紐付け）
     const emptyVisit = {
@@ -4893,7 +4908,7 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
           <div style={{ background: C.card, padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.border}` }}>
             <button onClick={() => setShowAdd(false)} style={{ background: "none", border: "none", color: "#7a6848", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>キャンセル</button>
             <div style={{ fontWeight: 800, fontSize: 16 }}>新規予約作成</div>
-            <button onClick={addAppt} style={{ border: "1.5px solid #ff6b6b", borderRadius: 8, padding: "5px 14px", background: "transparent", color: "#ff6b6b", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>作成</button>
+            <button onClick={() => addAppt(false)} style={{ border: "1.5px solid #ff6b6b", borderRadius: 8, padding: "5px 14px", background: "transparent", color: "#ff6b6b", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>作成</button>
           </div>
 
           <div style={{ flex: 1, overflowY: "auto", padding: "0 0 80px" }}>
@@ -5050,7 +5065,8 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
 
             {/* Create button */}
             <div style={{ margin: "20px 16px 32px" }}>
-              <button onClick={addAppt} style={{ ...css.btn("#7a6848"), width: "100%", fontSize: 16, padding: "14px", borderRadius: 14 }}>新規予約を作成する</button>
+              <button onClick={() => addAppt(false)} style={{ ...css.btn("#7a6848"), width: "100%", fontSize: 16, padding: "14px", borderRadius: 14 }}>新規予約を作成する</button>
+              <button onClick={() => addAppt(true)} style={{ width: "100%", marginTop: 10, fontSize: 15, padding: "13px", borderRadius: 14, border: "2px solid #06c755", background: "#e8f7ec", color: "#06955f", fontWeight: 800, cursor: "pointer" }}>次回の予約を作成する（LINEで予約内容を送信）</button>
             </div>
           </div>
         </div>
