@@ -841,7 +841,7 @@ function App() {
       )}
       {/* Content */}
       <div style={{ padding: "0 0 8px" }}>
-        {tab === "home" && <HomeTab visits={visits} customers={customers} appointments={appointments} menus={menus} setTab={setTab} products={products} purchaseCosts={purchaseCosts} purchaseCategories={purchaseCategories} monthlyGoals={monthlyGoals} />}
+        {tab === "home" && <HomeTab visits={visits} customers={customers} appointments={appointments} menus={menus} setTab={setTab} products={products} purchaseCosts={purchaseCosts} purchaseCategories={purchaseCategories} monthlyGoals={monthlyGoals} bizHours={bizHours} closedDaysOfWeek={closedDaysOfWeek} personalHolidays={personalHolidays} />}
         {tab === "customers" && <CustomersTab customers={customers} setCustomers={setCustomers} visits={visits} setVisits={setVisitsW} menus={menus} products={products} notify={notify} addCustomer={addCustomer} openKarteDetail={openKarteDetail} setTab={setTab} setPendingCustomerId={setPendingCustomerId} />}
         {tab === "visit" && <VisitTab customers={customers} menus={menus} products={products} visits={visits} setVisits={setVisitsW} setProducts={setProductsW} notify={notify} setTab={setTab} setCustomers={setCustomers} />}
         {tab === "analytics" && <AnalyticsTab visits={visits} customers={customers} menus={menus} products={products} appointments={appointments} purchaseCosts={purchaseCosts} purchaseCategories={purchaseCategories} />}
@@ -903,9 +903,18 @@ function App() {
   );
 }
 
-function HomeTab({ visits, customers, appointments, menus, setTab, products, purchaseCosts, purchaseCategories, monthlyGoals }) {
+function HomeTab({ visits, customers, appointments, menus, setTab, products, purchaseCosts, purchaseCategories, monthlyGoals, bizHours, closedDaysOfWeek, personalHolidays }) {
   const now = new Date();
   const mStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+
+  // 今日の日付表示 + 今月の残り出勤日数(今日を含む。定休日・臨時休業を除いた営業日でカウント)
+  const todayLabel = `${now.getMonth()+1}月${now.getDate()}日(${["日","月","火","水","木","金","土"][now.getDay()]})`;
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+  let remainingWorkDays = 0;
+  for (let d = now.getDate(); d <= daysInMonth; d++) {
+    const dStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+    if (!getBizForDate(dStr, bizHours, closedDaysOfWeek, personalHolidays).isHoliday) remainingWorkDays++;
+  }
   const mv = visits.filter(v => v.date.startsWith(mStr));
   const rev = mv.reduce((s, v) => s + v.total, 0);
   const avg = mv.length ? Math.round(rev / mv.length) : 0;
@@ -946,6 +955,16 @@ function HomeTab({ visits, customers, appointments, menus, setTab, products, pur
 
   return (
     <div style={{ padding: "12px 16px" }}>
+
+      {/* 今日の日付 + 今月の残り出勤日数 */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <div style={{ fontSize: 19, fontWeight: 800, color: C.text }}>{todayLabel}</div>
+        <div style={{ fontSize: 13, color: C.sub, fontWeight: 700, display: "flex", alignItems: "baseline", gap: 4 }}>
+          今月の残り出勤
+          <span style={{ fontSize: 19, fontWeight: 800, color: C.accent }}>{remainingWorkDays}</span>
+          日
+        </div>
+      </div>
 
       {/* 未会計アラート */}
       {unpaidVisits.length > 0 && (
@@ -3866,7 +3885,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.19-b"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.20-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
