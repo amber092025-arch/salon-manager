@@ -1,7 +1,9 @@
 // ═══════════════════════════════════════════
 // /api/line-notify.js  (NOTIFY-v1)
 // アプリで予約を登録した直後の「次回予約メモ」LINE自動送信
-// POST { apptId } → 該当予約のお客様にLINE連携があれば確認メッセージをpush
+// POST { apptId } → 該当予約のお客様にLINE連携があれば「次回予約メモ」をpush
+// POST { apptId, action:"confirm" } → 仮予約を確定し「ご予約が確定しました」をpush(booking_statusをconfirmedへ)
+// POST { apptId, action:"reschedule" } → 「別の日時でのご予約のお願い」をpush(予約の削除はアプリ側で実施)
 //
 // 設計:
 //   ・文面/ON-OFFはsettingsテーブルの lineNotifyBooked ({enabled, text}) を参照。
@@ -11,7 +13,7 @@
 //   ・LINE未連携のお客様は静かにスキップ(エラーにしない)
 // ═══════════════════════════════════════════
 
-const VERSION = "NOTIFY-v1";
+const VERSION = "NOTIFY-v2";
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 
@@ -27,9 +29,27 @@ module.exports = async (req, res) => {
     const apptId = Number(body.apptId);
     if (!apptId) return res.status(400).json({ ok: false, error: "bad_request" });
 
-    const appts = await sbFetch(`appointments?id=eq.${apptId}&select=id,customer_id,date,time,menu_ids,line_notified,notes`);
+    const action = body.action || "";
+    const appts = await sbFetch(`appointments?id=eq.${apptId}&select=id,customer_id,date,time,menu_ids,line_notified,notes,booking_status`);
     const appt = appts && appts[0];
     if (!appt) return res.status(404).json({ ok: false, error: "not_found" });
+
+    // ── 仮予約の確定 / 別日時の促し(サロン管理者の操作から呼ばれる) ──
+    if (action === "confirm" || action === "reschedule") {
+      const custs2 = await sbFetch(`customers?id=eq.${appt.customer_id}&select=id,name,line_user_id`);
+      const cust2 = custs2 && custs2[0];
+      if (action === "confirm") {
+        // 先に確定状態へ(お客様がLINE未連携でも予約自体は確定できる)
+        await sbFetch(`appointments?id=eq.${appt.id}`, { method: "PATCH", body: JSON.stringify({ booking_status: "confirmed" }) });
+      }
+      if (!cust2 || !cust2.line_user_id) return res.status(200).json({ ok: true, sent: false, reason: "no_line" });
+      const message = action === "confirm"
+        ? await buildMessage("{お名前}様\nご予約が確定しました✂️\n\n📅 {日付} {時間}〜\nメニュー: {メニュー}\n\nご来店お待ちしております！", appt, cust2)
+        : await buildMessage("{お名前}様\n申し訳ございません、{日付} {時間}〜のご希望のお時間でご予約をお受けすることができませんでした🙇\nお手数ですが、別の日時で改めてご予約をお願いいたします。", appt, cust2);
+      await pushLine(cust2.line_user_id, message);
+      return res.status(200).json({ ok: true, sent: true, action });
+    }
+
     if (appt.line_notified) return res.status(200).json({ ok: true, sent: false, reason: "already" });
 
     // 設定(ON/OFF・文面)を読む。未設定なら既定でON

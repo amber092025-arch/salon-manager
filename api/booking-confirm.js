@@ -44,6 +44,9 @@ module.exports = async (req, res) => {
     const free = await B.isSlotFree(date, time, settings, totalDuration);
     if (!free) return res.status(409).json({ ok: false, error: "taken" });
 
+    // 確定方法: 手動確定モードなら仮予約として受け付ける
+    const pending = settings.lineBookingConfirmMode === "manual";
+
     const profile = await L.getProfile(userId);
     const { customer, isNew, linked } = await B.findOrCreateCustomer(userId, profile.displayName, phone);
     await B.createBooking({
@@ -55,27 +58,30 @@ module.exports = async (req, res) => {
       isNew,
       customerMessage: message,
       menus: selected,
+      pending,
     });
     await B.clearSession(userId);
 
     const phoneNote = process.env.SALON_PHONE ? `（TEL: ${process.env.SALON_PHONE}）` : "";
     const menuNames = selected.map((m) => m.name).join("\n・");
 
-    // お客様のLINEトークにも確認を残す
+    // お客様のLINEトークにも確認を残す(仮予約の場合は文言を変える)
     await L.push(userId, [
       L.text(
-        `ご予約を承りました✂️\n\n📅 ${B.formatDateJP(date)} ${time}〜\nメニュー:\n・${menuNames}\n合計: ¥${totalPrice.toLocaleString()}（約${totalDuration}分）\n\n変更・キャンセルはお電話にてお願いいたします${phoneNote}。\nご来店お待ちしております！`
+        pending
+          ? `仮予約として承りました✂️\n\n📅 ${B.formatDateJP(date)} ${time}〜\nメニュー:\n・${menuNames}\n合計: ¥${totalPrice.toLocaleString()}（約${totalDuration}分）\n\nサロンにて内容を確認後、確定のご連絡をお送りします。今しばらくお待ちください${phoneNote}。`
+          : `ご予約を承りました✂️\n\n📅 ${B.formatDateJP(date)} ${time}〜\nメニュー:\n・${menuNames}\n合計: ¥${totalPrice.toLocaleString()}（約${totalDuration}分）\n\n変更・キャンセルはお電話にてお願いいたします${phoneNote}。\nご来店お待ちしております！`
       ),
     ]).catch((e) => console.error("customer push:", e));
 
     // オーナー通知（LINE push＋メール）
     await L.notifyOwner(
-      `🔔 [LINE-v3] カレンダー予約が入りました\n\n📅 ${B.formatDateJP(date)} ${time}〜\nメニュー:\n・${menuNames}\n合計: ¥${totalPrice.toLocaleString()}・約${totalDuration}分\n👤 ${profile.displayName}${isNew ? "（新規・空カルテ自動作成）" : linked ? `（既存カルテ「${customer.name}」様と電話番号で自動連携しました）` : ""}${message ? `\n💬 ${String(message).slice(0, 200)}` : ""}\n\n★サロンボード（HPB）側の同時間帯を手動でブロックしてください`
+      `${pending ? "🕒 [LINE-v3] 仮予約が入りました(予約表から確定または日時変更の促しをしてください)" : "🔔 [LINE-v3] カレンダー予約が入りました"}\n\n📅 ${B.formatDateJP(date)} ${time}〜\nメニュー:\n・${menuNames}\n合計: ¥${totalPrice.toLocaleString()}・約${totalDuration}分\n👤 ${profile.displayName}${isNew ? "（新規・空カルテ自動作成）" : linked ? `（既存カルテ「${customer.name}」様と電話番号で自動連携しました）` : ""}${message ? `\n💬 ${String(message).slice(0, 200)}` : ""}\n\n★サロンボード（HPB）側の同時間帯を手動でブロックしてください`
     );
 
     return res.status(200).json({
       ok: true, date, time, dateLabel: B.formatDateJP(date),
-      menus: selected, totalPrice, totalDuration,
+      menus: selected, totalPrice, totalDuration, pending,
     });
   } catch (e) {
     console.error("booking-confirm error:", e);

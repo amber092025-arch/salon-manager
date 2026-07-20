@@ -20,7 +20,7 @@
 const crypto = require("crypto");
 const B = require("./_lib/booking.js");
 
-const VERSION = "LINE-v2";
+const VERSION = "LINE-v3";
 const SALON_NAME = process.env.SALON_NAME || "Amber";
 const PHONE_NOTE = process.env.SALON_PHONE ? `（TEL: ${process.env.SALON_PHONE}）` : "";
 const TIME_PAGE_SIZE = 12; // Quick Replyは最大13個。12件+「もっと見る」
@@ -366,6 +366,7 @@ async function finalize(replyToken, userId, dateStr, time) {
 
   const profile = await getProfile(userId);
   const { customer, isNew } = await B.findOrCreateCustomer(userId, profile.displayName);
+  const pending = settings.lineBookingConfirmMode === "manual"; // 手動確定モードなら仮予約
   await B.createBooking({
     customerId: customer.id,
     dateStr,
@@ -373,12 +374,15 @@ async function finalize(replyToken, userId, dateStr, time) {
     userId,
     displayName: profile.displayName,
     isNew,
+    pending,
   });
   await B.clearSession(userId);
 
   await reply(replyToken, [
     text(
-      `ご予約を承りました✂️\n\n📅 ${B.formatDateJP(dateStr)} ${time}〜\n\n変更・キャンセルはお電話にてお願いいたします${PHONE_NOTE}。\nご来店お待ちしております！`
+      pending
+        ? `仮予約として承りました✂️\n\n📅 ${B.formatDateJP(dateStr)} ${time}〜\n\nサロンにて内容を確認後、確定のご連絡をお送りします。今しばらくお待ちください${PHONE_NOTE}。`
+        : `ご予約を承りました✂️\n\n📅 ${B.formatDateJP(dateStr)} ${time}〜\n\n変更・キャンセルはお電話にてお願いいたします${PHONE_NOTE}。\nご来店お待ちしております！`
     ),
   ]);
 
