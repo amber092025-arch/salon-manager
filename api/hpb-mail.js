@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════
-// /api/hpb-mail.js  (HPB-v5)
+// /api/hpb-mail.js  (HPB-v6)
 // HPB(サロンボード)予約通知メール取り込み: CloudMailin → 解析 → appointments INSERT/DELETE → 通知
 //
 // 経路: HPB予約通知メール → メールの自動転送 → CloudMailin(JSON Normalized)
@@ -22,7 +22,7 @@
 //   SALON_PHONE        … 任意
 // ═══════════════════════════════════════════
 
-const VERSION = "HPB-v5";
+const VERSION = "HPB-v6";
 const HPB_COLOR = "#f25c05"; // ホットペッパーオレンジ(出所タグ原則④)
 const DEFAULT_DURATION = 120; // 施術時間目安が読めなかった場合の既定(分)
 
@@ -218,11 +218,12 @@ function extractCouponName(text) {
   return null;
 }
 
-// 照合用の正規化: 括弧書き・空白・価格表記(\19000 / ¥13,500 / 13500円)を除去して比較
+// 照合用の正規化: 括弧書き・【】ラベル(【新規】【2回目以降】等)・価格表記(\19000 / ¥13,500 / 13500円)を除去して比較
 // ※「ヘッドスパ25分」のような時間表記の数字は消さない(価格の形をした数字だけ除去)
 function normalizeMenuText(s) {
   return String(s || "")
     .replace(/[（(].*?[）)]/g, "")
+    .replace(/[【\[［].*?[】\]］]/g, "")
     .replace(/[\\￥¥]\s*[\d,]{3,}/g, "")
     .replace(/[\d,]{4,}円/g, "")
     .replace(/[\s　]/g, "")
