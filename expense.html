@@ -47,6 +47,22 @@ const DEFAULT_TXNTYPES = []; // 取引分類（ユーザーが自由に追加・
 
 const todayStr = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); };
 const yen = n => "¥" + (n||0).toLocaleString();
+
+// ── CSV書き出し共通ヘルパー ──
+// フィールドはカンマ・改行・引用符を含む場合のみダブルクォートで囲む(会計ソフト取り込み向けの標準的なCSV)
+const csvField = (v) => {
+  const s = (v===undefined||v===null) ? "" : String(v);
+  return /[",\n\r]/.test(s) ? "\"" + s.replace(/"/g,"\"\"") + "\"" : s;
+};
+const downloadCSV = (filename, rows) => {
+  const body = rows.map(r => r.map(csvField).join(",")).join("\r\n");
+  const blob = new Blob(["\uFEFF" + body], { type: "text/csv;charset=utf-8;" }); // UTF-8 BOM付き(Excel文字化け防止)
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+};
 // 納品書OCRテキストから 取引日・金額・取引先 を抽出
 const parseReceiptText = (text, makers) => {
   const out = {};
@@ -537,6 +553,17 @@ function App() {
               </select>
             </div>
 
+            <button onClick={() => {
+                if (monthItems.length === 0) return notify("書き出す明細がありません","error");
+                const rows = [["日付","科目","取引先","取引分類","支払手段","金額","摘要"]];
+                monthItems.forEach(it => rows.push([it.date||"", catLabel(it.category), it.maker||"", it.txnType||"", it.payMethod||"", it.amount||0, it.memo||""]));
+                downloadCSV(`経費_${viewMonth}.csv`, rows);
+                notify("CSVを書き出しました ✓");
+              }}
+              style={{ width:"100%", marginBottom:14, padding:"10px", borderRadius:10, border:"1px solid "+C.accent, background:"#fff", color:C.accent, fontWeight:700, fontSize:13, cursor:"pointer" }}>
+              この月の明細をCSVで書き出す（{monthItems.length}件）
+            </button>
+
             <div style={{ ...css.card, background:"#fdfcf9" }}>
               {cats.map(c => (
                 <div key={c.key} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:"1px solid "+C.border, fontSize:13 }}>
@@ -582,6 +609,23 @@ function App() {
               <div style={{ flex:1, textAlign:"center", fontWeight:800, fontSize:16 }}>{viewYear}年</div>
               <button style={navBtn} onClick={() => setViewYear(y => y+1)}>{">"}</button>
             </div>
+
+            <button onClick={() => {
+                const rows = [["日付","科目","取引先","取引分類","支払手段","金額","摘要"]];
+                let count = 0;
+                for (let m = 1; m <= 12; m++) {
+                  const key = viewYear + "-" + String(m).padStart(2,"0");
+                  const arr = Array.isArray(costs[key]) ? [...costs[key]] : [];
+                  arr.sort((a,b) => (a.date||"").localeCompare(b.date||"") || ((a.id||0)-(b.id||0)));
+                  arr.forEach(it => { rows.push([it.date||"", catLabel(it.category), it.maker||"", it.txnType||"", it.payMethod||"", it.amount||0, it.memo||""]); count++; });
+                }
+                if (count === 0) return notify("書き出す明細がありません","error");
+                downloadCSV(`経費_${viewYear}年.csv`, rows);
+                notify("CSVを書き出しました ✓");
+              }}
+              style={{ width:"100%", marginBottom:14, padding:"10px", borderRadius:10, border:"1px solid "+C.accent, background:"#fff", color:C.accent, fontWeight:700, fontSize:13, cursor:"pointer" }}>
+              {viewYear}年分をまとめてCSVで書き出す
+            </button>
 
             <div style={css.card}>
               <div style={{ fontWeight:800, fontSize:15, marginBottom:10 }}>科目別 年間合計</div>

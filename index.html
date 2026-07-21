@@ -220,6 +220,21 @@ function bdayToStored(d) {
 
 const todayStr = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); };
 const yen = (n) => `¥${(n || 0).toLocaleString()}`;
+
+// ── CSV書き出し共通ヘルパー ──
+const csvField = (v) => {
+  const s = (v === undefined || v === null) ? "" : String(v);
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+};
+const downloadCSV = (filename, rows) => {
+  const body = rows.map(r => r.map(csvField).join(",")).join("\r\n");
+  const blob = new Blob(["\uFEFF" + body], { type: "text/csv;charset=utf-8;" }); // UTF-8 BOM付き(Excel文字化け防止)
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+};
 const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : 0);
 
 const C = {
@@ -2985,6 +3000,37 @@ function AnalyticsTab({ visits, customers, menus, products, appointments, purcha
                 </div>
               );
             })()}
+
+            {/* ── CSVエクスポート（会計ソフト取り込み用） ── */}
+            <div style={css.card}>
+              <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 6 }}>売上データをCSVで書き出す</div>
+              <div style={{ fontSize: 12, color: C.sub, marginBottom: 12 }}>
+                現在の期間（{periodLabel || (period === "3m" ? "直近3ヶ月" : period === "year" ? `${now.getFullYear()}年` : "全期間")}）の来店・会計記録を1件1行で書き出します。会計ソフトへの取り込みにご利用ください。
+              </div>
+              <button onClick={() => {
+                  if (fv.length === 0) return notify("この期間に書き出せるデータがありません", "error");
+                  const rows = [["日付","時刻","顧客名","新規/既存","メニュー","店販","施術売上","店販売上","合計金額","支払方法","備考"]];
+                  [...fv].sort((a,b) => (a.date||"").localeCompare(b.date||"") || (a.time||"").localeCompare(b.time||"")).forEach(v => {
+                    const cust = customers.find(c => c.id === v.customerId);
+                    const menuNames = (v.menus||[]).map(m => m.name).filter(Boolean).join("、");
+                    const prodNames = (v.products||[]).map(p => p.name).filter(Boolean).join("、");
+                    const menuSum = (v.menus||[]).reduce((s,m) => s + (m.price||0), 0);
+                    const prodSum = (v.products||[]).reduce((s,p) => s + (p.price||0), 0);
+                    rows.push([
+                      v.date||"", v.time||"", cust ? cust.name : "不明",
+                      v.customerType === "new" ? "新規" : "既存",
+                      menuNames, prodNames, menuSum, prodSum, v.total||0,
+                      v.paymentMethod||"", v.notes||"",
+                    ]);
+                  });
+                  const label = periodLabel ? periodLabel.replace(/[\/年月]/g,"") : (period==="3m"?"直近3ヶ月":period==="year"?String(now.getFullYear())+"年":"全期間");
+                  downloadCSV(`売上_${label}.csv`, rows);
+                  notify("CSVを書き出しました ✓");
+                }}
+                style={{ width: "100%", padding: "13px", borderRadius: 12, border: `1px solid ${C.accent}`, background: "#fff", color: C.accent, fontWeight: 800, fontSize: 14, cursor: "pointer" }}>
+                この期間のデータをCSVで書き出す（{fv.length}件）
+              </button>
+            </div>
           </>
         )}
 
@@ -3941,7 +3987,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.21-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.21-b"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
