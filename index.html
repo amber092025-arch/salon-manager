@@ -13,8 +13,9 @@
   <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; overflow: hidden; } /* 実際のスクロールはアプリ内のコンテンツ領域が担う(下部ナビをposition:fixedにしないための土台) */
     body { font-family: -apple-system, 'Hiragino Sans', sans-serif; background: #faf8f4; }
-    #root { max-width: 480px; margin: 0 auto; }
+    #root { max-width: 480px; margin: 0 auto; height: 100%; }
   .photo-preview { height: 375px !important; max-height: 375px !important; overflow: hidden !important; position: relative; flex-shrink: 0; }
   .photo-preview img { width: 100%; height: 375px !important; max-height: 375px !important; object-fit: cover; display: block; }
   input[type="date"] { -webkit-appearance: none; appearance: none; }
@@ -891,17 +892,17 @@ function App() {
   );
 
   return (
-    <div style={{ background: C.bg, minHeight: "100vh", maxWidth: 480, margin: "0 auto", fontFamily: "-apple-system, 'Hiragino Sans', 'Yu Gothic UI', sans-serif", paddingBottom: 80, position: "relative", overflowX: "hidden" }}>
+    <div style={{ background: C.bg, height: "100dvh", maxWidth: 480, margin: "0 auto", fontFamily: "-apple-system, 'Hiragino Sans', 'Yu Gothic UI', sans-serif", position: "relative", overflowX: "hidden", display: "flex", flexDirection: "column" }}>
       {/* 初回読み込み失敗バナー */}
       {loadError && (
-        <div style={{ position: "sticky", top: 0, zIndex: 300, background: "#c0392b", color: "#fff", padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+        <div style={{ position: "sticky", top: 0, zIndex: 300, background: "#c0392b", color: "#fff", padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, fontSize: 13, flexShrink: 0 }}>
           <span style={{ flex: 1, fontWeight: 600 }}>データの読み込みに失敗しました。表示中の数値は不完全です。</span>
           <button onClick={() => window.location.reload()} style={{ background: "#fff", color: "#c0392b", border: "none", borderRadius: 8, padding: "6px 12px", fontWeight: 700, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>再読み込み</button>
           <button onClick={() => setLoadError(false)} style={{ background: "transparent", color: "#fff", border: "none", fontSize: 16, cursor: "pointer", padding: "2px 4px" }}>✕</button>
         </div>
       )}
-      {/* Content */}
-      <div style={{ padding: "0 0 8px" }}>
+      {/* Content（このアプリの唯一のスクロール領域。下部ナビをposition:fixedにせず、フレックスの通常フローで常に最下部に来るようにする） */}
+      <div style={{ padding: "0 0 8px", flex: 1, minHeight: 0, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
         {tab === "home" && <HomeTab visits={visits} customers={customers} appointments={appointments} menus={menus} setTab={setTab} products={products} purchaseCosts={purchaseCosts} purchaseCategories={purchaseCategories} monthlyGoals={monthlyGoals} bizHours={bizHours} closedDaysOfWeek={closedDaysOfWeek} personalHolidays={personalHolidays} />}
         {tab === "customers" && <CustomersTab customers={customers} setCustomers={setCustomers} visits={visits} setVisits={setVisitsW} menus={menus} products={products} notify={notify} addCustomer={addCustomer} openKarteDetail={openKarteDetail} setTab={setTab} setPendingCustomerId={setPendingCustomerId} />}
         {tab === "visit" && <VisitTab customers={customers} menus={menus} products={products} visits={visits} setVisits={setVisitsW} setProducts={setProductsW} notify={notify} setTab={setTab} setCustomers={setCustomers} />}
@@ -946,8 +947,8 @@ function App() {
         }} notify={notify} onDeleteVisit={async (id) => { await deleteVisit(id); setTab(karteDetailBackTab); }} />}
       </div>
 
-      {/* Bottom nav */}
-      <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: C.card, borderTop: `1px solid ${C.border}`, display: "flex", zIndex: 200 }}>
+      {/* Bottom nav（通常のフレックス項目。position:fixedをやめ、Stage Manager等のウィンドウリサイズでズレる問題を回避） */}
+      <div style={{ background: C.card, borderTop: `1px solid ${C.border}`, display: "flex", flexShrink: 0 }}>
         {TABS.map(t => (
           <button key={t.id} onClick={() => {
     setTab(t.id);
@@ -4296,7 +4297,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.21-c"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.21-d"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
