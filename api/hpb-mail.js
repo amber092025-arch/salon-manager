@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════
-// /api/hpb-mail.js  (HPB-v6)
+// /api/hpb-mail.js  (HPB-v7)
 // HPB(サロンボード)予約通知メール取り込み: CloudMailin → 解析 → appointments INSERT/DELETE → 通知
 //
 // 経路: HPB予約通知メール → メールの自動転送 → CloudMailin(JSON Normalized)
@@ -22,7 +22,7 @@
 //   SALON_PHONE        … 任意
 // ═══════════════════════════════════════════
 
-const VERSION = "HPB-v6";
+const VERSION = "HPB-v7";
 const HPB_COLOR = "#f25c05"; // ホットペッパーオレンジ(出所タグ原則④)
 const DEFAULT_DURATION = 120; // 施術時間目安が読めなかった場合の既定(分)
 
@@ -332,16 +332,18 @@ async function sbDelete(table, id) {
 }
 
 // ---------- 顧客照合 ----------
+// カタカナ→ひらがな変換(本体アプリの新規顧客登録と同じ表記に揃える。ふりがな保存・照合の両方で使用)
+function kataToHira(s) {
+  return String(s || "").replace(/[\u30a1-\u30f6]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60));
+}
+
 // ふりがな(カタカナ)をひらがなに正規化し、customersのkana/nameと突合。
 // ちょうど1件一致 → その顧客に紐付け。0件 or 複数件 → 仮カルテを新規作成(誤紐付け防止)
 async function matchOrCreateCustomer(name, kana) {
-  const norm = (s) =>
-    String(s || "")
-      .replace(/[\u30a1-\u30f6]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60)) // カタカナ→ひらがな
-      .replace(/[\s　]/g, "")
-      .toLowerCase();
+  const norm = (s) => kataToHira(s).replace(/[\s　]/g, "").toLowerCase();
   const targetKana = norm(kana);
   const targetName = norm(name);
+  const kanaHira = kana ? kataToHira(kana) : null; // 保存用(本体アプリと同じくひらがなで保存)
 
   try {
     const rows = await sbFetch("customers?select=id,name,kana");
@@ -360,7 +362,7 @@ async function matchOrCreateCustomer(name, kana) {
   // 一意に決まらない → 仮カルテ新規作成(既存の流儀に合わせる)
   const customer = await sbInsert("customers", {
     name: name || "HPBのお客様",
-    kana: kana || null,
+    kana: kanaHira || null,
     phone: null,
     birthday: null,
     gender: "female",
