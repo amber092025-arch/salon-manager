@@ -4297,7 +4297,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.21-d"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.21-e"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -4458,12 +4458,21 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
     if (typeof addVisit === "function") await addVisit(emptyVisit);
     else setVisits(p => [...p, { ...emptyVisit, id: Date.now() + 1 }]);
   };
+  // 予約の色を「お客様ごとの淡い色」に戻す(HPB取り込み直後のオレンジ色は「確定を確認」した時点で解除する)
+  const revertToCustomerColor = async (a) => {
+    const custIdx = customers.findIndex(c => c.id === a.customerId);
+    const color = APPT_COLORS[custIdx >= 0 ? custIdx % APPT_COLORS.length : 0];
+    await sb.from("appointments").update({ color }).eq("id", a.id);
+    setAppointments(p => p.map(x => x.id === a.id ? { ...x, color } : x));
+  };
+
   const handleConfirmKarte = (a) => {
     closeTapMenu();
     // アプリ内に既に来店記録(カルテ)がある方 = 情報入力なしでそのまま空カルテを作成
     const priorVisits = visits.filter(v => v.customerId === a.customerId).length;
     if (priorVisits > 0) {
       createEmptyVisitFromAppt(a, { customerType: "existing" });
+      revertToCustomerColor(a);
       notify("空のカルテを作成しました ✓");
       return;
     }
@@ -4512,6 +4521,7 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
     await sb.from("customers").update({ name: confirmForm.name, kana: confirmForm.kana, phone: confirmForm.phone, birthday: bd, gender: confirmForm.gender, notes: confirmForm.notes }).eq("id", appt.customerId);
     setCustomers(p => p.map(c => c.id === appt.customerId ? { ...c, name: confirmForm.name, kana: confirmForm.kana, phone: confirmForm.phone, birthday: bd, gender: confirmForm.gender, notes: confirmForm.notes } : c));
     await createEmptyVisitFromAppt(appt, { customerType: confirmForm.customerType });
+    await revertToCustomerColor(appt);
     setConfirmForm(null);
     notify("カルテを作成しました ✓");
   };
