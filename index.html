@@ -902,7 +902,7 @@ function App() {
         </div>
       )}
       {/* Content（このアプリの唯一のスクロール領域。下部ナビをposition:fixedにせず、フレックスの通常フローで常に最下部に来るようにする） */}
-      <div style={{ padding: "0 0 8px", flex: 1, minHeight: 0, overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+      <div style={{ padding: "0 0 8px", flex: 1, minHeight: 0, overflowY: "auto" }}>
         {tab === "home" && <HomeTab visits={visits} customers={customers} appointments={appointments} menus={menus} setTab={setTab} products={products} purchaseCosts={purchaseCosts} purchaseCategories={purchaseCategories} monthlyGoals={monthlyGoals} bizHours={bizHours} closedDaysOfWeek={closedDaysOfWeek} personalHolidays={personalHolidays} />}
         {tab === "customers" && <CustomersTab customers={customers} setCustomers={setCustomers} visits={visits} setVisits={setVisitsW} menus={menus} products={products} notify={notify} addCustomer={addCustomer} openKarteDetail={openKarteDetail} setTab={setTab} setPendingCustomerId={setPendingCustomerId} />}
         {tab === "visit" && <VisitTab customers={customers} menus={menus} products={products} visits={visits} setVisits={setVisitsW} setProducts={setProductsW} notify={notify} setTab={setTab} setCustomers={setCustomers} />}
@@ -4297,7 +4297,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.21-e"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.25-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
