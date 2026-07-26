@@ -4297,7 +4297,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.25-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.26-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -5070,9 +5070,9 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
           if (c2 && setTab) setTab("customerDetail_" + c2.id);
         };
         return (
-          <div style={{ position: "fixed", inset: 0, zIndex: 800, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }} onClick={closeTapMenu}>
+          <div style={{ position: "fixed", inset: 0, zIndex: 800, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 16px", boxSizing: "border-box" }} onClick={closeTapMenu}>
             <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.55)" }} />
-            <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }} onClick={e => e.stopPropagation()}>
+            <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 12, maxHeight: "85vh", overflowY: "auto", WebkitOverflowScrolling: "touch" }} onClick={e => e.stopPropagation()}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 {actions.map(ac => (
                   <button key={ac.label} onClick={ac.action} style={{ width: 150, height: 130, borderRadius: 16, background: "#fff", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.15)" }}>
