@@ -305,7 +305,7 @@ function App() {
   ]);
   const [expensePin, setExpensePin] = useState("");
   const [monthlyGoals, setMonthlyGoals] = useState({ techRev:"", visitCount:"", avgPrice:"", shopRev:"" });
-  const [lineBooking, setLineBooking] = useState({ slotUnit: 30, capacity: 1, enabled: true, notifyBooked: { enabled: true, text: "" }, remind: { enabled: true, text: "" }, confirmMode: "auto" }); // LINE予約設定（枠単位・同時受入数・受付ON/OFF・自動メッセージ2種・確定方法）
+  const [lineBooking, setLineBooking] = useState({ slotUnit: 30, capacity: 1, enabled: true, notifyBooked: { enabled: true, text: "" }, remind: { enabled: true, text: "" }, confirmMode: "auto", advanceDays: 14, cutoffMinutes: 60 }); // LINE予約設定（枠単位・同時受入数・受付ON/OFF・自動メッセージ2種・確定方法・受付開始日数・受付締切分数）
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false); // 初回読み込み失敗フラグ（バナー表示用）
@@ -395,12 +395,14 @@ function App() {
           const parseNum = (raw, def) => { if (raw === undefined || raw === null) return def; try { const v = parseInt(JSON.parse(raw)); return isNaN(v) ? def : v; } catch(e) { const v = parseInt(raw); return isNaN(v) ? def : v; } };
           const lbSlot = parseNum(settingsMap.bookingSlotUnit, 30);
           const lbCap = parseNum(settingsMap.bookingCapacity, 1);
+          const lbAdvanceDays = parseNum(settingsMap.bookingAdvanceDays, 14);
+          const lbCutoffMinutes = parseNum(settingsMap.bookingCutoffMinutes, 60);
           let lbEnabled = true;
           if (settingsMap.lineBookingEnabled !== undefined) { try { lbEnabled = JSON.parse(settingsMap.lineBookingEnabled) !== false; } catch(e) { lbEnabled = String(settingsMap.lineBookingEnabled) !== "false"; } }
           const parseMsg = (raw) => { if (!raw) return { enabled: true, text: "" }; try { const v = JSON.parse(raw); return { enabled: v.enabled !== false, text: v.text || "" }; } catch(e) { return { enabled: true, text: "" }; } };
           let lbMode = "auto";
           if (settingsMap.lineBookingConfirmMode) { try { lbMode = JSON.parse(settingsMap.lineBookingConfirmMode); } catch(e) { lbMode = settingsMap.lineBookingConfirmMode; } }
-          setLineBooking({ slotUnit: (lbSlot === 15 ? 15 : 30), capacity: Math.min(Math.max(lbCap, 1), 9), enabled: lbEnabled, notifyBooked: parseMsg(settingsMap.lineNotifyBooked), remind: parseMsg(settingsMap.lineRemind), confirmMode: lbMode === "manual" ? "manual" : "auto" });
+          setLineBooking({ slotUnit: (lbSlot === 15 ? 15 : 30), capacity: Math.min(Math.max(lbCap, 1), 9), enabled: lbEnabled, notifyBooked: parseMsg(settingsMap.lineNotifyBooked), remind: parseMsg(settingsMap.lineRemind), confirmMode: lbMode === "manual" ? "manual" : "auto", advanceDays: Math.min(Math.max(lbAdvanceDays, 1), 60), cutoffMinutes: Math.max(lbCutoffMinutes, 0) });
         }
         if (settingsMap.blogPrompt && !settingsMap.blogPrompt.includes("ここに")) { try { localStorage.setItem("blogPrompt", settingsMap.blogPrompt); } catch(e) {} }
         if (settingsMap.stylupPrompt && !settingsMap.stylupPrompt.includes("ここに")) { try { localStorage.setItem("stylupPrompt", settingsMap.stylupPrompt); } catch(e) {} }
@@ -3882,6 +3884,8 @@ function LineBookingSettingsTab({ setTab, notify, lineBooking, setLineBooking, s
     notifyBooked: { enabled: lineBooking.notifyBooked?.enabled !== false, text: lineBooking.notifyBooked?.text || "" },
     remind: { enabled: lineBooking.remind?.enabled !== false, text: lineBooking.remind?.text || "" },
     confirmMode: lineBooking.confirmMode === "manual" ? "manual" : "auto",
+    advanceDays: lineBooking.advanceDays || 14,
+    cutoffMinutes: lineBooking.cutoffMinutes !== undefined ? lineBooking.cutoffMinutes : 60,
   });
   const [saving, setSaving] = useState(false);
   const save = async () => {
@@ -3892,6 +3896,8 @@ function LineBookingSettingsTab({ setTab, notify, lineBooking, setLineBooking, s
     await saveSetting("lineNotifyBooked", { enabled: form.notifyBooked.enabled, text: form.notifyBooked.text });
     await saveSetting("lineRemind", { enabled: form.remind.enabled, text: form.remind.text });
     await saveSetting("lineBookingConfirmMode", form.confirmMode);
+    await saveSetting("bookingAdvanceDays", form.advanceDays);
+    await saveSetting("bookingCutoffMinutes", form.cutoffMinutes);
     setLineBooking({ ...form });
     setSaving(false);
     notify("LINE予約設定を保存しました ✓");
@@ -3957,6 +3963,28 @@ function LineBookingSettingsTab({ setTab, notify, lineBooking, setLineBooking, s
               {[1,2,3,4,5,6,7,8,9].map(n => <option key={n} value={n}>{n} 件</option>)}
             </select>
             <div style={{ fontSize: 11, color: C.sub, marginTop: 6 }}>同じ時間帯に受けられる予約の数（スタッフ数）。1人サロンは1のまま</div>
+          </div>
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 8 }}>何日先まで予約を受け付けるか</div>
+            <select value={form.advanceDays} onChange={e => setForm(p => ({ ...p, advanceDays: parseInt(e.target.value) }))}
+              style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "12px 14px", fontSize: 16, background: "#fff", outline: "none" }}>
+              {[7, 14, 21, 30, 45, 60].map(n => <option key={n} value={n}>{n}日先まで</option>)}
+            </select>
+            <div style={{ fontSize: 11, color: C.sub, marginTop: 6 }}>お客様が予約できる範囲(受付開始)です。HPBの「◯週間前から受付」に近い設定です</div>
+          </div>
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 8 }}>予約の何分前まで受け付けるか（受付締切）</div>
+            <select value={form.cutoffMinutes} onChange={e => setForm(p => ({ ...p, cutoffMinutes: parseInt(e.target.value) }))}
+              style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "12px 14px", fontSize: 16, background: "#fff", outline: "none" }}>
+              <option value={0}>直前まで受付</option>
+              <option value={30}>30分前まで</option>
+              <option value={60}>1時間前まで</option>
+              <option value={120}>2時間前まで</option>
+              <option value={360}>6時間前まで</option>
+              <option value={720}>12時間前まで</option>
+              <option value={1440}>24時間前まで（前日同時刻まで）</option>
+            </select>
+            <div style={{ fontSize: 11, color: C.sub, marginTop: 6 }}>直近すぎる予約を防ぎます。日をまたぐ設定(6時間以上)は翌日早朝の枠にも適用されます</div>
           </div>
           <div style={{ marginBottom: 18 }}>
             <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 8 }}>LINE予約の受付</div>
@@ -4323,7 +4351,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.28-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.28-b"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
