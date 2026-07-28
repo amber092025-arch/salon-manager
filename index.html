@@ -107,6 +107,7 @@ const toDb = {
   visit: (v) => ({ customer_id:v.customerId, date:v.date, time:v.time||null, menus:v.menus||[], products:v.products||[], drug_cost:v.drugCost||0, payment_method:v.paymentMethod||"cash", total:v.total||0, notes:v.notes||null, images:v.images||[], customer_type:v.customerType||"existing", hpb_point:v.hpbPoint||0, paid:v.paid||false, duration:v.duration||60, appointment_id:v.appointmentId||null, tags:v.tags||[], style_name:v.styleName||null, style_comment:v.styleComment||null, is_public:v.isPublic||false, paid_at:v.paidAt||null }),
   style: (s) => ({ images:s.images||[], cover_image:s.coverImage||null, category:s.category||"ladies", length:s.length||"", stylist_name:s.stylistName||"", stylist_comment:s.stylistComment||"", style_name:s.styleName||"", menu_flags:s.menuFlags||[], menu_text:s.menuText||"", coupon_menu_id:s.couponMenuId||null, hashtags:s.hashtags||[], model_volume:s.modelVolume||"", model_texture:s.modelTexture||"", model_thickness:s.modelThickness||"", model_curl:s.modelCurl||"", model_face:s.modelFace||"", model_age:s.modelAge||"", sort_order:s.sortOrder||Date.now() }),
   appointment: (a) => ({ customer_id:a.customerId, date:a.date, time:a.time||null, end_time:a.endTime||null, duration:a.duration||60, menu_ids:a.menuIds||[], notes:a.notes||null, color:a.color||"#00b4a6", paid:a.paid||false, shimeika:a.shimeika||"shimeika", customer_type:a.customerType||"existing" }),
+  privateEvent: (e) => ({ title:e.title||"予定", date:e.date, time:e.time||null, end_time:e.endTime||null, memo:e.memo||null, color:e.color||"#9a9088", is_shared:e.isShared!==false, recurrence:e.recurrence||"none", recurrence_until:e.recurrenceUntil||null }),
 };
 const fromDb = {
   customer: (r) => ({ id:r.id, name:r.name, kana:r.kana||"", phone:r.phone||"", birthday:r.birthday||"", gender:r.gender||"female", notes:r.notes||"", joinDate:r.join_date||"" }),
@@ -115,6 +116,7 @@ const fromDb = {
   visit: (r) => { var pd={}; try{pd=r.photo_data?JSON.parse(r.photo_data):{};}catch(e){} return { id:r.id, customerId:r.customer_id, date:r.date, time:r.time||"", menus:r.menus||[], products:r.products||[], drugCost:r.drug_cost||0, paymentMethod:r.payment_method||"cash", total:r.total||0, notes:r.notes||"", images:r.images||[], beforeImgs:pd.before||[], afterImgs:pd.after||[], otherImgs:pd.other||[], customerType:r.customer_type||"existing", hpbPoint:r.hpb_point||0, paid:r.paid||false, duration:r.duration||60, appointmentId:r.appointment_id||null, tags:r.tags||[], styleName:r.style_name||"", styleComment:r.style_comment||"", isPublic:r.is_public||false, paidAt:r.paid_at||null }; },
   style: (r) => ({ id:r.id, images:r.images||[], coverImage:r.cover_image||null, category:r.category||"ladies", length:r.length||"", stylistName:r.stylist_name||"", stylistComment:r.stylist_comment||"", styleName:r.style_name||"", menuFlags:r.menu_flags||[], menuText:r.menu_text||"", couponMenuId:r.coupon_menu_id||null, hashtags:r.hashtags||[], modelVolume:r.model_volume||"", modelTexture:r.model_texture||"", modelThickness:r.model_thickness||"", modelCurl:r.model_curl||"", modelFace:r.model_face||"", modelAge:r.model_age||"", sortOrder:r.sort_order||0, createdAt:r.created_at||null }),
   appointment: (r) => ({ id:r.id, customerId:r.customer_id, date:r.date, time:r.time||"", endTime:r.end_time||"", duration:r.duration||60, menuIds:r.menu_ids||[], notes:r.notes||"", color:r.color||"#00b4a6", paid:r.paid||false, shimeika:r.shimeika||"shimeika", customerType:r.customer_type||"existing", hpbPoint:r.hpb_point||0, bookingStatus:r.booking_status||"confirmed" }),
+  privateEvent: (r) => ({ id:r.id, title:r.title||"予定", date:r.date, time:r.time||"", endTime:r.end_time||"", memo:r.memo||"", color:r.color||"#9a9088", isShared:r.is_shared!==false, recurrence:r.recurrence||"none", recurrenceUntil:r.recurrence_until||"" }),
 };
 
 const SEED_MENUS = [
@@ -284,6 +286,7 @@ function App() {
   const [products, setProducts] = useState([]);
   const [visits, setVisits] = useState([]);
   const [appointments, setAppointments] = useState([]);
+  const [privateEvents, setPrivateEvents] = useState([]); // プライベート予定(お客様に紐付かない予約表ブロック)
   const [styles, setStyles] = useState([]); // スタイル掲載情報(その他→スタイル管理)
   const [editingStyleId, setEditingStyleId] = useState(null); // スタイルフォームで編集中のid(null=新規)
   const [weekOffset, setWeekOffset] = useState(0);
@@ -407,7 +410,7 @@ function App() {
       }
 
       // ② 残りのデータを並列取得（各クエリ最大3回リトライ。visitsは写真カラム除外の軽量版）
-      const [c, m, p, v, a, tc, ti, st] = await Promise.all([
+      const [c, m, p, v, a, tc, ti, st, pe] = await Promise.all([
         sbRetry(() => sb.from("customers").select().order("name")),
         sbRetry(() => sb.from("menus").select("id,name,price,duration,category,tags,show_tilde,sort_order,menu_kind,target_customer,is_bookable").order("sort_order")),
         sbRetry(() => sb.from("products").select("id,name,price,cost,stock,min_stock,category,sub_category,placeholder,description,is_public,sort_order").order("sort_order")),
@@ -416,6 +419,7 @@ function App() {
         sbRetry(() => sb.from("tag_categories").select().order("sort_order")),
         sbRetry(() => sb.from("tag_items").select().order("sort_order")),
         sbRetry(() => sb.from("styles").select("id,style_name,category,length,coupon_menu_id,hashtags,sort_order,created_at,cover_image").order("created_at", {ascending:false})),
+        sbRetry(() => sb.from("private_events").select().order("date")),
       ]);
       // 重要データ（顧客・来店・予約・メニュー）が1つでも読めなかったらバナー表示
       if (c.error || v.error || a.error || m.error) {
@@ -434,6 +438,7 @@ function App() {
       if (!v.error) setVisits(v.data.map(fromDb.visit));
       if (!a.error) setAppointments(a.data.map(fromDb.appointment));
       if (!st.error && st.data) setStyles(st.data.map(fromDb.style));
+      if (!pe.error && pe.data) setPrivateEvents(pe.data.map(fromDb.privateEvent));
       if (!tc.error && !ti.error) {
         const items = ti.data || [];
         setTagCategories((tc.data || []).map(cat => ({
@@ -723,6 +728,26 @@ function App() {
     }
   }, [appointments, visits]);
 
+  const addPrivateEvent = useCallback(async (e) => {
+    const { data, error } = await sb.from("private_events").insert([toDb.privateEvent(e)]);
+    if (error) return notify("プライベート予定の保存に失敗しました", "error");
+    const saved = fromDb.privateEvent(data[0]);
+    setPrivateEvents(p => [...p, saved]);
+    return saved;
+  }, []);
+
+  const updatePrivateEvent = useCallback(async (id, changes) => {
+    const cur = privateEvents.find(e => e.id === id);
+    if (!cur) return;
+    await sb.from("private_events").update(toDb.privateEvent({...cur,...changes})).eq("id", id);
+    setPrivateEvents(p => p.map(e => e.id === id ? {...e,...changes} : e));
+  }, [privateEvents]);
+
+  const deletePrivateEvent = useCallback(async (id) => {
+    await sb.from("private_events").delete().eq("id", id);
+    setPrivateEvents(p => p.filter(e => e.id !== id));
+  }, []);
+
   const addMenu = useCallback(async (m) => {
     const { data, error } = await sb.from("menus").insert([toDb.menu(m)]);
     if (error) return notify("保存に失敗しました", "error");
@@ -918,7 +943,7 @@ function App() {
         {tab === "styleList" && <StyleListTab setTab={setTab} notify={notify} styles={styles} menus={menus} deleteStyle={deleteStyle} setEditingStyleId={setEditingStyleId} />}
         {tab === "styleForm" && <StyleFormTab setTab={setTab} notify={notify} menus={menus} styles={styles} editingStyleId={editingStyleId} addStyle={addStyle} updateStyle={updateStyle} />}
         {tab === "tagSettings" && <TagSettingsTab setTab={setTab} notify={notify} tagCategories={tagCategories} setTagCategories={setTagCategories} />}
-        {tab === "appointments" && <AppointmentsTab appointments={appointments} setAppointments={setAppointmentsW} customers={customers} setCustomers={setCustomers} visits={visits} setVisits={setVisitsW} products={products} menus={menus} notify={notify} setTab={setTab} bizHours={bizHours} closedDaysOfWeek={closedDaysOfWeek} personalHolidays={personalHolidays} openKarteDetail={openKarteDetail} addCustomer={addCustomer} addVisit={addVisit} addAppointment={addAppointment} deleteAppointment={deleteAppointment} pendingCustomerId={pendingCustomerId} setPendingCustomerId={setPendingCustomerId} weekOffset={weekOffset} setWeekOffset={setWeekOffset} viewMode={viewMode} setViewMode={setViewMode} dayOffset={dayOffset} setDayOffset={setDayOffset} monthOffset={monthOffset} setMonthOffset={setMonthOffset} shopCategoryList={shopCategoryList} slotUnit={lineBooking.slotUnit} />}
+        {tab === "appointments" && <AppointmentsTab appointments={appointments} setAppointments={setAppointmentsW} customers={customers} setCustomers={setCustomers} visits={visits} setVisits={setVisitsW} products={products} menus={menus} notify={notify} setTab={setTab} bizHours={bizHours} closedDaysOfWeek={closedDaysOfWeek} personalHolidays={personalHolidays} openKarteDetail={openKarteDetail} addCustomer={addCustomer} addVisit={addVisit} addAppointment={addAppointment} deleteAppointment={deleteAppointment} privateEvents={privateEvents} addPrivateEvent={addPrivateEvent} updatePrivateEvent={updatePrivateEvent} deletePrivateEvent={deletePrivateEvent} pendingCustomerId={pendingCustomerId} setPendingCustomerId={setPendingCustomerId} weekOffset={weekOffset} setWeekOffset={setWeekOffset} viewMode={viewMode} setViewMode={setViewMode} dayOffset={dayOffset} setDayOffset={setDayOffset} monthOffset={monthOffset} setMonthOffset={setMonthOffset} shopCategoryList={shopCategoryList} slotUnit={lineBooking.slotUnit} />}
         {tab === "inventory" && <InventoryTab products={products} setProducts={setProductsW} addProduct={addProduct} updateProduct={updateProduct} deleteProduct={deleteProduct} notify={notify} setTab={setTab} visits={visits} purchaseCosts={purchaseCosts} setPurchaseCosts={setPurchaseCosts} purchaseMakers={purchaseMakers} setPurchaseMakers={setPurchaseMakers} purchasePayMethods={purchasePayMethods} setPurchasePayMethods={setPurchasePayMethods} purchaseCategories={purchaseCategories} setPurchaseCategories={setPurchaseCategories} />}
         {tab === "bizHours" && <BizHoursTab setTab={setTab} bizHours={bizHours} setBizHours={setBizHours} closedDaysOfWeek={closedDaysOfWeek} setClosedDaysOfWeek={setClosedDaysOfWeek} personalHolidays={personalHolidays} setPersonalHolidays={setPersonalHolidays} saveSetting={saveSetting} notify={notify} />}
         {tab === "settings" && <SettingsTab menus={menus} setMenus={setMenusW} products={products} setProducts={setProductsW} notify={notify} setTab={setTab} />}
@@ -4293,11 +4318,12 @@ function StylupPromptTab({ setTab, notify }) {
 }
 
 const APPT_COLORS = ["#C8A15A", "#e8829a", "#e8a864", "#7a9aba", "#9a88c8", "#72b08a"];
+const PE_COLORS = ["#8a8a8a", "#3fb98a", "#e8924a", "#9a7fd4", "#e0668a", "#5aa8e8", "#e05a4a"];
 const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.26-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.28-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -4333,7 +4359,7 @@ function getWeekStart(offset = 0) {
   return mon;
 }
 
-function AppointmentsTab({ appointments, setAppointments, customers, setCustomers, visits, setVisits, products, menus, notify, setTab, bizHours, closedDaysOfWeek, personalHolidays, openKarteDetail, addCustomer, addVisit, addAppointment, updateAppointment, deleteAppointment, initialCustomer, pendingCustomerId, setPendingCustomerId, weekOffset, setWeekOffset, viewMode, setViewMode, dayOffset, setDayOffset, monthOffset, setMonthOffset, shopCategoryList, slotUnit = 30 }) {
+function AppointmentsTab({ appointments, setAppointments, customers, setCustomers, visits, setVisits, products, menus, notify, setTab, bizHours, closedDaysOfWeek, personalHolidays, openKarteDetail, addCustomer, addVisit, addAppointment, updateAppointment, deleteAppointment, privateEvents = [], addPrivateEvent, updatePrivateEvent, deletePrivateEvent, initialCustomer, pendingCustomerId, setPendingCustomerId, weekOffset, setWeekOffset, viewMode, setViewMode, dayOffset, setDayOffset, monthOffset, setMonthOffset, shopCategoryList, slotUnit = 30 }) {
   const [showAdd, setShowAdd] = useState(!!(initialCustomer || pendingCustomerId));
   const [showEdit, setShowEdit] = useState(null);
   const [showEditMenuPicker, setShowEditMenuPicker] = useState(false);
@@ -4345,6 +4371,39 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
   const [custSearch, setCustSearch] = useState("");
   const [showFormMenuPicker, setShowFormMenuPicker] = useState(false);
+  const [showPrivateForm, setShowPrivateForm] = useState(false);
+  const [peEditId, setPeEditId] = useState(null); // 編集中のプライベート予定id（null=新規作成）
+  const [peForm, setPeForm] = useState({ title: "", date: todayStr(), time: "10:00", endTime: "11:00", memo: "", color: PE_COLORS[0], isShared: false, recurrence: "none", recurrenceUntil: "" });
+  const [tapPe, setTapPe] = useState(null); // タップ中のプライベート予定（編集/削除メニュー用）
+
+  // プライベート予定が指定日に発生するか（繰り返し設定を考慮）
+  const privateEventOccursOn = (e, dateStr) => {
+    if (e.date === dateStr) return true;
+    if (!e.recurrence || e.recurrence === "none") return false;
+    if (dateStr < e.date) return false;
+    if (e.recurrenceUntil && dateStr > e.recurrenceUntil) return false;
+    if (e.recurrence === "daily") return true;
+    const start = new Date(e.date + "T00:00:00");
+    const cur = new Date(dateStr + "T00:00:00");
+    if (e.recurrence === "weekly") return start.getDay() === cur.getDay();
+    if (e.recurrence === "monthly") return start.getDate() === cur.getDate();
+    return false;
+  };
+  const peOnDate = (dateStr) => (privateEvents||[]).filter(e => privateEventOccursOn(e, dateStr));
+  const openPrivateForm = (e) => {
+    if (e) { setPeEditId(e.id); setPeForm({ title:e.title, date:e.date, time:e.time||"10:00", endTime:e.endTime||"11:00", memo:e.memo||"", color:e.color||PE_COLORS[0], isShared:e.isShared!==false, recurrence:e.recurrence||"none", recurrenceUntil:e.recurrenceUntil||"" }); }
+    else { setPeEditId(null); setPeForm({ title:"", date:todayStr(), time:"10:00", endTime:"11:00", memo:"", color:PE_COLORS[0], isShared:true, recurrence:"none", recurrenceUntil:"" }); }
+    setTapPe(null);
+    setShowAdd(false);
+    setShowPrivateForm(true);
+  };
+  const savePrivateEvent = async () => {
+    if (!peForm.title.trim()) return notify("タイトルを入力してください", "error");
+    if (peEditId) { if (updatePrivateEvent) await updatePrivateEvent(peEditId, peForm); }
+    else { if (addPrivateEvent) await addPrivateEvent(peForm); }
+    setShowPrivateForm(false);
+    notify(peEditId ? "プライベート予定を更新しました ✓" : "プライベート予定を作成しました ✓");
+  };
 
   const gridRef = useRef(null);   // week view grid
   const dayRef = useRef(null);    // day view grid
@@ -4559,6 +4618,9 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
 
   const addAppt = async (sendLine) => {
     if (!form.customerId || !form.date || !form.time) return notify("必須項目を入力してください", "error");
+    // プライベート予定とかぶっていないか確認（ブロック済み時間帯への予約は警告のみ・強制はしない）
+    const overlapsPe = peOnDate(form.date).some(e => e.time && form.time < (e.endTime||"23:59") && (form.endTime||form.time) > e.time);
+    if (overlapsPe && !window.confirm("この時間帯はプライベート予定でブロックされています。予約を作成しますか？")) return;
     // 次回予約ボタン経由の場合はLINE送信の確認をとる(どちらを選んでも予約は作成される)
     let doSendLine = false;
     if (sendLine === true) {
@@ -4768,6 +4830,22 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
                 </div>
               );
             })}
+            {/* プライベート予定ブロック（ストライプ柄で通常予約と区別） */}
+            {peOnDate(currentDay).map(e => {
+              const top = timeToPx2(e.time||"00:00") + 1;
+              const [sh,sm] = (e.time||"00:00").split(":").map(Number);
+              const [eh,em] = (e.endTime||"23:59").split(":").map(Number);
+              const dur = Math.max((eh*60+em)-(sh*60+sm), 20);
+              const height = Math.max((dur / 60) * dynCellH - 4, 32);
+              const color = e.color || PE_COLORS[0];
+              return (
+                <div key={"pe"+e.id} onClick={() => setTapPe(e)}
+                  style={{ position: "absolute", top, left: 52, right: 8, height, borderRadius: 10, background: `repeating-linear-gradient(45deg, ${color}, ${color} 8px, ${color}cc 8px, ${color}cc 16px)`, padding: "6px 10px", overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.15)", zIndex: 2, cursor: "pointer", border: "1px solid rgba(255,255,255,0.4)" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>{e.time}-{e.endTime}</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "#fff" }}>🔒 {e.title}</div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -4839,6 +4917,20 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
                         {a.paid && <div style={{ background: "rgba(0,0,0,0.55)", color: "#fff", fontSize: 9, fontWeight: 700, borderRadius: 4, padding: "1px 5px", display: "inline-block", marginBottom: 2 }}>会計済</div>}
                         <div style={{ fontSize: 11, fontWeight: 700, color: "#fff", lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{cust?.name || "不明"}様</div>
                         {height > 42 && <div style={{ display: "flex", gap: 3, marginTop: 3, flexWrap: "wrap" }}>{am.slice(0,5).map((m,i) => <div key={i} style={{ width: 9, height: 9, borderRadius: "50%", background: "rgba(255,255,255,0.75)" }} />)}</div>}
+                      </div>
+                    );
+                  })}
+                  {peOnDate(d).map(e => {
+                    const top = timeToPx2(e.time||"00:00");
+                    const [sh,sm] = (e.time||"00:00").split(":").map(Number);
+                    const [eh,em] = (e.endTime||"23:59").split(":").map(Number);
+                    const dur = Math.max((eh*60+em)-(sh*60+sm), 20);
+                    const height = Math.max((dur / 60) * dynCellH - 4, 24);
+                    const color = e.color || PE_COLORS[0];
+                    return (
+                      <div key={"pe"+e.id} onClick={() => setTapPe(e)}
+                        style={{ position: "absolute", top: top+1, left: 2, right: 2, height, borderRadius: 8, background: `repeating-linear-gradient(45deg, ${color}, ${color} 6px, ${color}cc 6px, ${color}cc 12px)`, padding: "4px 5px", overflow: "hidden", boxShadow: "0 2px 6px rgba(0,0,0,0.18)", zIndex: 2, cursor: "pointer" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#fff", lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>🔒{e.title}</div>
                       </div>
                     );
                   })}
@@ -5128,6 +5220,19 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
           </div>
         );
       })()}
+
+      {/* ── プライベート予定タップメニュー（編集/削除） ── */}
+      {tapPe && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 800, display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px", boxSizing: "border-box" }} onClick={() => setTapPe(null)}>
+          <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.55)" }} />
+          <div style={{ position: "relative", zIndex: 1, background: "#fff", borderRadius: 16, padding: "20px", width: 280, boxShadow: "0 4px 20px rgba(0,0,0,0.15)" }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>🔒 {tapPe.title}</div>
+            <div style={{ fontSize: 13, color: C.sub, marginBottom: 16 }}>{tapPe.date} {tapPe.time}-{tapPe.endTime}</div>
+            <button onClick={() => openPrivateForm(tapPe)} style={{ width: "100%", padding: "12px", borderRadius: 10, border: "none", background: "#f5ede0", color: "#7a6848", fontWeight: 700, fontSize: 14, cursor: "pointer", marginBottom: 8 }}>編集する</button>
+            <button onClick={async () => { if (window.confirm("このプライベート予定を削除しますか？")) { await deletePrivateEvent(tapPe.id); setTapPe(null); notify("削除しました ✓"); } }} style={{ width: "100%", padding: "12px", borderRadius: 10, border: "none", background: "#fff0ee", color: "#ff3b30", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>削除する</button>
+          </div>
+        </div>
+      )}
 
       {/* ── 来店確定 → お客様情報入力(アプリ内にカルテが無い方のみ) ── */}
       {confirmForm && (
@@ -5502,7 +5607,97 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
             <div style={{ margin: "20px 16px 32px" }}>
               <button onClick={() => addAppt(false)} style={{ ...css.btn("#7a6848"), width: "100%", fontSize: 16, padding: "14px", borderRadius: 14 }}>新規予約を作成する</button>
               <button onClick={() => addAppt(true)} style={{ width: "100%", marginTop: 10, fontSize: 15, padding: "13px", borderRadius: 14, border: "2px solid #06c755", background: "#e8f7ec", color: "#06955f", fontWeight: 800, cursor: "pointer" }}>次回の予約を作成する（LINEで予約内容を送信）</button>
+              <button onClick={() => openPrivateForm(null)} style={{ width: "100%", marginTop: 10, fontSize: 15, padding: "13px", borderRadius: 14, border: `2px solid ${C.border}`, background: "transparent", color: C.sub, fontWeight: 700, cursor: "pointer" }}>プライベートの予定を作成</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── プライベート予定 作成・編集モーダル ── */}
+      {showPrivateForm && (
+        <div style={{ position: "fixed", inset: 0, background: C.bg, zIndex: 960, display: "flex", flexDirection: "column", maxWidth: 480, margin: "0 auto" }}>
+          <div style={{ background: C.card, padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.border}` }}>
+            <button onClick={() => setShowPrivateForm(false)} style={{ background: "none", border: "none", color: "#7a6848", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>キャンセル</button>
+            <div style={{ fontWeight: 800, fontSize: 16 }}>プライベート予定</div>
+            <button onClick={savePrivateEvent} style={{ border: "1.5px solid #ff6b6b", borderRadius: 8, padding: "5px 14px", background: "transparent", color: "#ff6b6b", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>{peEditId ? "更新" : "作成"}</button>
+          </div>
+          <div style={{ flex: 1, overflowY: "auto", padding: "16px 16px 80px" }}>
+            <div style={{ background: "#fff3f0", color: "#d9534f", fontSize: 12.5, borderRadius: 10, padding: "10px 14px", marginBottom: 20, lineHeight: 1.6 }}>
+              プライベートの予定を作成する事でその時間帯を予約受付不可にできます。
+            </div>
+
+            <div style={{ fontSize: 13, color: C.sub, marginBottom: 8 }}>1. 予定のタイトルを入力してください</div>
+            <input value={peForm.title} onChange={e => setPeForm(p => ({...p, title: e.target.value}))} placeholder="タイトルを入力"
+              style={{ width: "100%", boxSizing: "border-box", padding: "13px 14px", borderRadius: 12, border: `1px solid ${C.border}`, fontSize: 15, background: C.card, marginBottom: 20 }} />
+
+            <div style={{ fontSize: 13, color: C.sub, marginBottom: 8, textAlign: "center" }}>2. 予定の日時を入力してください</div>
+            <div style={{ background: C.card, borderRadius: 14, overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.06)", marginBottom: 20 }}>
+              <div style={{ padding: "0 16px", borderBottom: `1px solid ${C.border}` }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 0" }}>
+                  <span style={{ fontSize: 14, color: C.sub }}>開始時刻</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input type="date" value={peForm.date} onChange={e => setPeForm(p => ({...p, date: e.target.value}))}
+                      style={{ border: "none", fontSize: 15, fontWeight: 600, color: C.text, background: "transparent", textAlign: "right" }} />
+                    <input type="time" step="600" value={peForm.time} onChange={e => setPeForm(p => ({...p, time: e.target.value}))}
+                      style={{ border: "none", fontSize: 15, fontWeight: 600, color: C.text, background: "transparent" }} />
+                  </div>
+                </div>
+              </div>
+              <div style={{ padding: "0 16px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 0" }}>
+                  <span style={{ fontSize: 14, color: C.sub }}>終了時刻</span>
+                  <input type="time" step="600" value={peForm.endTime} onChange={e => setPeForm(p => ({...p, endTime: e.target.value}))}
+                    style={{ border: "none", fontSize: 15, fontWeight: 600, color: C.text, background: "transparent" }} />
+                </div>
+              </div>
+            </div>
+
+            <div style={{ fontSize: 13, color: C.sub, marginBottom: 8 }}>3. メモを入力できます</div>
+            <textarea value={peForm.memo} onChange={e => setPeForm(p => ({...p, memo: e.target.value}))} rows={3}
+              style={{ width: "100%", boxSizing: "border-box", padding: "12px 14px", borderRadius: 12, border: `1px solid ${C.border}`, fontSize: 14, background: C.card, marginBottom: 20, resize: "vertical", fontFamily: "inherit" }} />
+
+            <div style={{ fontSize: 13, color: C.sub, marginBottom: 8, textAlign: "center" }}>4. 繰り返し作成</div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
+              {[["none","なし"],["daily","毎日"],["weekly","毎週"],["monthly","毎月"]].map(([val,label]) => (
+                <button key={val} onClick={() => setPeForm(p => ({...p, recurrence: val}))}
+                  style={{ flex: 1, padding: "10px 4px", borderRadius: 10, border: `2px solid ${peForm.recurrence===val?"#7a6848":C.border}`, background: peForm.recurrence===val?"#f5ede0":C.card, color: peForm.recurrence===val?"#7a6848":C.sub, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>{label}</button>
+              ))}
+            </div>
+            {peForm.recurrence !== "none" && (
+              <div style={{ margin: "-12px 0 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 13, color: C.sub }}>繰り返しの終了日（任意）</span>
+                <input type="date" value={peForm.recurrenceUntil} onChange={e => setPeForm(p => ({...p, recurrenceUntil: e.target.value}))}
+                  style={{ border: "none", fontSize: 14, fontWeight: 600, color: C.text, background: "transparent" }} />
+              </div>
+            )}
+
+            <div style={{ fontSize: 13, color: C.sub, marginBottom: 8, textAlign: "center" }}>5. カラー</div>
+            <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
+              {PE_COLORS.map(c => (
+                <div key={c} onClick={() => setPeForm(p => ({...p, color: c}))}
+                  style={{ width: 34, height: 34, borderRadius: "50%", background: c, cursor: "pointer", border: peForm.color===c ? "3px solid #2a2218" : "3px solid transparent", boxSizing: "border-box" }} />
+              ))}
+            </div>
+
+            <div style={{ fontSize: 13, color: C.sub, marginBottom: 8, textAlign: "center" }}>6. 公開範囲の設定</div>
+            <div style={{ display: "flex", gap: 24, alignItems: "center", justifyContent: "center", marginBottom: 24 }}>
+              {[[true,"自分のみ"],[false,"サロンに共有"]].map(([val,label]) => (
+                <label key={label} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <div onClick={() => setPeForm(p => ({...p, isShared: !val}))} style={{ width: 22, height: 22, borderRadius: "50%", border: `2px solid ${peForm.isShared===!val ? "#3fb98a" : C.border}`, background: peForm.isShared===!val ? "#3fb98a" : "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {peForm.isShared===!val && <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#fff" }} />}
+                  </div>
+                  <span style={{ fontSize: 14, color: C.text }}>{label}</span>
+                </label>
+              ))}
+            </div>
+
+            <button onClick={savePrivateEvent} style={{ width: "100%", padding: "14px", borderRadius: 14, border: "2px solid #ff6b6b", background: "transparent", color: "#ff6b6b", fontWeight: 800, fontSize: 16, cursor: "pointer" }}>
+              {peEditId ? "プライベート予定を更新する" : "プライベートの予定を作成"}
+            </button>
+            {peEditId && (
+              <button onClick={async () => { if (window.confirm("このプライベート予定を削除しますか？")) { await deletePrivateEvent(peEditId); setShowPrivateForm(false); notify("削除しました ✓"); } }}
+                style={{ width: "100%", marginTop: 10, padding: "12px", borderRadius: 14, border: "none", background: "transparent", color: C.sub, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>削除する</button>
+            )}
           </div>
         </div>
       )}
