@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>レポート分析 - Amber</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; overflow:hidden; font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; background:#faf8f4; }
+  input[type=file] { font-family:inherit; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useCallback, useRef } = React;
+
+// ── Supabase接続(index.htmlと同じ設定・同じsbラッパーを踏襲) ──
+const SUPABASE_URL = "https://yvsavbxijdggzihvoram.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2c2F2YnhpamRnZ3ppaHZvcmFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NTkyNTEsImV4cCI6MjA5NTUzNTI1MX0.v_5yFWKizgOSUHifx10vSm7OEafy6fZhjy5cff-QHQw";
+
+const sb = {
+  from: (table) => ({
+    _table: table,
+    select: function(cols = "*") { this._cols = cols; this._filters = []; return this; },
+    insert: function(data) { this._method = "POST"; this._data = data; return this; },
+    upsert: function(data) { this._method = "POST"; this._data = data; this._upsert = true; return this; },
+    update: function(data) { this._method = "PATCH"; this._data = data; this._filters = []; return this; },
+    delete: function() { this._method = "DELETE"; this._filters = []; return this; },
+    eq: function(col, val) { this._filters = [...(this._filters||[]), `${col}=eq.${val}`]; return this; },
+    order: function(col, opts={}) { this._order = `${col}.${opts.ascending===false?"desc":"asc"}`; return this; },
+    then: async function(resolve, reject) {
+      try {
+        const base = `${SUPABASE_URL}/rest/v1/${this._table}`;
+        const headers = {
+          "apikey": SUPABASE_KEY,
+          "Authorization": `Bearer ${SUPABASE_KEY}`,
+          "Content-Type": "application/json",
+          "Prefer": this._upsert ? "resolution=merge-duplicates,return=representation" : "return=representation",
+        };
+        let url = base;
+        const params = [];
+        if (this._cols && !this._method) params.push(`select=${this._cols}`);
+        if (this._filters) this._filters.forEach(f => params.push(f));
+        if (this._order) params.push(`order=${this._order}`);
+        if (params.length) url += "?" + params.join("&");
+        const method = this._method || "GET";
+        const res = await fetch(url, { method, headers, body: this._data ? JSON.stringify(this._data) : undefined });
+        if (!res.ok) { const err = await res.text(); throw new Error(err); }
+        const data = method === "DELETE" || method === "PATCH" ? [] : await res.json();
+        resolve({ data, error: null });
+      } catch(e) { resolve({ data: null, error: e }); }
+    }
+  })
+};
+
+const C = { bg:"#faf8f4", card:"#ffffff", border:"#ece7df", text:"#2a2218", sub:"#9a9088", accent:"#7a6848", red:"#c0392b", green:"#3fb98a", orange:"#e8924a" };
+
+// ═══════════════════════════════════════════
+// HPBサロンレポートPDF 解析ロジック
+// 「① ご来店人数〜サイトアクセス状況」のページ(1ページ目)から、
+// ラベル文字列を目印に、その右(同じ行)に続く数値を抜き出す方式。
+// 表がExcel由来で結合セルが多く、pdf.jsの単純なテキスト抽出だと
+// 隣り合う別の表の文字列が同じ行に混ざるため、①y座標で行にグルーピング
+// →②ラベルを含む語を探す→③直後の非数値(「PV数」等の単位語、最大4語まで)を
+// 読み飛ばす→④続く数値の並びを1つの系列として採用、という手順にしている。
+// ═══════════════════════════════════════════
+
+const REPORT_METRICS = [
+  { key: "total_pv",            label: "総PV数" },
+  { key: "salon_info_pv",       label: "サロン情報" },
+  { key: "style_detail_pv",     label: "ｽﾀｲﾙ詳細" },
+  { key: "coupon_menu_pv",      label: "ｸｰﾎﾟﾝﾒﾆｭｰﾍﾟｰｼﾞ" },
+  { key: "booking_complete_pv", label: "予約完了" },
+  { key: "blog_posts",          label: "ﾌﾞﾛｸﾞ投稿数" },
+  { key: "blog_views",          label: "ﾌﾞﾛｸﾞ閲覧数" },
+  { key: "net_bookings",        label: "NET予約数" },
+  { key: "net_sales",           label: "NET予約売上" },
+];
+
+const METRIC_JP = {
+  total_pv: "総PV数", salon_info_pv: "サロン情報PV", style_detail_pv: "スタイル詳細PV",
+  coupon_menu_pv: "クーポンメニューPV", booking_complete_pv: "予約完了PV",
+  blog_posts: "ブログ投稿数", blog_views: "ブログ閲覧数",
+  net_bookings: "NET予約数", net_sales: "NET予約売上(万円)",
+};
+
+function isNumToken(s) {
+  const t = (s||"").trim();
+  if (!t) return false;
+  const cleaned = t.replace(/,/g, "").replace(/%$/, "");
+  return /^-?\d+\.?\d*$/.test(cleaned);
+}
+function parseNumToken(s) {
+  return parseFloat(s.replace(/,/g, "").replace(/%$/, ""));
+}
+
+// pdf.jsのテキストアイテム配列 → y座標でグルーピングし、行ごとにx座標順へ並べる
+function clusterRows(items, yTol = 2.5) {
+  const used = new Array(items.length).fill(false);
+  const withIdx = items.map((it, i) => ({ i, x: it.transform[4], y: it.transform[5], text: it.str }));
+  const sortedByY = [...withIdx].sort((a, b) => b.y - a.y); // pdf.js座標は下から上に増えるので降順=上から順
+  const rows = [];
+  for (const cur of sortedByY) {
+    if (used[cur.i]) continue;
+    const group = withIdx.filter(w => !used[w.i] && Math.abs(w.y - cur.y) < yTol);
+    group.forEach(w => { used[w.i] = true; });
+    group.sort((a, b) => a.x - b.x);
+    rows.push(group.map(w => w.text));
+  }
+  return rows;
+}
+
+function findMetricSeries(rows, label, minCount = 3, maxSkip = 4) {
+  for (const row of rows) {
+    const idx = row.findIndex(t => t.includes(label));
+    if (idx === -1) continue;
+    let i = idx + 1, skipped = 0;
+    while (i < row.length && !isNumToken(row[i]) && skipped < maxSkip) { i++; skipped++; }
+    const nums = [];
+    while (i < row.length && isNumToken(row[i])) { nums.push(parseNumToken(row[i])); i++; }
+    if (nums.length >= minCount) return nums;
+  }
+  return null;
+}
+
+// 系列(末尾が「ご掲載月号」の月に一致する)から、各値に対応する年月("YYYY-MM")を割り当てる
+function assignMonths(series, reportYear, reportMonth) {
+  const n = series.length;
+  return series.map((v, i) => {
+    const back = n - 1 - i;
+    let y = reportYear, m = reportMonth - back;
+    while (m <= 0) { m += 12; y -= 1; }
+    return { month: `${y}-${String(m).padStart(2, "0")}`, value: v };
+  });
+}
+
+async function extractReportFromPdf(arrayBuffer) {
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const page = await pdf.getPage(1);
+  const textContent = await page.getTextContent();
+  const fullText = textContent.items.map(it => it.str).join(" ");
+
+  const m = fullText.match(/ご掲載月号\s*(\d{2})(\d{2})月号/);
+  if (!m) throw new Error("「ご掲載月号」が見つかりませんでした。HPBサロンレポート①のPDFか確認してください。");
+  const reportYear = 2000 + parseInt(m[1], 10);
+  const reportMonth = parseInt(m[2], 10);
+
+  const rows = clusterRows(textContent.items);
+
+  const byMonth = {}; // { "YYYY-MM": { total_pv: n, ... } }
+  const missing = [];
+  for (const { key, label } of REPORT_METRICS) {
+    const series = findMetricSeries(rows, label);
+    if (!series) { missing.push(METRIC_JP[key]); continue; }
+    const withMonths = assignMonths(series, reportYear, reportMonth);
+    withMonths.forEach(({ month, value }) => {
+      byMonth[month] = byMonth[month] || { month };
+      byMonth[month][key] = value;
+    });
+  }
+  const rowsOut = Object.values(byMonth).sort((a, b) => a.month.localeCompare(b.month));
+  return { rows: rowsOut, missing, reportLabel: `${reportYear}年${reportMonth}月号` };
+}
+
+// ── DB mapper ──
+const toDbReport = (r) => ({
+  month: r.month, total_pv: r.total_pv ?? null, salon_info_pv: r.salon_info_pv ?? null,
+  style_detail_pv: r.style_detail_pv ?? null, coupon_menu_pv: r.coupon_menu_pv ?? null,
+  booking_complete_pv: r.booking_complete_pv ?? null, blog_posts: r.blog_posts ?? null,
+  blog_views: r.blog_views ?? null, net_bookings: r.net_bookings ?? null, net_sales: r.net_sales ?? null,
+});
+
+// ── シンプルな折れ線チャート(依存ライブラリなし・SVG手書き) ──
+function TrendChart({ data, dataKey, color, height = 140 }) {
+  const vals = data.map(d => d[dataKey]).filter(v => v !== undefined && v !== null);
+  if (vals.length === 0) return <div style={{ fontSize:12, color:C.sub, padding:"20px 0", textAlign:"center" }}>データがありません</div>;
+  const max = Math.max(...vals, 1);
+  const min = Math.min(...vals, 0);
+  const range = (max - min) || 1;
+  const w = 100 / Math.max(data.length - 1, 1);
+  const points = data.map((d, i) => {
+    const v = d[dataKey];
+    const x = i * w;
+    const y = v == null ? null : 100 - ((v - min) / range) * 90 - 5;
+    return { x, y, v };
+  });
+  const valid = points.filter(p => p.y !== null);
+  const path = valid.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
+  return (
+    <div>
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ width:"100%", height, display:"block" }}>
+        <polyline points={valid.map(p => `${p.x},${p.y}`).join(" ")} fill="none" stroke={color} strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
+        {valid.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="1.4" fill={color} />)}
+      </svg>
+      <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:C.sub, marginTop:4 }}>
+        {data.map((d, i) => (i === 0 || i === data.length - 1 || i === Math.floor(data.length/2)) ? <span key={i}>{d.month.slice(2).replace("-","/")}</span> : <span key={i} />)}
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ title, value, sub, color }) {
+  return (
+    <div style={{ background:C.card, borderRadius:14, padding:"14px 16px", border:`1px solid ${C.border}`, flex:1, minWidth:0 }}>
+      <div style={{ fontSize:11, color:C.sub, marginBottom:6, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{title}</div>
+      <div style={{ fontSize:22, fontWeight:800, color:color||C.text }}>{value}</div>
+      {sub && <div style={{ fontSize:11, color:C.sub, marginTop:2 }}>{sub}</div>}
+    </div>
+  );
+}
+
+// ── 簡易ルールベースの気づきカード(v1: 本格AI分析ではなく、しきい値ベースの簡単な比較のみ) ──
+function buildInsights(reports) {
+  if (reports.length < 2) return [];
+  const cur = reports[reports.length - 1];
+  const prev = reports[reports.length - 2];
+  const insights = [];
+  if (cur.total_pv != null && prev.total_pv != null) {
+    const diff = ((cur.total_pv - prev.total_pv) / (prev.total_pv || 1)) * 100;
+    if (diff <= -10) insights.push({ type:"warn", text:`総PVが前月比${diff.toFixed(1)}%減っています。ブログ投稿数(${cur.blog_posts ?? "-"}件)やクーポン内容を見直すタイミングかもしれません。` });
+    else if (diff >= 15) insights.push({ type:"good", text:`総PVが前月比${diff.toFixed(1)}%増えています。直近の投稿やクーポン変更が効いている可能性があります。` });
+  }
+  if (cur.blog_posts != null && prev.blog_posts != null && cur.total_pv != null && prev.total_pv != null) {
+    if (cur.blog_posts > prev.blog_posts && cur.total_pv > prev.total_pv) {
+      insights.push({ type:"good", text:`ブログ投稿数(${prev.blog_posts}→${cur.blog_posts})とPVが同時に伸びています。この投稿ペースを維持すると良さそうです。` });
+    }
+  }
+  if (cur.booking_complete_pv != null && prev.booking_complete_pv != null && prev.booking_complete_pv > 0) {
+    const diff = ((cur.booking_complete_pv - prev.booking_complete_pv) / prev.booking_complete_pv) * 100;
+    if (diff <= -15) insights.push({ type:"warn", text:`予約完了PVが前月比${diff.toFixed(1)}%減っています。クーポン内容やメニューページの見え方を確認してみてください。` });
+  }
+  if (insights.length === 0) insights.push({ type:"neutral", text:"目立った増減はありません。引き続き投稿を継続しましょう。" });
+  return insights;
+}
+
+function App() {
+  const [reports, setReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [parsing, setParsing] = useState(false);
+  const [preview, setPreview] = useState(null); // { rows, missing, reportLabel }
+  const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+  const fileInputRef = useRef(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await sb.from("hpb_reports").select().order("month");
+    if (!error && data) setReports(data);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleFile = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setErrorMsg(""); setParsing(true); setPreview(null);
+    try {
+      const buf = await file.arrayBuffer();
+      const result = await extractReportFromPdf(buf);
+      if (result.rows.length === 0) throw new Error("数値を読み取れませんでした。レポート①(1ページ目)を含むPDFかご確認ください。");
+      setPreview(result);
+    } catch (err) {
+      console.error(err);
+      setErrorMsg("読み取りに失敗しました: " + (err.message || String(err)));
+    } finally {
+      setParsing(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleSave = async () => {
+    if (!preview) return;
+    setSaving(true);
+    try {
+      await Promise.all(preview.rows.map(row =>
+        fetch(`${SUPABASE_URL}/rest/v1/hpb_reports?on_conflict=month`, {
+          method: "POST",
+          headers: {
+            apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`,
+            "Content-Type": "application/json", Prefer: "resolution=merge-duplicates",
+          },
+          body: JSON.stringify([toDbReport(row)]),
+        })
+      ));
+    } catch (err) {
+      console.error(err);
+      setErrorMsg("保存に失敗しました: " + (err.message || String(err)));
+    }
+    setSaving(false);
+    setPreview(null);
+    await load();
+  };
+
+  const insights = useMemo(() => buildInsights(reports), [reports]);
+  const latest = reports[reports.length - 1];
+  const prevMonth = reports[reports.length - 2];
+
+  return (
+    <div style={{ background:C.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", display:"flex", flexDirection:"column" }}>
+      <div style={{ background:"#fff", padding:"14px 16px", borderBottom:`1px solid ${C.border}` }}>
+        <div style={{ fontWeight:800, fontSize:17 }}>レポート分析</div>
+        <div style={{ fontSize:12, color:C.sub, marginTop:2 }}>HPBサロンレポートPDFを毎月アップロードして推移を確認</div>
+      </div>
+
+      <div style={{ flex:1, overflowY:"auto", padding:16 }}>
+        {/* アップロードカード */}
+        <div style={{ background:C.card, borderRadius:14, padding:16, border:`1px solid ${C.border}`, marginBottom:16 }}>
+          <div style={{ fontSize:13, fontWeight:700, marginBottom:8 }}>サロンレポートPDFをアップロード</div>
+          <div style={{ fontSize:11.5, color:C.sub, marginBottom:12, lineHeight:1.6 }}>
+            サロンボードからダウンロードした「HOT PEPPER Beauty Salon Report①」のPDFを選んでください(1ページ目のみ解析します)。
+          </div>
+          <input ref={fileInputRef} type="file" accept="application/pdf" onChange={handleFile} disabled={parsing}
+            style={{ width:"100%", fontSize:13, padding:"10px 8px", border:`1px dashed ${C.border}`, borderRadius:10, background:C.bg }} />
+          {parsing && <div style={{ fontSize:12, color:C.sub, marginTop:8 }}>読み取り中...</div>}
+          {errorMsg && <div style={{ fontSize:12, color:C.red, marginTop:8, lineHeight:1.6 }}>{errorMsg}</div>}
+        </div>
+
+        {/* 抽出プレビュー・確認 */}
+        {preview && (
+          <div style={{ background:C.card, borderRadius:14, padding:16, border:`2px solid ${C.accent}`, marginBottom:16 }}>
+            <div style={{ fontSize:13, fontWeight:700, marginBottom:4 }}>{preview.reportLabel} を読み取りました</div>
+            <div style={{ fontSize:11.5, color:C.sub, marginBottom:10 }}>内容を確認して問題なければ保存してください({preview.rows.length}ヶ月分)</div>
+            {preview.missing.length > 0 && (
+              <div style={{ fontSize:11.5, color:C.orange, marginBottom:10, lineHeight:1.6 }}>
+                以下の項目は読み取れませんでした(レイアウトが想定と違う可能性): {preview.missing.join("・")}
+              </div>
+            )}
+            <div style={{ overflowX:"auto", marginBottom:12 }}>
+              <table style={{ borderCollapse:"collapse", fontSize:11, whiteSpace:"nowrap" }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign:"left", padding:"4px 8px", color:C.sub, borderBottom:`1px solid ${C.border}` }}>月</th>
+                    {Object.keys(METRIC_JP).map(k => <th key={k} style={{ textAlign:"right", padding:"4px 8px", color:C.sub, borderBottom:`1px solid ${C.border}` }}>{METRIC_JP[k]}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.rows.map(r => (
+                    <tr key={r.month}>
+                      <td style={{ padding:"4px 8px" }}>{r.month}</td>
+                      {Object.keys(METRIC_JP).map(k => <td key={k} style={{ textAlign:"right", padding:"4px 8px" }}>{r[k] != null ? r[k].toLocaleString() : "-"}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={() => setPreview(null)} style={{ flex:1, padding:"11px 0", borderRadius:10, border:`1px solid ${C.border}`, background:"#fff", color:C.sub, fontWeight:700, fontSize:13 }}>キャンセル</button>
+              <button onClick={handleSave} disabled={saving} style={{ flex:2, padding:"11px 0", borderRadius:10, border:"none", background:C.accent, color:"#fff", fontWeight:800, fontSize:13 }}>{saving ? "保存中..." : "この内容で保存する"}</button>
+            </div>
+          </div>
+        )}
+
+        {loading ? (
+          <div style={{ textAlign:"center", color:C.sub, fontSize:13, padding:"40px 0" }}>読み込み中...</div>
+        ) : reports.length === 0 ? (
+          <div style={{ textAlign:"center", color:C.sub, fontSize:13, padding:"40px 0" }}>まだデータがありません。上からPDFをアップロードしてください。</div>
+        ) : (
+          <React.Fragment>
+            {/* 今月のサマリー */}
+            <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+              <StatCard title="総PV(今月)" value={latest?.total_pv != null ? latest.total_pv.toLocaleString() : "-"}
+                sub={prevMonth?.total_pv != null && latest?.total_pv != null ? `前月比 ${(((latest.total_pv - prevMonth.total_pv) / (prevMonth.total_pv||1)) * 100).toFixed(1)}%` : ""}
+                color={prevMonth && latest && latest.total_pv < prevMonth.total_pv ? C.red : C.green} />
+              <StatCard title="NET予約数" value={latest?.net_bookings != null ? latest.net_bookings.toLocaleString() : "-"} />
+              <StatCard title="ブログ投稿数" value={latest?.blog_posts != null ? latest.blog_posts.toLocaleString() : "-"} />
+            </div>
+
+            {/* 気づきカード */}
+            <div style={{ marginBottom:16 }}>
+              {insights.map((ins, i) => (
+                <div key={i} style={{ background: ins.type==="warn" ? "#fff3f0" : ins.type==="good" ? "#eefaf3" : C.card, border:`1px solid ${ins.type==="warn"?"#f5c6bd":ins.type==="good"?"#bfe8d3":C.border}`, borderRadius:12, padding:"10px 14px", marginBottom:8, fontSize:12.5, color: ins.type==="warn"?"#b3413a":ins.type==="good"?"#2a8a5f":C.text, lineHeight:1.6 }}>
+                  {ins.text}
+                </div>
+              ))}
+            </div>
+
+            {/* PV推移 */}
+            <div style={{ background:C.card, borderRadius:14, padding:16, border:`1px solid ${C.border}`, marginBottom:16 }}>
+              <div style={{ fontSize:13, fontWeight:700, marginBottom:10 }}>総PV推移</div>
+              <TrendChart data={reports} dataKey="total_pv" color={C.accent} />
+            </div>
+
+            {/* PV内訳 */}
+            <div style={{ background:C.card, borderRadius:14, padding:16, border:`1px solid ${C.border}`, marginBottom:16 }}>
+              <div style={{ fontSize:13, fontWeight:700, marginBottom:10 }}>PVの内訳(推移)</div>
+              {[
+                ["salon_info_pv", "サロン情報PV", "#7a9aba"],
+                ["style_detail_pv", "スタイル詳細PV", "#9a88c8"],
+                ["coupon_menu_pv", "クーポンメニューPV", "#e8a864"],
+                ["booking_complete_pv", "予約完了PV", "#72b08a"],
+              ].map(([key, label, color]) => (
+                <div key={key} style={{ marginBottom:14 }}>
+                  <div style={{ fontSize:11.5, color:C.sub, marginBottom:4 }}>{label}</div>
+                  <TrendChart data={reports} dataKey={key} color={color} height={70} />
+                </div>
+              ))}
+            </div>
+
+            {/* 投稿との関係 */}
+            <div style={{ background:C.card, borderRadius:14, padding:16, border:`1px solid ${C.border}`, marginBottom:16 }}>
+              <div style={{ fontSize:13, fontWeight:700, marginBottom:4 }}>ブログ投稿数とPVの関係</div>
+              <div style={{ fontSize:11, color:C.sub, marginBottom:10 }}>上段:ブログ投稿数 / 下段:総PV数(同じ月同士で見比べてください)</div>
+              <div style={{ marginBottom:10 }}>
+                <div style={{ fontSize:11, color:C.sub, marginBottom:4 }}>ブログ投稿数</div>
+                <TrendChart data={reports} dataKey="blog_posts" color="#e8829a" height={60} />
+              </div>
+              <div>
+                <div style={{ fontSize:11, color:C.sub, marginBottom:4 }}>総PV数</div>
+                <TrendChart data={reports} dataKey="total_pv" color={C.accent} height={60} />
+              </div>
+            </div>
+
+            <div style={{ fontSize:10.5, color:C.sub, textAlign:"center", padding:"8px 0 20px", lineHeight:1.6 }}>
+              全{reports.length}ヶ月分のデータ({reports[0]?.month} 〜 {latest?.month})
+            </div>
+          </React.Fragment>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
