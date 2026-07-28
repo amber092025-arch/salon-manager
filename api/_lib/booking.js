@@ -132,8 +132,41 @@ function normalizeAppt(r) {
   return { start, end };
 }
 
+// プライベート予定が指定日に発生するか（繰り返し設定を考慮。index.html側の同名ロジックと揃える）
+function privateEventOccursOn(e, dateStr) {
+  if (e.date === dateStr) return true;
+  if (!e.recurrence || e.recurrence === "none") return false;
+  if (dateStr < e.date) return false;
+  if (e.recurrence_until && dateStr > e.recurrence_until) return false;
+  if (e.recurrence === "daily") return true;
+  const [sy, sm, sd] = e.date.split("-").map(Number);
+  const [cy, cm, cd] = dateStr.split("-").map(Number);
+  if (e.recurrence === "weekly") {
+    const startDow = new Date(Date.UTC(sy, sm - 1, sd)).getUTCDay();
+    const curDow = new Date(Date.UTC(cy, cm - 1, cd)).getUTCDay();
+    return startDow === curDow;
+  }
+  if (e.recurrence === "monthly") return sd === cd;
+  return false;
+}
+
+// 指定期間の各日に適用されるプライベート予定を展開して返す: { "YYYY-MM-DD": [event,...] }
+async function getPrivateEventsExpanded(fromDate, toDate) {
+  const rows = await sbFetch(
+    `private_events?select=date,time,end_time,recurrence,recurrence_until&date=lte.${toDate}`
+  );
+  const byDate = {};
+  let d = fromDate;
+  while (d <= toDate) {
+    byDate[d] = (rows || []).filter((r) => privateEventOccursOn(r, d));
+    d = addDays(d, 1);
+  }
+  return byDate;
+}
+
 // その日の空きスロット(開始時刻 "HH:MM" の配列)を計算
-function calcSlots(dateStr, settings, apptsForDate, duration) {
+// peForDate: その日に適用されるプライベート予定（あれば容量に関係なくその時間帯を除外＝完全ブロック）
+function calcSlots(dateStr, settings, apptsForDate, duration, peForDate) {
   const dur = Number(duration) > 0 ? Number(duration) : DEFAULT_DURATION;
   const biz = getBizForDate(dateStr, settings);
   if (biz.isHoliday) return [];
@@ -143,10 +176,13 @@ function calcSlots(dateStr, settings, apptsForDate, duration) {
   const now = jstNow();
   const minStart = dateStr === now.dateStr ? now.minutes + LEAD_MINUTES : -1;
   const appts = (apptsForDate || []).map(normalizeAppt);
+  const blocks = (peForDate || []).map(normalizeAppt);
 
   const slots = [];
   for (let s = open; s <= lastStart; s += settings.slotUnit) {
     if (s < minStart) continue;
+    const blocked = blocks.some((b) => b.start < s + dur && b.end > s);
+    if (blocked) continue;
     const overlapping = appts.filter((a) => a.start < s + dur && a.end > s).length;
     if (overlapping < settings.capacity) slots.push(toHHMM(s));
   }
@@ -162,11 +198,12 @@ async function findAvailableDates(settings, duration) {
   );
   const byDate = {};
   for (const r of rows || []) (byDate[r.date] = byDate[r.date] || []).push(r);
+  const peByDate = await getPrivateEventsExpanded(today, endDate);
 
   const result = [];
   for (let i = 0; i < SEARCH_DAYS && result.length < MAX_DATE_CHOICES; i++) {
     const dateStr = addDays(today, i);
-    const slots = calcSlots(dateStr, settings, byDate[dateStr], duration);
+    const slots = calcSlots(dateStr, settings, byDate[dateStr], duration, peByDate[dateStr]);
     if (slots.length > 0) result.push({ date: dateStr, slots });
   }
   return result;
@@ -177,7 +214,8 @@ async function getSlotsForDate(dateStr, settings, duration) {
   const rows = await sbFetch(
     `appointments?select=date,time,end_time,duration&date=eq.${dateStr}`
   );
-  return calcSlots(dateStr, settings, rows, duration);
+  const peByDate = await getPrivateEventsExpanded(dateStr, dateStr);
+  return calcSlots(dateStr, settings, rows, duration, peByDate[dateStr]);
 }
 
 // 確定直前の空き再チェック（リスクヘッジ原則③）
@@ -343,6 +381,7 @@ async function buildGrid(settings, duration) {
   );
   const byDate = {};
   for (const r of rows14 || []) (byDate[r.date] = byDate[r.date] || []).push(r);
+  const peByDate = await getPrivateEventsExpanded(today, endDate);
 
   let minOpen = Infinity;
   let maxClose = -Infinity;
@@ -350,7 +389,7 @@ async function buildGrid(settings, duration) {
   for (let i = 0; i < SEARCH_DAYS; i++) {
     const dateStr = addDays(today, i);
     const biz = getBizForDate(dateStr, settings);
-    const slots = calcSlots(dateStr, settings, byDate[dateStr], dur);
+    const slots = calcSlots(dateStr, settings, byDate[dateStr], dur, peByDate[dateStr]);
     if (!biz.isHoliday) {
       minOpen = Math.min(minOpen, toMin(biz.open));
       maxClose = Math.max(maxClose, toMin(biz.close));
