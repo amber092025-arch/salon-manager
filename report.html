@@ -117,9 +117,12 @@ function parseNumToken(s) {
 }
 
 // pdf.jsのテキストアイテム配列 → y座標でグルーピングし、行ごとにx座標順へ並べる
+// 注意: pdf.jsは数値と数値の間の空白を独立したアイテムとして返すため、
+// 空白のみのアイテムを除外しないと数値の連続判定が最初の1個で途切れる(実PDFで検証済み)
 function clusterRows(items, yTol = 2.5) {
-  const used = new Array(items.length).fill(false);
-  const withIdx = items.map((it, i) => ({ i, x: it.transform[4], y: it.transform[5], text: it.str }));
+  const meaningful = items.filter(it => (it.str || "").trim() !== "");
+  const used = new Array(meaningful.length).fill(false);
+  const withIdx = meaningful.map((it, i) => ({ i, x: it.transform[4], y: it.transform[5], text: it.str.trim() }));
   const sortedByY = [...withIdx].sort((a, b) => b.y - a.y); // pdf.js座標は下から上に増えるので降順=上から順
   const rows = [];
   for (const cur of sortedByY) {
