@@ -266,6 +266,16 @@ function App() {
     });
     return set;
   }, [products, view, shopCats]);
+  // 業務⇔店販の切り替え用：現在のタブと逆側に分類されている既存カテゴリ一覧
+  const otherCats = useMemo(() => {
+    const isShop = c => shopCats.includes(c);
+    const set = [];
+    products.forEach(p => {
+      const cat = p.category || "未分類";
+      if ((view === "hanbai" ? !isShop(cat) : isShop(cat)) && !set.includes(cat)) set.push(cat);
+    });
+    return set;
+  }, [products, view, shopCats]);
   const existingSubs = useMemo(() => {
     const set = [];
     products.forEach(p => { if ((p.category||"未分類") === form.category && p.subCategory && !set.includes(p.subCategory)) set.push(p.subCategory); });
@@ -571,7 +581,7 @@ function App() {
           onClick={e => { if (e.target === e.currentTarget) setModal(null); }}>
           <div style={{ background:C.card, borderRadius:20, width:"100%", maxWidth:440, maxHeight:"80vh", overflowY:"auto", WebkitOverflowScrolling:"touch", padding:20, boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-              <div style={{ fontWeight:800, fontSize:16 }}>{modal.mode==="add" ? "商品を追加" : "商品を編集"}<span style={{ fontSize:12, color:C.sub, fontWeight:600, marginLeft:8 }}>{view==="hanbai"?"店販":"業務"}</span></div>
+              <div style={{ fontWeight:800, fontSize:16 }}>{modal.mode==="add" ? "商品を追加" : "商品を編集"}<span style={{ fontSize:12, color:C.sub, fontWeight:600, marginLeft:8 }}>{(form.category ? shopCats.includes(form.category) : view==="hanbai")?"店販":"業務"}</span></div>
               <button onClick={() => setModal(null)} style={{ background:"none", border:"none", fontSize:22, color:C.sub, cursor:"pointer", padding:"0 4px" }}>✕</button>
             </div>
             <div style={{ marginBottom:12 }}>
@@ -591,6 +601,17 @@ function App() {
                     <button key={c} onClick={() => setForm(p=>({...p,category:c}))}
                       style={{ padding:"5px 10px", borderRadius:14, border:"1px solid "+(form.category===c?C.accent:C.border), background:form.category===c?"#f5f0e8":"#fff", color:form.category===c?C.accent:C.sub, fontSize:12, fontWeight:700, cursor:"pointer" }}>{c}</button>
                   ))}
+                </div>
+              )}
+              {modal.mode==="edit" && otherCats.length > 0 && (
+                <div style={{ marginTop:10, paddingTop:10, borderTop:"1px dashed "+C.border }}>
+                  <div style={{ fontSize:11, color:C.sub, marginBottom:6 }}>↔ {view==="hanbai"?"業務":"店販"}に移動する場合はこちらから選択</div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                    {otherCats.map(c => (
+                      <button key={c} onClick={() => setForm(p=>({...p,category:c}))}
+                        style={{ padding:"5px 10px", borderRadius:14, border:"1px solid "+(form.category===c?C.accent:C.border), background:form.category===c?"#f5f0e8":C.bg, color:form.category===c?C.accent:C.sub, fontSize:12, fontWeight:700, cursor:"pointer" }}>{c}</button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
