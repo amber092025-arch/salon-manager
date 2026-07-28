@@ -6,8 +6,25 @@
 <title>レポート分析 - Amber</title>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+  // pdf.jsのworker設定(未設定だとPDF解析時に失敗する)
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  }
+  // 画面が真っ白のまま原因が分からない事態を防ぐ:エラーを画面に直接表示する
+  window.addEventListener("error", function(e) {
+    var el = document.getElementById("err-overlay");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "err-overlay";
+      el.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:9999;background:#fff3f0;color:#b3413a;font-size:12px;padding:10px 14px;font-family:monospace;white-space:pre-wrap;border-bottom:1px solid #f5c6bd;";
+      document.body.appendChild(el);
+    }
+    el.textContent = "エラー: " + (e.message || e.error || "不明なエラー") + (e.filename ? "\n" + e.filename + ":" + e.lineno : "");
+  });
+</script>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html, body { height:100%; overflow:hidden; font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; background:#faf8f4; }
