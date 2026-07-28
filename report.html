@@ -196,30 +196,29 @@ const toDbReport = (r) => ({
 });
 
 // ── シンプルな折れ線チャート(依存ライブラリなし・SVG手書き) ──
-function TrendChart({ data, dataKey, color, height = 140 }) {
-  const vals = data.map(d => d[dataKey]).filter(v => v !== undefined && v !== null);
-  if (vals.length === 0) return <div style={{ fontSize:12, color:C.sub, padding:"20px 0", textAlign:"center" }}>データがありません</div>;
-  const max = Math.max(...vals, 1);
-  const min = Math.min(...vals, 0);
-  const range = (max - min) || 1;
-  const w = 100 / Math.max(data.length - 1, 1);
-  const points = data.map((d, i) => {
-    const v = d[dataKey];
-    const x = i * w;
-    const y = v == null ? null : 100 - ((v - min) / range) * 90 - 5;
-    return { x, y, v };
-  });
-  const valid = points.filter(p => p.y !== null);
-  const path = valid.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
+function TrendChart({ data, dataKey, color, height = 150 }) {
+  const points = data
+    .map(d => ({ month: d.month, value: d[dataKey] }))
+    .filter(p => p.value !== undefined && p.value !== null);
+  if (points.length === 0) return <div style={{ fontSize:12, color:C.sub, padding:"20px 0", textAlign:"center" }}>データがありません</div>;
+  const max = Math.max(...points.map(p => p.value), 1);
+  const barAreaH = height - 40; // 上に数値ラベル、下に月ラベルを置く分の余白を確保
   return (
-    <div>
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ width:"100%", height, display:"block" }}>
-        <polyline points={valid.map(p => `${p.x},${p.y}`).join(" ")} fill="none" stroke={color} strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
-        {valid.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="1.4" fill={color} />)}
-      </svg>
-      <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:C.sub, marginTop:4 }}>
-        {data.map((d, i) => (i === 0 || i === data.length - 1 || i === Math.floor(data.length/2)) ? <span key={i}>{d.month.slice(2).replace("-","/")}</span> : <span key={i} />)}
-      </div>
+    <div style={{ display:"flex", alignItems:"flex-end", gap:6, height, overflowX:"auto", paddingBottom:2 }}>
+      {points.map((p, i) => {
+        const barH = Math.max((p.value / max) * barAreaH, 3);
+        return (
+          <div key={i} style={{ flex:"0 0 auto", width:36, display:"flex", flexDirection:"column", alignItems:"center", height:"100%" }}>
+            <div style={{ flex:1, display:"flex", flexDirection:"column", justifyContent:"flex-end", alignItems:"center", width:"100%" }}>
+              <div style={{ fontSize:9.5, color:C.text, fontWeight:700, marginBottom:3, whiteSpace:"nowrap" }}>
+                {p.value >= 1000 ? Math.round(p.value).toLocaleString() : p.value}
+              </div>
+              <div style={{ width:20, height:barH, background:color, borderRadius:"3px 3px 0 0" }} />
+            </div>
+            <div style={{ fontSize:9, color:C.sub, marginTop:4, whiteSpace:"nowrap" }}>{p.month.slice(2).replace("-","/")}</div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -417,7 +416,7 @@ function App() {
               ].map(([key, label, color]) => (
                 <div key={key} style={{ marginBottom:14 }}>
                   <div style={{ fontSize:11.5, color:C.sub, marginBottom:4 }}>{label}</div>
-                  <TrendChart data={reports} dataKey={key} color={color} height={70} />
+                  <TrendChart data={reports} dataKey={key} color={color} height={110} />
                 </div>
               ))}
             </div>
@@ -428,11 +427,11 @@ function App() {
               <div style={{ fontSize:11, color:C.sub, marginBottom:10 }}>上段:ブログ投稿数 / 下段:総PV数(同じ月同士で見比べてください)</div>
               <div style={{ marginBottom:10 }}>
                 <div style={{ fontSize:11, color:C.sub, marginBottom:4 }}>ブログ投稿数</div>
-                <TrendChart data={reports} dataKey="blog_posts" color="#e8829a" height={60} />
+                <TrendChart data={reports} dataKey="blog_posts" color="#e8829a" height={100} />
               </div>
               <div>
                 <div style={{ fontSize:11, color:C.sub, marginBottom:4 }}>総PV数</div>
-                <TrendChart data={reports} dataKey="total_pv" color={C.accent} height={60} />
+                <TrendChart data={reports} dataKey="total_pv" color={C.accent} height={100} />
               </div>
             </div>
 
