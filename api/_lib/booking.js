@@ -61,6 +61,13 @@ function addDays(dateStr, n) {
   return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(t.getUTCDate()).padStart(2, "0")}`;
 }
 
+// 2つの日付文字列の日数差（b - a）。b>=aの前提で使用
+function daysBetween(a, b) {
+  const [ay, am, ad] = a.split("-").map(Number);
+  const [by, bm, bd] = b.split("-").map(Number);
+  return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86400000);
+}
+
 function weekdayJP(dateStr) {
   const [y, m, d] = dateStr.split("-").map(Number);
   const idx = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=日
@@ -98,6 +105,8 @@ async function getSettings() {
     liffBookingId: map.liffBookingId || null,      // LIFF登録済みならモーダル表示に使う
     lineBookingConfirmMode: map.lineBookingConfirmMode === "manual" ? "manual" : "auto", // LINE予約の確定方法(auto=即確定/manual=仮予約)
     lineBookingEnabled: map.lineBookingEnabled,    // 受付停止スイッチ（未設定undefined=受付中扱い）
+    advanceDays: Number(map.bookingAdvanceDays) > 0 ? Number(map.bookingAdvanceDays) : SEARCH_DAYS,       // 何日先まで受け付けるか（未設定ならSEARCH_DAYS=14）
+    cutoffMinutes: (map.bookingCutoffMinutes !== undefined && map.bookingCutoffMinutes !== null && map.bookingCutoffMinutes !== "") ? Number(map.bookingCutoffMinutes) : LEAD_MINUTES, // 何分前まで受け付けるか（未設定ならLEAD_MINUTES=60）
   };
 }
 
@@ -174,13 +183,15 @@ function calcSlots(dateStr, settings, apptsForDate, duration, peForDate) {
   const close = toMin(biz.close);
   const lastStart = close - dur; // 閉店までに施術が終わる枠のみ
   const now = jstNow();
-  const minStart = dateStr === now.dateStr ? now.minutes + LEAD_MINUTES : -1;
+  const cutoffMin = Number.isFinite(settings.cutoffMinutes) ? settings.cutoffMinutes : LEAD_MINUTES;
+  const daysDiff = daysBetween(now.dateStr, dateStr); // dateStrは常にtoday以降の前提
   const appts = (apptsForDate || []).map(normalizeAppt);
   const blocks = (peForDate || []).map(normalizeAppt);
 
   const slots = [];
   for (let s = open; s <= lastStart; s += settings.slotUnit) {
-    if (s < minStart) continue;
+    // 「今からcutoffMin分後」より前の枠は除外。日をまたぐ長いカットオフ(数時間〜24時間等)にも対応
+    if (daysDiff * 1440 + s - now.minutes < cutoffMin) continue;
     const blocked = blocks.some((b) => b.start < s + dur && b.end > s);
     if (blocked) continue;
     const overlapping = appts.filter((a) => a.start < s + dur && a.end > s).length;
@@ -189,10 +200,11 @@ function calcSlots(dateStr, settings, apptsForDate, duration, peForDate) {
   return slots;
 }
 
-// 今日〜14日先で空きのある日を最大4件返す: [{date, slots}]
+// 今日〜設定日数先で空きのある日を最大4件返す: [{date, slots}]
 async function findAvailableDates(settings, duration) {
+  const searchDays = Number(settings.advanceDays) > 0 ? Number(settings.advanceDays) : SEARCH_DAYS;
   const today = jstNow().dateStr;
-  const endDate = addDays(today, SEARCH_DAYS - 1);
+  const endDate = addDays(today, searchDays - 1);
   const rows = await sbFetch(
     `appointments?select=date,time,end_time,duration&date=gte.${today}&date=lte.${endDate}`
   );
@@ -201,7 +213,7 @@ async function findAvailableDates(settings, duration) {
   const peByDate = await getPrivateEventsExpanded(today, endDate);
 
   const result = [];
-  for (let i = 0; i < SEARCH_DAYS && result.length < MAX_DATE_CHOICES; i++) {
+  for (let i = 0; i < searchDays && result.length < MAX_DATE_CHOICES; i++) {
     const dateStr = addDays(today, i);
     const slots = calcSlots(dateStr, settings, byDate[dateStr], duration, peByDate[dateStr]);
     if (slots.length > 0) result.push({ date: dateStr, slots });
@@ -370,12 +382,13 @@ async function getMenuImages() {
 }
 
 // ---------- カレンダー予約用（booking.html） ----------
-// 14日分の空き状況グリッドを構築: { rows: ["10:00",...], days: [{date, w, holiday, avail: [...]}] }
+// 設定日数分の空き状況グリッドを構築: { rows: ["10:00",...], days: [{date, w, holiday, avail: [...]}] }
 // duration省略時はDEFAULT_DURATION(60分)。メニュー選択に応じて呼び出し側から渡す
 async function buildGrid(settings, duration) {
   const dur = Number(duration) > 0 ? Number(duration) : DEFAULT_DURATION;
+  const searchDays = Number(settings.advanceDays) > 0 ? Number(settings.advanceDays) : SEARCH_DAYS;
   const today = jstNow().dateStr;
-  const endDate = addDays(today, SEARCH_DAYS - 1);
+  const endDate = addDays(today, searchDays - 1);
   const rows14 = await sbFetch(
     `appointments?select=date,time,end_time,duration&date=gte.${today}&date=lte.${endDate}`
   );
@@ -386,7 +399,7 @@ async function buildGrid(settings, duration) {
   let minOpen = Infinity;
   let maxClose = -Infinity;
   const days = [];
-  for (let i = 0; i < SEARCH_DAYS; i++) {
+  for (let i = 0; i < searchDays; i++) {
     const dateStr = addDays(today, i);
     const biz = getBizForDate(dateStr, settings);
     const slots = calcSlots(dateStr, settings, byDate[dateStr], dur, peByDate[dateStr]);
