@@ -3330,19 +3330,26 @@ function MoreTab({ setTab }) {
   return (
     <div style={{ padding: "12px 16px" }}>
       <div style={{ fontSize: 22, fontWeight: 800, color: C.text, padding: "12px 0 14px", letterSpacing: "-0.5px" }}>メニュー</div>
-      {items.map(item => (
-        <div key={item.tab} onClick={() => item.href ? window.open(item.href, "_blank") : setTab(item.tab)}
-          style={{ background: C.card, borderRadius: 14, padding: "13px 14px", marginBottom: 8, border: `1px solid ${C.border}`, boxShadow: "0 1px 3px rgba(0,0,0,0.04)", display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: item.iconBg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            {item.svg}
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, fontSize: 13, color: C.text }}>{item.label}</div>
-            <div style={{ fontSize: 10, color: C.sub, marginTop: 2 }}>{item.sub}</div>
-          </div>
-          <div style={{ fontSize: 14, color: "#d0c8be" }}>›</div>
-        </div>
-      ))}
+      {items.map(item => {
+        const rowStyle = { background: C.card, borderRadius: 14, padding: "13px 14px", marginBottom: 8, border: `1px solid ${C.border}`, boxShadow: "0 1px 3px rgba(0,0,0,0.04)", display: "flex", alignItems: "center", gap: 12, cursor: "pointer", textDecoration: "none" };
+        const rowContent = (
+          <React.Fragment>
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: item.iconBg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              {item.svg}
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: C.text }}>{item.label}</div>
+              <div style={{ fontSize: 10, color: C.sub, marginTop: 2 }}>{item.sub}</div>
+            </div>
+            <div style={{ fontSize: 14, color: "#d0c8be" }}>›</div>
+          </React.Fragment>
+        );
+        // href持ちの項目(別ファイルのページ)はwindow.openではなく通常のaタグで開く。
+        // PWA(ホーム画面追加)状態だとwindow.openが不安定でクラッシュ的な挙動になることがあるため
+        return item.href
+          ? <a key={item.tab} href={item.href} style={rowStyle}>{rowContent}</a>
+          : <div key={item.tab} onClick={() => setTab(item.tab)} style={rowStyle}>{rowContent}</div>;
+      })}
     </div>
   );
 }
@@ -4356,7 +4363,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.28-c"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.28-e"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
