@@ -159,6 +159,35 @@ function assignMonths(series, reportYear, reportMonth) {
   });
 }
 
+// ページ7「スタイル閲覧ランキング」の1～64位列から、スタイル名・掲載No・閲覧数(PV)を抽出
+// (1～64位に既にPV降順で入っているので、上位64件から更にソートしてtopNを返せば十分)
+async function extractStyleViews(pdf, topN = 20) {
+  if (pdf.numPages < 7) return [];
+  const page = await pdf.getPage(7);
+  const textContent = await page.getTextContent();
+  const entries = [];
+  // x座標が必要なため、textContent.itemsから直接x/y座標を使ってy方向にクラスタリングする
+  const meaningful = textContent.items.filter(it => (it.str || "").trim() !== "");
+  const withPos = meaningful.map(it => ({ text: it.str.trim(), x: it.transform[4], y: it.transform[5] }));
+  const used = new Array(withPos.length).fill(false);
+  const sortedByY = [...withPos.keys()].sort((a, b) => withPos[b].y - withPos[a].y);
+  for (const idx of sortedByY) {
+    if (used[idx]) continue;
+    const y = withPos[idx].y;
+    const group = withPos.filter((w, i) => !used[i] && Math.abs(w.y - y) < 3);
+    group.forEach(w => { const i = withPos.indexOf(w); used[i] = true; });
+    // 「スタイル閲覧(1～64)」列のみ対象: 名前=x 690〜890 / 掲載No=x 890〜920 / 閲覧数=x 920〜938
+    const names = group.filter(w => w.x >= 690 && w.x < 890).sort((a,b)=>a.x-b.x).map(w => w.text);
+    const nos = group.filter(w => w.x >= 890 && w.x < 920 && /^\d+$/.test(w.text));
+    const pvs = group.filter(w => w.x >= 920 && w.x < 938 && /^\d+$/.test(w.text));
+    if (names.length && nos.length && pvs.length) {
+      entries.push({ name: names.join(" "), no: parseInt(nos[0].text, 10), pv: parseInt(pvs[0].text, 10) });
+    }
+  }
+  entries.sort((a, b) => b.pv - a.pv);
+  return entries.slice(0, topN);
+}
+
 async function extractReportFromPdf(arrayBuffer) {
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   const page = await pdf.getPage(1);
@@ -184,16 +213,25 @@ async function extractReportFromPdf(arrayBuffer) {
     });
   }
   const rowsOut = Object.values(byMonth).sort((a, b) => a.month.localeCompare(b.month));
-  return { rows: rowsOut, missing, reportLabel: `${reportYear}年${reportMonth}月号` };
+
+  let styleViews = [];
+  try { styleViews = await extractStyleViews(pdf, 20); } catch (e) { console.error("style views extraction failed:", e); }
+  if (styleViews.length > 0 && rowsOut.length > 0) rowsOut[rowsOut.length - 1].styleViews = styleViews;
+
+  return { rows: rowsOut, missing, styleViews, reportLabel: `${reportYear}年${reportMonth}月号` };
 }
 
 // ── DB mapper ──
-const toDbReport = (r) => ({
-  month: r.month, total_pv: r.total_pv ?? null, salon_info_pv: r.salon_info_pv ?? null,
-  style_detail_pv: r.style_detail_pv ?? null, coupon_menu_pv: r.coupon_menu_pv ?? null,
-  booking_complete_pv: r.booking_complete_pv ?? null, blog_posts: r.blog_posts ?? null,
-  blog_views: r.blog_views ?? null, net_bookings: r.net_bookings ?? null, net_sales: r.net_sales ?? null,
-});
+const toDbReport = (r) => {
+  const base = {
+    month: r.month, total_pv: r.total_pv ?? null, salon_info_pv: r.salon_info_pv ?? null,
+    style_detail_pv: r.style_detail_pv ?? null, coupon_menu_pv: r.coupon_menu_pv ?? null,
+    booking_complete_pv: r.booking_complete_pv ?? null, blog_posts: r.blog_posts ?? null,
+    blog_views: r.blog_views ?? null, net_bookings: r.net_bookings ?? null, net_sales: r.net_sales ?? null,
+  };
+  if (r.styleViews) base.style_views = r.styleViews; // 存在する月のみ送る(他の月の既存値を空で上書きしないため)
+  return base;
+};
 
 // ── シンプルな折れ線チャート(依存ライブラリなし・SVG手書き) ──
 function TrendChart({ data, dataKey, color, height = 150 }) {
@@ -203,22 +241,26 @@ function TrendChart({ data, dataKey, color, height = 150 }) {
   if (points.length === 0) return <div style={{ fontSize:12, color:C.sub, padding:"20px 0", textAlign:"center" }}>データがありません</div>;
   const max = Math.max(...points.map(p => p.value), 1);
   const barAreaH = height - 40; // 上に数値ラベル、下に月ラベルを置く分の余白を確保
+  const colW = 42; // 1本あたりの幅(bar+gap込み)。ここを元に内側行の合計幅を明示指定し、確実に横スクロールさせる
   return (
-    <div style={{ display:"flex", alignItems:"flex-end", gap:6, height, overflowX:"auto", paddingBottom:2 }}>
-      {points.map((p, i) => {
-        const barH = Math.max((p.value / max) * barAreaH, 3);
-        return (
-          <div key={i} style={{ flex:"0 0 auto", width:36, display:"flex", flexDirection:"column", alignItems:"center", height:"100%" }}>
-            <div style={{ flex:1, display:"flex", flexDirection:"column", justifyContent:"flex-end", alignItems:"center", width:"100%" }}>
-              <div style={{ fontSize:9.5, color:C.text, fontWeight:700, marginBottom:3, whiteSpace:"nowrap" }}>
-                {p.value >= 1000 ? Math.round(p.value).toLocaleString() : p.value}
+    <div style={{ overflowX:"auto", WebkitOverflowScrolling:"touch" }}>
+      <div style={{ display:"flex", alignItems:"flex-end", gap:6, height, width: points.length * colW, paddingBottom:2 }}>
+        {points.map((p, i) => {
+          const barH = Math.max((p.value / max) * barAreaH, 3);
+          return (
+            <div key={i} style={{ flex:"0 0 auto", width:36, display:"flex", flexDirection:"column", alignItems:"center", height:"100%" }}>
+              <div style={{ flex:1, display:"flex", flexDirection:"column", justifyContent:"flex-end", alignItems:"center", width:"100%" }}>
+                <div style={{ fontSize:9.5, color:C.text, fontWeight:700, marginBottom:3, whiteSpace:"nowrap" }}>
+                  {p.value >= 1000 ? Math.round(p.value).toLocaleString() : p.value}
+                </div>
+                <div style={{ width:20, height:barH, background:color, borderRadius:"3px 3px 0 0" }} />
               </div>
-              <div style={{ width:20, height:barH, background:color, borderRadius:"3px 3px 0 0" }} />
+              <div style={{ fontSize:9, color:C.sub, marginTop:4, whiteSpace:"nowrap" }}>{p.month.slice(2).replace("-","/")}</div>
             </div>
-            <div style={{ fontSize:9, color:C.sub, marginTop:4, whiteSpace:"nowrap" }}>{p.month.slice(2).replace("-","/")}</div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+      {points.length * colW > 380 && <div style={{ fontSize:9.5, color:C.sub, textAlign:"center", marginTop:2 }}>← 横にスクロールできます →</div>}
     </div>
   );
 }
@@ -269,7 +311,7 @@ function App() {
   const load = useCallback(async () => {
     setLoading(true);
     const { data, error } = await sb.from("hpb_reports").select().order("month");
-    if (!error && data) setReports(data);
+    if (!error && data) setReports(data.map(r => ({ ...r, styleViews: r.style_views || null })));
     setLoading(false);
   }, []);
 
@@ -317,6 +359,12 @@ function App() {
   };
 
   const insights = useMemo(() => buildInsights(reports), [reports]);
+  const latestStyleViews = useMemo(() => {
+    for (let i = reports.length - 1; i >= 0; i--) {
+      if (reports[i].styleViews && reports[i].styleViews.length > 0) return { month: reports[i].month, list: reports[i].styleViews };
+    }
+    return null;
+  }, [reports]);
   const latest = reports[reports.length - 1];
   const prevMonth = reports[reports.length - 2];
 
@@ -344,7 +392,7 @@ function App() {
         {preview && (
           <div style={{ background:C.card, borderRadius:14, padding:16, border:`2px solid ${C.accent}`, marginBottom:16 }}>
             <div style={{ fontSize:13, fontWeight:700, marginBottom:4 }}>{preview.reportLabel} を読み取りました</div>
-            <div style={{ fontSize:11.5, color:C.sub, marginBottom:10 }}>内容を確認して問題なければ保存してください({preview.rows.length}ヶ月分)</div>
+            <div style={{ fontSize:11.5, color:C.sub, marginBottom:10 }}>内容を確認して問題なければ保存してください({preview.rows.length}ヶ月分{preview.styleViews.length > 0 ? `・スタイル閲覧TOP${preview.styleViews.length}も取得` : ""})</div>
             {preview.missing.length > 0 && (
               <div style={{ fontSize:11.5, color:C.orange, marginBottom:10, lineHeight:1.6 }}>
                 以下の項目は読み取れませんでした(レイアウトが想定と違う可能性): {preview.missing.join("・")}
@@ -434,6 +482,30 @@ function App() {
                 <TrendChart data={reports} dataKey="total_pv" color={C.accent} height={100} />
               </div>
             </div>
+
+            {/* スタイル閲覧TOP */}
+            {latestStyleViews && (
+              <div style={{ background:C.card, borderRadius:14, padding:16, border:`1px solid ${C.border}`, marginBottom:16 }}>
+                <div style={{ fontSize:13, fontWeight:700, marginBottom:2 }}>スタイル閲覧数 TOP{latestStyleViews.list.length}</div>
+                <div style={{ fontSize:11, color:C.sub, marginBottom:10 }}>{latestStyleViews.month} 号時点(掲載No1〜64より)</div>
+                {latestStyleViews.list.map((s, i) => {
+                  const max = latestStyleViews.list[0].pv || 1;
+                  const pct = Math.max((s.pv / max) * 100, 4);
+                  return (
+                    <div key={i} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+                      <div style={{ width:18, fontSize:11, color:C.sub, fontWeight:700, flexShrink:0, textAlign:"right" }}>{i + 1}</div>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:11.5, color:C.text, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", marginBottom:2 }}>{s.name}<span style={{ color:C.sub, fontSize:10 }}> (No.{s.no})</span></div>
+                        <div style={{ background:C.bg, borderRadius:4, height:6, overflow:"hidden" }}>
+                          <div style={{ width:pct + "%", height:"100%", background:C.accent, borderRadius:4 }} />
+                        </div>
+                      </div>
+                      <div style={{ width:34, fontSize:11.5, fontWeight:700, color:C.text, textAlign:"right", flexShrink:0 }}>{s.pv}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             <div style={{ fontSize:10.5, color:C.sub, textAlign:"center", padding:"8px 0 20px", lineHeight:1.6 }}>
               全{reports.length}ヶ月分のデータ({reports[0]?.month} 〜 {latest?.month})
