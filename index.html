@@ -4363,7 +4363,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.28-e"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.29-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -5041,7 +5041,7 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
 
       {/* 予約を追加ボタン（ボトムナビの上に固定） */}
       <div style={{ position: "fixed", bottom: 60, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, padding: "8px 16px", zIndex: 190, boxSizing: "border-box" }}>
-        <button onClick={() => setShowAdd(true)} style={{ ...css.btn("#E8DCC3"), width: "100%", padding: "13px", fontSize: 15, color: "#2a2218" }}>＋ 予約を追加</button>
+        <button onClick={() => { setForm(p => ({ ...p, date: currentDay })); setShowAdd(true); }} style={{ ...css.btn("#E8DCC3"), width: "100%", padding: "13px", fontSize: 15, color: "#2a2218" }}>＋ 予約を追加</button>
       </div>
 
       {/* ── Karte Detail from appointment ── */}
