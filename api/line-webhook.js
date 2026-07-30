@@ -154,6 +154,28 @@ async function handleEvent(event) {
       return reply(event.replyToken, [text(`あなたのLINE userId:\n${userId}`)]);
     }
 
+    // 電話番号らしきメッセージ(全角数字・ハイフン・空白を正規化し、0始まり10〜11桁の数字のみ) → LINE連携を試みる
+    const digitsForPhone = t
+      .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0)) // 全角数字→半角
+      .replace(/[-‐－―ー\s]/g, "");
+    if (/^0\d{9,10}$/.test(digitsForPhone)) {
+      const result = await B.linkByPhone(userId, digitsForPhone);
+      if (result.linked) {
+        return reply(event.replyToken, [
+          text(`${result.name}様、連携が完了しました✂️\nこれで予約完了などのご連絡がLINEに届くようになります。`),
+        ]);
+      }
+      if (result.reason === "already") {
+        return reply(event.replyToken, [text("すでに連携済みです。ご予約は下のボタンからどうぞ。")]);
+      }
+      // no_match / ambiguous / other_linked / invalid はすべて同じ案内にする(誤連携の手がかりを外部に出さないため)
+      return reply(event.replyToken, [
+        text(
+          `お電話番号を確認できませんでした。\nカルテのお電話番号と一致しているかご確認いただくか、お手数ですがサロンまでご連絡ください${PHONE_NOTE}。`
+        ),
+      ]);
+    }
+
     if (t.includes("予約") || /よやく/.test(t)) {
       return startFlow(event.replyToken, userId);
     }
