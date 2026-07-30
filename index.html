@@ -110,7 +110,7 @@ const toDb = {
   privateEvent: (e) => ({ title:e.title||"予定", date:e.date, time:e.time||null, end_time:e.endTime||null, memo:e.memo||null, color:e.color||"#9a9088", is_shared:e.isShared!==false, recurrence:e.recurrence||"none", recurrence_until:e.recurrenceUntil||null }),
 };
 const fromDb = {
-  customer: (r) => ({ id:r.id, name:r.name, kana:r.kana||"", phone:r.phone||"", birthday:r.birthday||"", gender:r.gender||"female", notes:r.notes||"", joinDate:r.join_date||"" }),
+  customer: (r) => ({ id:r.id, name:r.name, kana:r.kana||"", phone:r.phone||"", birthday:r.birthday||"", gender:r.gender||"female", notes:r.notes||"", joinDate:r.join_date||"", lineUserId:r.line_user_id||"" }),
   menu: (r) => ({ id:r.id, name:r.name, price:r.price||0, category:r.category||"", duration:r.duration||60, showTilde:r.show_tilde||false, tags:r.tags||[], sortOrder:r.sort_order||0, menuKind:r.menu_kind||"menu", targetCustomer:r.target_customer||"all", isBookable:r.is_bookable!==false }),
   product: (r) => ({ id:r.id, name:r.name, price:r.price||0, cost:r.cost||0, stock:r.stock||0, minStock:r.min_stock||3, category:r.category||"", subCategory:r.sub_category||"", placeholder:r.placeholder||false, photos:r.photos||[], description:r.description||"", isPublic:r.is_public||false, sortOrder:r.sort_order||0 }),
   visit: (r) => { var pd={}; try{pd=r.photo_data?JSON.parse(r.photo_data):{};}catch(e){} return { id:r.id, customerId:r.customer_id, date:r.date, time:r.time||"", menus:r.menus||[], products:r.products||[], drugCost:r.drug_cost||0, paymentMethod:r.payment_method||"cash", total:r.total||0, notes:r.notes||"", images:r.images||[], beforeImgs:pd.before||[], afterImgs:pd.after||[], otherImgs:pd.other||[], customerType:r.customer_type||"existing", hpbPoint:r.hpb_point||0, paid:r.paid||false, duration:r.duration||60, appointmentId:r.appointment_id||null, tags:r.tags||[], styleName:r.style_name||"", styleComment:r.style_comment||"", isPublic:r.is_public||false, paidAt:r.paid_at||null }; },
@@ -1288,6 +1288,9 @@ function CustomersTab({ customers, setCustomers, visits, setVisits, menus, produ
           {lastLabel && <div style={{ fontSize: 13, color: overdue ? C.orange : C.sub, marginTop: 1 }}>{lastLabel}に来店</div>}
         </div>
         <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 8 }}>
+          {c.lineUserId
+            ? <span style={{ fontSize: 10, fontWeight: 800, color: "#06955f", background: "#e8f7ec", border: "1px solid #bfe8d3", borderRadius: 8, padding: "2px 6px" }}>LINE連携済</span>
+            : <span style={{ fontSize: 10, fontWeight: 700, color: C.sub, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "2px 6px" }}>LINE未連携</span>}
           <span style={{ fontSize: 18, color: "#d0d0d0" }}>☆</span>
         </div>
       </div>
@@ -1459,6 +1462,7 @@ function CustomerDetail({ c, visits, menus, products, onBack, notify, setCustome
             <span>性別-</span><span>{c.gender==="female"?"女性":c.gender==="male"?"男性":"—"}</span>
             <span>年齢-</span><span>{c.birthday ? Math.floor((new Date()-new Date(c.birthday))/31557600000)+"歳" : "--歳"}</span>
             <span>電話-</span><span>{c.phone || "—"}</span>
+            <span>LINE-</span><span style={{ color: c.lineUserId ? "#06955f" : C.orange, fontWeight:700 }}>{c.lineUserId ? "連携済み(メッセージ送信可)" : "未連携(メッセージ送信不可)"}</span>
           </div>
           {c.notes && <div style={{ fontSize:12, color:C.orange, marginTop:6 }}>⚠ {c.notes}</div>}
         </div>
@@ -4363,7 +4367,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.29-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.29-b"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
