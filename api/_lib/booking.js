@@ -283,6 +283,33 @@ async function findOrCreateCustomer(userId, displayName, phone) {
   return { customer, isNew: true, linked: false };
 }
 
+// 電話番号だけのメッセージから、既存顧客とLINEアカウントの連携だけを行う(新規作成はしない)。
+// findOrCreateCustomerと同じ「ちょうど1件一致・かつ未連携の場合のみ」という安全ルールを流用。
+// 戻り値: { linked: true, name } | { linked: false, reason: "already"|"invalid"|"no_match"|"ambiguous"|"other_linked" }
+async function linkByPhone(userId, phoneRaw) {
+  const already = await sbFetch(
+    `customers?line_user_id=eq.${encodeURIComponent(userId)}&select=id,name`
+  );
+  if (already && already.length > 0) return { linked: false, reason: "already", name: already[0].name };
+
+  const normPhone = String(phoneRaw || "").replace(/[^0-9]/g, "");
+  if (normPhone.length < 10) return { linked: false, reason: "invalid" };
+
+  const rows = await sbFetch("customers?select=id,name,phone,line_user_id&phone=not.is.null");
+  const hits = (rows || []).filter(
+    (c) => String(c.phone || "").replace(/[^0-9]/g, "") === normPhone
+  );
+  if (hits.length === 0) return { linked: false, reason: "no_match" };
+  if (hits.length > 1) return { linked: false, reason: "ambiguous" };
+  if (hits[0].line_user_id) return { linked: false, reason: "other_linked" };
+
+  await sbFetch(`customers?id=eq.${hits[0].id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ line_user_id: userId }),
+  });
+  return { linked: true, name: hits[0].name };
+}
+
 // ---------- 予約INSERT（appointments + 空カルテvisits） ----------
 // リスクヘッジ原則②: INSERTのみ。UPDATE/DELETEは行わない
 // menus(複数)対応。menu(単数)も従来どおり受け付ける(line-webhook.jsとの互換維持)
@@ -444,6 +471,7 @@ module.exports = {
   getSlotsForDate,
   isSlotFree,
   findOrCreateCustomer,
+  linkByPhone,
   isKnownUser,
   createBooking,
   saveSession,
