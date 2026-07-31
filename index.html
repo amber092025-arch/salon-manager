@@ -4367,7 +4367,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.30-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.30-b"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -5940,6 +5940,45 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
     // setProducts(=setProductsW)が差分を検知してSupabaseへ自動同期する
     setProducts(prev => prev.map(x => x.id===p.id ? {...x, sortOrder:bO} : x.id===other.id ? {...x, sortOrder:aO} : x));
   };
+
+  // ── 三本線ハンドルのドラッグ並べ替え(メニュー並べ替えと同方式。サブカテゴリ内のリスト単位で並べ替え) ──
+  const [prodDrag, setProdDrag] = useState(null); // { id, listKey, fromIdx, toIdx, dy, rowH, startY }
+  const prodDragRef = useRef(null);
+  const prodListOf = (p) => (catMap[p.category||"未分類"]||{})[p.subCategory||"一般"]||[];
+  const startProdDrag = (e, p, idx) => {
+    e.preventDefault(); e.stopPropagation();
+    const row = e.currentTarget.closest("[data-prow]");
+    const rowH = row ? row.getBoundingClientRect().height : 60;
+    const d = { id: p.id, product: p, fromIdx: idx, toIdx: idx, dy: 0, rowH, startY: e.clientY };
+    prodDragRef.current = d;
+    setProdDrag(d);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+  };
+  const moveProdDrag = (e) => {
+    const d = prodDragRef.current;
+    if (!d) return;
+    const list = prodListOf(d.product);
+    const dy = e.clientY - d.startY;
+    const toIdx = Math.max(0, Math.min(list.length - 1, d.fromIdx + Math.round(dy / d.rowH)));
+    const nd = { ...d, dy, toIdx };
+    prodDragRef.current = nd;
+    setProdDrag(nd);
+  };
+  const endProdDrag = () => {
+    const d = prodDragRef.current;
+    prodDragRef.current = null;
+    setProdDrag(null);
+    if (!d || d.toIdx === d.fromIdx) return;
+    const list = prodListOf(d.product);
+    const newList = [...list];
+    const [moved] = newList.splice(d.fromIdx, 1);
+    newList.splice(d.toIdx, 0, moved);
+    let orders = list.map(x => x.sortOrder||0).sort((a,b)=>a-b);
+    if (new Set(orders).size !== orders.length) orders = newList.map((_, i) => Date.now() + i);
+    const orderById = {};
+    newList.forEach((x, i) => { orderById[x.id] = orders[i]; });
+    setProducts(prev => prev.map(x => orderById[x.id] !== undefined ? { ...x, sortOrder: orderById[x.id] } : x));
+  };
   // 店販カテゴリリスト（Supabase settings保存）- 初期値は空（Supabaseから読み込む）
   const [shopCategoryList, setShopCategoryList] = useState([]);
   const [shopCatLoaded, setShopCatLoaded] = useState(false);
@@ -6478,9 +6517,21 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                                 }} style={{...css.btn("#7a6848"),fontSize:12,padding:"6px 12px"}}>追加</button>
                               </div>
                             )}
-                            {subOpen && items.map(p => (
-                              <div key={p.id} onClick={() => selectMode && !p.placeholder && toggleSelect(p.id)}
-                                style={{ padding:"12px 16px", borderBottom:`1px solid ${C.border}`, cursor:(selectMode&&!p.placeholder)?"pointer":"default", background:(selectMode&&selectedIds.has(p.id))?"#f5f0e8":"transparent" }}>
+                            {subOpen && items.map((p, pIdx) => {
+                              let rowTransform = "none", rowTransition = "transform 0.15s ease", rowZ = 0, rowShadow = "none";
+                              const dragInThisList = prodDrag && items.some(x => x.id === prodDrag.id);
+                              if (dragInThisList) {
+                                if (p.id === prodDrag.id) {
+                                  rowTransform = `translateY(${prodDrag.dy}px)`; rowTransition = "none"; rowZ = 5; rowShadow = "0 4px 16px rgba(0,0,0,0.15)";
+                                } else if (prodDrag.toIdx > prodDrag.fromIdx && pIdx > prodDrag.fromIdx && pIdx <= prodDrag.toIdx) {
+                                  rowTransform = `translateY(${-prodDrag.rowH}px)`;
+                                } else if (prodDrag.toIdx < prodDrag.fromIdx && pIdx >= prodDrag.toIdx && pIdx < prodDrag.fromIdx) {
+                                  rowTransform = `translateY(${prodDrag.rowH}px)`;
+                                }
+                              }
+                              return (
+                              <div key={p.id} data-prow="1" onClick={() => selectMode && !p.placeholder && toggleSelect(p.id)}
+                                style={{ padding:"12px 16px", borderBottom:`1px solid ${C.border}`, cursor:(selectMode&&!p.placeholder)?"pointer":"default", background:(selectMode&&selectedIds.has(p.id))?"#f5f0e8":(prodDrag&&p.id===prodDrag.id)?"#fff":"transparent", position:"relative", transform:rowTransform, transition:rowTransition, zIndex:rowZ, boxShadow:rowShadow, userSelect: prodDrag ? "none" : "auto", WebkitUserSelect: prodDrag ? "none" : "auto" }}>
                                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
                                   <div style={{ flex:1, display:"flex", alignItems:"flex-start", gap:10 }}>
                                     {selectMode && !p.placeholder && (
@@ -6494,11 +6545,12 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                                     </div>
                                   </div>
                                   {!selectMode && (prodSortMode ? (
-                                    <div style={{ display:"flex", gap:6, marginLeft:12 }}>
-                                      <button onClick={() => moveProduct(p, -1)} disabled={items[0] && items[0].id===p.id}
-                                        style={{ width:34,height:34,borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:items[0]&&items[0].id===p.id?"#d0c8be":"#7a6848",fontSize:14,fontWeight:700,cursor:"pointer" }}>▲</button>
-                                      <button onClick={() => moveProduct(p, 1)} disabled={items[items.length-1] && items[items.length-1].id===p.id}
-                                        style={{ width:34,height:34,borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:items[items.length-1]&&items[items.length-1].id===p.id?"#d0c8be":"#7a6848",fontSize:14,fontWeight:700,cursor:"pointer" }}>▼</button>
+                                    <div onPointerDown={(e) => startProdDrag(e, p, pIdx)} onPointerMove={moveProdDrag} onPointerUp={endProdDrag} onPointerCancel={endProdDrag}
+                                      onClick={e => e.stopPropagation()}
+                                      style={{ touchAction:"none", cursor:"grab", padding:"12px 4px 12px 14px", display:"flex", flexDirection:"column", gap:3.5, flexShrink:0, marginLeft:12 }}>
+                                      <div style={{ width:22, height:2, borderRadius:1, background:"#b8b0a6" }} />
+                                      <div style={{ width:22, height:2, borderRadius:1, background:"#b8b0a6" }} />
+                                      <div style={{ width:22, height:2, borderRadius:1, background:"#b8b0a6" }} />
                                     </div>
                                   ) : (!p.placeholder && (
                                     <div style={{ textAlign:"right", marginLeft:12 }}>
@@ -6543,7 +6595,8 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                                   <button onClick={()=>{setAddForm(f=>({...f,category:p.category,subCategory:p.subCategory}));setAddIsShop(shopCategoryList.includes(p.category));setView("addProduct");}} style={{...css.btn("#7a6848",false),width:"100%",fontSize:13}}>＋ 商品を追加する</button>
                                 )}
                               </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         );
                       })}
