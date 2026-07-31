@@ -4367,7 +4367,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.29-b"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.30-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -7284,6 +7284,43 @@ function SettingsTab({ menus, setMenus, products, setProducts, notify, setTab })
     setMenus(prev => prev.map(x => x.id===m.id ? {...x, sortOrder:bO} : x.id===other.id ? {...x, sortOrder:aO} : x));
   };
 
+  // ── 三本線ハンドルのドラッグ並べ替え(iPad/iPhoneのタッチ対応: Pointer Events + capture) ──
+  const [menuDrag, setMenuDrag] = useState(null); // { id, fromIdx, toIdx, dy, rowH, startY }
+  const menuDragRef = useRef(null);
+  const startMenuDrag = (e, m, idx) => {
+    e.preventDefault(); e.stopPropagation();
+    const row = e.currentTarget.closest("[data-mrow]");
+    const rowH = row ? row.getBoundingClientRect().height : 50;
+    const d = { id: m.id, fromIdx: idx, toIdx: idx, dy: 0, rowH, startY: e.clientY };
+    menuDragRef.current = d;
+    setMenuDrag(d);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+  };
+  const moveMenuDrag = (e) => {
+    const d = menuDragRef.current;
+    if (!d) return;
+    const dy = e.clientY - d.startY;
+    const toIdx = Math.max(0, Math.min(catMenus.length - 1, d.fromIdx + Math.round(dy / d.rowH)));
+    const nd = { ...d, dy, toIdx };
+    menuDragRef.current = nd;
+    setMenuDrag(nd);
+  };
+  const endMenuDrag = () => {
+    const d = menuDragRef.current;
+    menuDragRef.current = null;
+    setMenuDrag(null);
+    if (!d || d.toIdx === d.fromIdx) return;
+    // 並べ替え後の順に、既存のsortOrder値(昇順)を割り当て直す(カテゴリ内でのみ意味を持つ値のため安全)
+    const newList = [...catMenus];
+    const [moved] = newList.splice(d.fromIdx, 1);
+    newList.splice(d.toIdx, 0, moved);
+    let orders = catMenus.map(m => m.sortOrder||0).sort((a,b)=>a-b);
+    if (new Set(orders).size !== orders.length) orders = newList.map((_, i) => Date.now() + i); // 重複時は振り直し
+    const orderById = {};
+    newList.forEach((m, i) => { orderById[m.id] = orders[i]; });
+    setMenus(prev => prev.map(x => orderById[x.id] !== undefined ? { ...x, sortOrder: orderById[x.id] } : x));
+  };
+
   const autoTagsFromCategory = (cat) => cat ? [cat] : [];
 
   const renameCategory = async (oldName) => {
@@ -7453,29 +7490,48 @@ function SettingsTab({ menus, setMenus, products, setProducts, notify, setTab })
         </button>
       </div>
       <div style={{ background:"#fff",marginTop:8 }}>
-        {catMenus.map(m => (
-          <div key={m.id}
-            style={{ display:"flex",alignItems:"center",padding:"14px 16px",borderBottom:`1px solid ${C.border}`,cursor: deleteMenuMode ? "default" : "pointer" }}
+        {catMenus.map((m, idx) => {
+          // ドラッグ中の見た目: 掴んでいる行はそのまま指に追従、間の行はスッと1行分ずれる
+          let rowTransform = "none";
+          let rowTransition = "transform 0.15s ease";
+          let rowZ = 0, rowShadow = "none", rowBg = "transparent";
+          if (menuDrag) {
+            if (m.id === menuDrag.id) {
+              rowTransform = `translateY(${menuDrag.dy}px)`;
+              rowTransition = "none";
+              rowZ = 5; rowShadow = "0 4px 16px rgba(0,0,0,0.15)"; rowBg = "#fff";
+            } else if (menuDrag.toIdx > menuDrag.fromIdx && idx > menuDrag.fromIdx && idx <= menuDrag.toIdx) {
+              rowTransform = `translateY(${-menuDrag.rowH}px)`;
+            } else if (menuDrag.toIdx < menuDrag.fromIdx && idx >= menuDrag.toIdx && idx < menuDrag.fromIdx) {
+              rowTransform = `translateY(${menuDrag.rowH}px)`;
+            }
+          }
+          return (
+          <div key={m.id} data-mrow="1"
+            style={{ display:"flex",alignItems:"center",padding:"14px 16px",borderBottom:`1px solid ${C.border}`,cursor: deleteMenuMode ? "default" : "pointer", position:"relative", transform:rowTransform, transition:rowTransition, zIndex:rowZ, boxShadow:rowShadow, background:rowBg, userSelect: menuDrag ? "none" : "auto", WebkitUserSelect: menuDrag ? "none" : "auto" }}
             onClick={() => !deleteMenuMode && openEditMenu(m)}>
             {deleteMenuMode && (
-              <button onClick={() => deleteMenu(m)}
+              <button onClick={(e) => { e.stopPropagation(); deleteMenu(m); }}
                 style={{ width:24,height:24,borderRadius:"50%",background:C.red,border:"none",color:"#fff",fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginRight:12,lineHeight:1 }}>－</button>
             )}
             <span style={{ fontSize:15,color:C.text,flex:1 }}>{m.name}</span>
             <div style={{ display:"flex",alignItems:"center",gap:12 }}>
-              {deleteMenuMode && (
-                <div style={{ display:"flex", gap:6 }} onClick={e=>e.stopPropagation()}>
-                  <button onClick={() => moveMenu(m, -1)} disabled={catMenus[0] && catMenus[0].id===m.id}
-                    style={{ width:32,height:32,borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:catMenus[0]&&catMenus[0].id===m.id?"#d0c8be":"#7a6848",fontSize:14,fontWeight:700,cursor:"pointer" }}>▲</button>
-                  <button onClick={() => moveMenu(m, 1)} disabled={catMenus[catMenus.length-1] && catMenus[catMenus.length-1].id===m.id}
-                    style={{ width:32,height:32,borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:catMenus[catMenus.length-1]&&catMenus[catMenus.length-1].id===m.id?"#d0c8be":"#7a6848",fontSize:14,fontWeight:700,cursor:"pointer" }}>▼</button>
-                </div>
-              )}
               {m.price > 0 && <span style={{ fontSize:14,color:C.sub }}>{m.price.toLocaleString()} 円</span>}
-              {!deleteMenuMode && <span style={{ color:C.sub }}>›</span>}
+              {deleteMenuMode ? (
+                <div onPointerDown={(e) => startMenuDrag(e, m, idx)} onPointerMove={moveMenuDrag} onPointerUp={endMenuDrag} onPointerCancel={endMenuDrag}
+                  onClick={e => e.stopPropagation()}
+                  style={{ touchAction:"none", cursor:"grab", padding:"10px 4px 10px 12px", display:"flex", flexDirection:"column", gap:3.5, flexShrink:0 }}>
+                  <div style={{ width:22, height:2, borderRadius:1, background:"#b8b0a6" }} />
+                  <div style={{ width:22, height:2, borderRadius:1, background:"#b8b0a6" }} />
+                  <div style={{ width:22, height:2, borderRadius:1, background:"#b8b0a6" }} />
+                </div>
+              ) : (
+                <span style={{ color:C.sub }}>›</span>
+              )}
             </div>
           </div>
-        ))}
+          );
+        })}
         {!deleteMenuMode && (
           <div onClick={openNewMenu}
             style={{ display:"flex",alignItems:"center",gap:8,padding:"14px 16px",cursor:"pointer",color:"#7a6848" }}>
