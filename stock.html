@@ -230,7 +230,7 @@ function App() {
   useEffect(() => {
     if (!authed || view !== "history" || movements.length > 0 || movLoading) return;
     setMovLoading(true);
-    fetch(SUPABASE_URL + "/rest/v1/stock_movements?select=product_name,category,delta,created_at&order=created_at.desc&limit=2000", { headers: HDRS })
+    fetch(SUPABASE_URL + "/rest/v1/stock_movements?select=id,product_id,product_name,category,delta,created_at&order=created_at.desc&limit=2000", { headers: HDRS })
       .then(res => res.ok ? res.json() : Promise.reject())
       .then(rows => setMovements(rows))
       .catch(() => notify("入出庫履歴の取得に失敗しました", "error"))
@@ -257,28 +257,56 @@ function App() {
 
   // ── 入出庫履歴を月ごと・商品ごとに集計 ──
   const monthlyMovements = useMemo(() => {
-    const byMonth = {}; // { "YYYY-MM": { in: {productName: qty}, out: {productName: qty}, inTotal, outTotal } }
+    const costOf = (m) => {
+      const p = products.find(x => x.id === m.product_id) || products.find(x => x.name === m.product_name);
+      return p ? (p.cost || 0) : 0;
+    };
+    const byMonth = {}; // { "YYYY-MM": { in: {name:{qty,amount,rows[]}}, out: {...}, inTotal, outTotal, inAmount, outAmount } }
     for (const m of movements) {
       const month = (m.created_at || "").slice(0, 7);
       if (!month) continue;
-      byMonth[month] = byMonth[month] || { in: {}, out: {}, inTotal: 0, outTotal: 0 };
+      byMonth[month] = byMonth[month] || { in: {}, out: {}, inTotal: 0, outTotal: 0, inAmount: 0, outAmount: 0 };
       const bucket = byMonth[month];
-      if (m.delta > 0) {
-        bucket.in[m.product_name] = (bucket.in[m.product_name] || 0) + m.delta;
-        bucket.inTotal += m.delta;
-      } else if (m.delta < 0) {
-        bucket.out[m.product_name] = (bucket.out[m.product_name] || 0) + (-m.delta);
-        bucket.outTotal += (-m.delta);
-      }
+      const side = m.delta > 0 ? "in" : m.delta < 0 ? "out" : null;
+      if (!side) continue;
+      const qty = Math.abs(m.delta);
+      const amount = qty * costOf(m);
+      const e = bucket[side][m.product_name] = bucket[side][m.product_name] || { qty: 0, amount: 0, rows: [] };
+      e.qty += qty; e.amount += amount; e.rows.push(m);
+      if (side === "in") { bucket.inTotal += qty; bucket.inAmount += amount; }
+      else { bucket.outTotal += qty; bucket.outAmount += amount; }
     }
     return Object.keys(byMonth).sort().reverse().map(month => ({
       month,
       inTotal: byMonth[month].inTotal,
       outTotal: byMonth[month].outTotal,
-      inList: Object.entries(byMonth[month].in).sort((a,b) => b[1]-a[1]),
-      outList: Object.entries(byMonth[month].out).sort((a,b) => b[1]-a[1]),
+      inAmount: byMonth[month].inAmount,
+      outAmount: byMonth[month].outAmount,
+      inList: Object.entries(byMonth[month].in).sort((a,b) => b[1].qty-a[1].qty),
+      outList: Object.entries(byMonth[month].out).sort((a,b) => b[1].qty-a[1].qty),
     }));
-  }, [movements]);
+  }, [movements, products]);
+
+  // 履歴の修正: その月・その商品の記録済み行のdeltaを直接増減する(在庫数そのものは変えない=記録だけを直す)
+  const adjustMovement = async (side, entry, dir) => {
+    const step = (side === "in" ? 1 : -1) * dir; // 入庫は+方向、出庫(使用)は-方向が「増やす」
+    const row = entry.rows[0];
+    if (!row) return;
+    if (dir < 0 && entry.qty <= 0) return;
+    const newDelta = row.delta + step;
+    try {
+      const sameSign = (side === "in" && newDelta > 0) || (side === "out" && newDelta < 0);
+      if (newDelta === 0 || !sameSign) {
+        const res = await fetch(SUPABASE_URL + "/rest/v1/stock_movements?id=eq." + row.id, { method: "DELETE", headers: HDRS });
+        if (!res.ok) throw new Error();
+        setMovements(prev => prev.filter(x => x.id !== row.id));
+      } else {
+        const res = await fetch(SUPABASE_URL + "/rest/v1/stock_movements?id=eq." + row.id, { method: "PATCH", headers: HDRS, body: JSON.stringify({ delta: newDelta }) });
+        if (!res.ok) throw new Error();
+        setMovements(prev => prev.map(x => x.id === row.id ? { ...x, delta: newDelta } : x));
+      }
+    } catch (e) { notify("履歴の修正に失敗しました", "error"); }
+  };
 
   // ── グルーピング（業務/店販） ──
   const grouped = useMemo(() => {
@@ -581,18 +609,23 @@ function App() {
                 <div style={{ flex:1, background:"#eefaf3", borderRadius:10, padding:"8px 12px" }}>
                   <div style={{ fontSize:11, color:"#2a8a5f" }}>入庫合計</div>
                   <div style={{ fontSize:18, fontWeight:800, color:"#2a8a5f" }}>{mo.inTotal}点</div>
+                  <div style={{ fontSize:12, fontWeight:700, color:"#2a8a5f" }}>{yen(mo.inAmount)}</div>
                 </div>
                 <div style={{ flex:1, background:"#fff3f0", borderRadius:10, padding:"8px 12px" }}>
                   <div style={{ fontSize:11, color:"#b3413a" }}>出庫合計(使用)</div>
                   <div style={{ fontSize:18, fontWeight:800, color:"#b3413a" }}>{mo.outTotal}点</div>
+                  <div style={{ fontSize:12, fontWeight:700, color:"#b3413a" }}>{yen(mo.outAmount)}</div>
                 </div>
               </div>
               {mo.inList.length > 0 && (
                 <div style={{ marginBottom:10 }}>
                   <div style={{ fontSize:12, fontWeight:700, color:C.sub, marginBottom:4 }}>入庫した商品</div>
-                  {mo.inList.map(([name, qty]) => (
-                    <div key={name} style={{ display:"flex", justifyContent:"space-between", fontSize:12.5, padding:"3px 0" }}>
-                      <span>{name}</span><span style={{ fontWeight:700 }}>+{qty}</span>
+                  {mo.inList.map(([name, entry]) => (
+                    <div key={name} style={{ display:"flex", alignItems:"center", gap:8, fontSize:12.5, padding:"3px 0" }}>
+                      <span style={{ flex:1, minWidth:0 }}>{name}{entry.amount > 0 && <span style={{ color:C.sub, fontSize:10.5 }}> ({yen(entry.amount)})</span>}</span>
+                      <button onClick={() => adjustMovement("in", entry, -1)} style={{ width:26, height:26, borderRadius:7, border:"1px solid "+C.border, background:"#fff", color:C.text, fontSize:14, fontWeight:700, cursor:"pointer", flexShrink:0 }}>−</button>
+                      <span style={{ fontWeight:700, width:30, textAlign:"center", flexShrink:0 }}>+{entry.qty}</span>
+                      <button onClick={() => adjustMovement("in", entry, 1)} style={{ width:26, height:26, borderRadius:7, border:"1px solid "+C.border, background:"#fff", color:C.text, fontSize:14, fontWeight:700, cursor:"pointer", flexShrink:0 }}>＋</button>
                     </div>
                   ))}
                 </div>
@@ -600,9 +633,12 @@ function App() {
               {mo.outList.length > 0 && (
                 <div>
                   <div style={{ fontSize:12, fontWeight:700, color:C.sub, marginBottom:4 }}>使用した商品</div>
-                  {mo.outList.map(([name, qty]) => (
-                    <div key={name} style={{ display:"flex", justifyContent:"space-between", fontSize:12.5, padding:"3px 0" }}>
-                      <span>{name}</span><span style={{ fontWeight:700 }}>-{qty}</span>
+                  {mo.outList.map(([name, entry]) => (
+                    <div key={name} style={{ display:"flex", alignItems:"center", gap:8, fontSize:12.5, padding:"3px 0" }}>
+                      <span style={{ flex:1, minWidth:0 }}>{name}{entry.amount > 0 && <span style={{ color:C.sub, fontSize:10.5 }}> ({yen(entry.amount)})</span>}</span>
+                      <button onClick={() => adjustMovement("out", entry, -1)} style={{ width:26, height:26, borderRadius:7, border:"1px solid "+C.border, background:"#fff", color:C.text, fontSize:14, fontWeight:700, cursor:"pointer", flexShrink:0 }}>−</button>
+                      <span style={{ fontWeight:700, width:30, textAlign:"center", flexShrink:0 }}>-{entry.qty}</span>
+                      <button onClick={() => adjustMovement("out", entry, 1)} style={{ width:26, height:26, borderRadius:7, border:"1px solid "+C.border, background:"#fff", color:C.text, fontSize:14, fontWeight:700, cursor:"pointer", flexShrink:0 }}>＋</button>
                     </div>
                   ))}
                 </div>
