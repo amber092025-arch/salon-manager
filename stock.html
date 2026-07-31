@@ -231,7 +231,7 @@ function App() {
   useEffect(() => {
     if (!authed || view !== "history" || movements.length > 0 || movLoading) return;
     setMovLoading(true);
-    fetch(SUPABASE_URL + "/rest/v1/stock_movements?select=id,product_id,product_name,category,delta,created_at&order=created_at.desc&limit=2000", { headers: HDRS })
+    fetch(SUPABASE_URL + "/rest/v1/stock_movements?select=id,product_id,product_name,category,sub_category,delta,created_at&order=created_at.desc&limit=2000", { headers: HDRS })
       .then(res => res.ok ? res.json() : Promise.reject())
       .then(rows => setMovements(rows))
       .catch(() => notify("入出庫履歴の取得に失敗しました", "error"))
@@ -256,37 +256,81 @@ function App() {
   };
   const lock = () => { localStorage.removeItem("stock_auth"); setAuthed(false); };
 
-  // ── 入出庫履歴を月ごと・商品ごとに集計 ──
+  // ── 入出庫履歴を「選択中の月」だけ、業務/店販→カテゴリ→サブカテゴリで集計 ──
+  const [historyMonthOffset, setHistoryMonthOffset] = useState(0); // 0=今月、-1=先月、+1=来月
+  const historyTarget = (() => { const d = new Date(); d.setMonth(d.getMonth() + historyMonthOffset); return d; })();
+  const historyMonthKey = historyTarget.getFullYear() + "-" + String(historyTarget.getMonth()+1).padStart(2,"0");
+  const historyMonthLabel = historyTarget.getFullYear() + "年" + (historyTarget.getMonth()+1) + "月";
+
+  // UTCのcreated_atをJSTのカレンダー日に変換してから月を取り出す(そのままsliceすると
+  // JST深夜0時台〜朝9時前の記録が前日=前月のUTC日付になり、月境界でズレる問題があった)
+  const jstMonthKey = (isoStr) => {
+    if (!isoStr) return "";
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return "";
+    const jst = new Date(d.getTime() + 9 * 3600 * 1000);
+    return jst.getUTCFullYear() + "-" + String(jst.getUTCMonth() + 1).padStart(2, "0");
+  };
+
   const monthlyMovements = useMemo(() => {
     const costOf = (m) => {
       const p = products.find(x => x.id === m.product_id) || products.find(x => x.name === m.product_name);
       return p ? (p.cost || 0) : 0;
     };
-    const byMonth = {}; // { "YYYY-MM": { in: {name:{qty,amount,rows[]}}, out: {...}, inTotal, outTotal, inAmount, outAmount } }
-    for (const m of movements) {
-      const month = (m.created_at || "").slice(0, 7);
-      if (!month) continue;
-      byMonth[month] = byMonth[month] || { in: {}, out: {}, inTotal: 0, outTotal: 0, inAmount: 0, outAmount: 0 };
-      const bucket = byMonth[month];
+    const isShop = c => shopCats.includes(c);
+    const inMonth = movements.filter(m => jstMonthKey(m.created_at) === historyMonthKey);
+
+    // typeKey → category → subCategory → productName → {qty, amount, rows[], side}
+    const tree = {};
+    for (const m of inMonth) {
       const side = m.delta > 0 ? "in" : m.delta < 0 ? "out" : null;
       if (!side) continue;
+      const typeKey = isShop(m.category || "") ? "店販" : "業務";
+      const cat = m.category || "未分類";
+      const sub = m.sub_category || "未分類";
       const qty = Math.abs(m.delta);
       const amount = qty * costOf(m);
-      const e = bucket[side][m.product_name] = bucket[side][m.product_name] || { qty: 0, amount: 0, rows: [] };
-      e.qty += qty; e.amount += amount; e.rows.push(m);
-      if (side === "in") { bucket.inTotal += qty; bucket.inAmount += amount; }
-      else { bucket.outTotal += qty; bucket.outAmount += amount; }
+      tree[typeKey] = tree[typeKey] || {};
+      tree[typeKey][cat] = tree[typeKey][cat] || {};
+      tree[typeKey][cat][sub] = tree[typeKey][cat][sub] || {};
+      const bucket = tree[typeKey][cat][sub];
+      const e = bucket[m.product_name] = bucket[m.product_name] || { in: null, out: null };
+      const key = side;
+      e[key] = e[key] || { qty: 0, amount: 0, rows: [] };
+      e[key].qty += qty; e[key].amount += amount; e[key].rows.push(m);
     }
-    return Object.keys(byMonth).sort().reverse().map(month => ({
-      month,
-      inTotal: byMonth[month].inTotal,
-      outTotal: byMonth[month].outTotal,
-      inAmount: byMonth[month].inAmount,
-      outAmount: byMonth[month].outAmount,
-      inList: Object.entries(byMonth[month].in).sort((a,b) => b[1].qty-a[1].qty),
-      outList: Object.entries(byMonth[month].out).sort((a,b) => b[1].qty-a[1].qty),
-    }));
-  }, [movements, products]);
+
+    const sumAmounts = (obj) => {
+      let inAmount = 0, outAmount = 0, inQty = 0, outQty = 0;
+      const walk = (o) => {
+        if (o && (o.in || o.out)) {
+          if (o.in) { inAmount += o.in.amount; inQty += o.in.qty; }
+          if (o.out) { outAmount += o.out.amount; outQty += o.out.qty; }
+          return;
+        }
+        Object.values(o).forEach(walk);
+      };
+      Object.values(obj).forEach(walk);
+      return { inAmount, outAmount, inQty, outQty };
+    };
+
+    const typeList = Object.keys(tree).sort().map(typeKey => {
+      const catList = Object.keys(tree[typeKey]).sort().map(cat => {
+        const subList = Object.keys(tree[typeKey][cat]).sort().map(sub => {
+          const entries = Object.entries(tree[typeKey][cat][sub]).sort((a,b) => {
+            const qa = (a[1].in?.qty||0) + (a[1].out?.qty||0), qb = (b[1].in?.qty||0) + (b[1].out?.qty||0);
+            return qb - qa;
+          });
+          return { sub, entries, ...sumAmounts({ [sub]: tree[typeKey][cat][sub] }) };
+        });
+        return { cat, subList, ...sumAmounts(tree[typeKey][cat]) };
+      });
+      return { typeKey, catList, ...sumAmounts(tree[typeKey]) };
+    });
+
+    const grand = sumAmounts(tree);
+    return { typeList, grand, hasData: inMonth.length > 0 };
+  }, [movements, products, shopCats, historyMonthKey]);
 
   // 履歴の修正: その月・その商品の記録済み行のdeltaを直接増減する(在庫数そのものは変えない=記録だけを直す)
   const adjustMovement = async (side, entry, dir) => {
@@ -428,7 +472,7 @@ function App() {
   const logStockMovement = async (p, delta) => {
     if (!delta) return;
     try {
-      const row = { product_id: p.id, product_name: p.name, category: p.category || null, delta };
+      const row = { product_id: p.id, product_name: p.name, category: p.category || null, sub_category: (p.subCategory && p.subCategory !== "一般") ? p.subCategory : "未分類", delta };
       if (recordDate) row.created_at = recordDate + "T12:00:00+09:00"; // 記録日が指定されていればその日付で記録(未指定=今日)
       await fetch(SUPABASE_URL + "/rest/v1/stock_movements", {
         method: "POST", headers: HDRS,
@@ -624,54 +668,84 @@ function App() {
           </div>
         )}
 
+        {view === "history" && (
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:6, marginTop:10, marginBottom:14 }}>
+            <button onClick={() => setHistoryMonthOffset(o => o-1)}
+              style={{ background:C.bg, border:"1px solid "+C.border, borderRadius:8, padding:"5px 12px", fontWeight:700, cursor:"pointer", fontSize:13, color:C.text }}>＜前月</button>
+            <button onClick={() => setHistoryMonthOffset(0)}
+              style={{ background:"#E8DCC3", border:"none", borderRadius:8, padding:"5px 12px", fontWeight:700, cursor:"pointer", fontSize:12, color:"#2a2218" }}>今月</button>
+            <div style={{ fontWeight:800, fontSize:15, color:C.text, flex:1, textAlign:"center" }}>{historyMonthLabel}</div>
+            <button onClick={() => setHistoryMonthOffset(o => o+1)}
+              style={{ background:C.bg, border:"1px solid "+C.border, borderRadius:8, padding:"5px 12px", fontWeight:700, cursor:"pointer", fontSize:13, color:C.text }}>次月＞</button>
+          </div>
+        )}
+
         {!loading && !loadError && view === "history" && (
           movLoading ? (
             <div style={{ textAlign:"center", color:C.sub, fontSize:14, padding:"40px 0" }}>読み込み中...</div>
-          ) : monthlyMovements.length === 0 ? (
-            <div style={{ textAlign:"center", color:C.sub, fontSize:13, padding:"30px 0", lineHeight:1.7 }}>まだ履歴がありません。<br/>「＋」での増減や、納品書読み取りでの入出庫を行うと、ここに月ごとの記録が表示されます。</div>
-          ) : monthlyMovements.map(mo => (
-            <div key={mo.month} style={{ ...css.card, marginBottom:12 }}>
-              <div style={{ fontWeight:800, fontSize:15, marginBottom:10 }}>{mo.month.replace("-","年")}月</div>
-              <div style={{ display:"flex", gap:10, marginBottom:12 }}>
+          ) : !monthlyMovements.hasData ? (
+            <div style={{ textAlign:"center", color:C.sub, fontSize:13, padding:"30px 0", lineHeight:1.7 }}>{historyMonthLabel}の履歴はありません。<br/>「＋」での増減や、納品書読み取りでの入出庫を行うと、ここに記録が表示されます。</div>
+          ) : (
+            <React.Fragment>
+              <div style={{ ...css.card, marginBottom:12, display:"flex", gap:10 }}>
                 <div style={{ flex:1, background:"#eefaf3", borderRadius:10, padding:"8px 12px" }}>
-                  <div style={{ fontSize:11, color:"#2a8a5f" }}>入庫合計</div>
-                  <div style={{ fontSize:18, fontWeight:800, color:"#2a8a5f" }}>{mo.inTotal}点</div>
-                  <div style={{ fontSize:12, fontWeight:700, color:"#2a8a5f" }}>{yen(mo.inAmount)}</div>
+                  <div style={{ fontSize:11, color:"#2a8a5f" }}>入庫合計(全体)</div>
+                  <div style={{ fontSize:18, fontWeight:800, color:"#2a8a5f" }}>{monthlyMovements.grand.inQty}点</div>
+                  <div style={{ fontSize:12, fontWeight:700, color:"#2a8a5f" }}>{yen(monthlyMovements.grand.inAmount)}</div>
                 </div>
                 <div style={{ flex:1, background:"#fff3f0", borderRadius:10, padding:"8px 12px" }}>
-                  <div style={{ fontSize:11, color:"#b3413a" }}>出庫合計(使用)</div>
-                  <div style={{ fontSize:18, fontWeight:800, color:"#b3413a" }}>{mo.outTotal}点</div>
-                  <div style={{ fontSize:12, fontWeight:700, color:"#b3413a" }}>{yen(mo.outAmount)}</div>
+                  <div style={{ fontSize:11, color:"#b3413a" }}>出庫合計(全体・使用)</div>
+                  <div style={{ fontSize:18, fontWeight:800, color:"#b3413a" }}>{monthlyMovements.grand.outQty}点</div>
+                  <div style={{ fontSize:12, fontWeight:700, color:"#b3413a" }}>{yen(monthlyMovements.grand.outAmount)}</div>
                 </div>
               </div>
-              {mo.inList.length > 0 && (
-                <div style={{ marginBottom:10 }}>
-                  <div style={{ fontSize:12, fontWeight:700, color:C.sub, marginBottom:4 }}>入庫した商品</div>
-                  {mo.inList.map(([name, entry]) => (
-                    <div key={name} style={{ display:"flex", alignItems:"center", gap:8, fontSize:12.5, padding:"3px 0" }}>
-                      <span style={{ flex:1, minWidth:0 }}>{name}{entry.amount > 0 && <span style={{ color:C.sub, fontSize:10.5 }}> ({yen(entry.amount)})</span>}</span>
-                      <button onClick={() => adjustMovement("in", entry, -1)} style={{ width:26, height:26, borderRadius:7, border:"1px solid "+C.border, background:"#fff", color:C.text, fontSize:14, fontWeight:700, cursor:"pointer", flexShrink:0 }}>−</button>
-                      <span style={{ fontWeight:700, width:30, textAlign:"center", flexShrink:0 }}>+{entry.qty}</span>
-                      <button onClick={() => adjustMovement("in", entry, 1)} style={{ width:26, height:26, borderRadius:7, border:"1px solid "+C.border, background:"#fff", color:C.text, fontSize:14, fontWeight:700, cursor:"pointer", flexShrink:0 }}>＋</button>
+
+              {monthlyMovements.typeList.map(t => (
+                <div key={t.typeKey} style={{ ...css.card, marginBottom:12 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                    <div style={{ fontWeight:800, fontSize:15, color:C.accent }}>{t.typeKey}</div>
+                    <div style={{ fontSize:11.5, color:C.sub }}>入庫 {yen(t.inAmount)} / 出庫 {yen(t.outAmount)}</div>
+                  </div>
+                  {t.catList.map(c => (
+                    <div key={c.cat} style={{ marginBottom:10, paddingLeft:2 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 8px", background:C.bg, borderRadius:8, marginBottom:4 }}>
+                        <div style={{ fontSize:13, fontWeight:700, color:C.text }}>{c.cat}</div>
+                        <div style={{ fontSize:11, color:C.sub }}>入 {yen(c.inAmount)} / 出 {yen(c.outAmount)}</div>
+                      </div>
+                      {c.subList.map(s => (
+                        <div key={s.sub} style={{ marginBottom:6, paddingLeft:10 }}>
+                          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:2 }}>
+                            <div style={{ fontSize:12, fontWeight:700, color:C.sub }}>{s.sub}</div>
+                            <div style={{ fontSize:10.5, color:C.sub }}>入 {yen(s.inAmount)} / 出 {yen(s.outAmount)}</div>
+                          </div>
+                          {s.entries.map(([name, entry]) => (
+                            <div key={name}>
+                              {entry.in && (
+                                <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:12.5, padding:"3px 0" }}>
+                                  <span style={{ flex:1, minWidth:0 }}>{name}{entry.in.amount > 0 && <span style={{ color:C.sub, fontSize:10.5 }}> ({yen(entry.in.amount)})</span>}</span>
+                                  <button onClick={() => adjustMovement("in", entry.in, -1)} style={{ width:24, height:24, borderRadius:6, border:"1px solid "+C.border, background:"#fff", color:C.text, fontSize:13, fontWeight:700, cursor:"pointer", flexShrink:0 }}>−</button>
+                                  <span style={{ fontWeight:700, width:28, textAlign:"center", flexShrink:0, color:"#2a8a5f" }}>+{entry.in.qty}</span>
+                                  <button onClick={() => adjustMovement("in", entry.in, 1)} style={{ width:24, height:24, borderRadius:6, border:"1px solid "+C.border, background:"#fff", color:C.text, fontSize:13, fontWeight:700, cursor:"pointer", flexShrink:0 }}>＋</button>
+                                </div>
+                              )}
+                              {entry.out && (
+                                <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:12.5, padding:"3px 0" }}>
+                                  <span style={{ flex:1, minWidth:0 }}>{name}{entry.out.amount > 0 && <span style={{ color:C.sub, fontSize:10.5 }}> ({yen(entry.out.amount)})</span>}</span>
+                                  <button onClick={() => adjustMovement("out", entry.out, -1)} style={{ width:24, height:24, borderRadius:6, border:"1px solid "+C.border, background:"#fff", color:C.text, fontSize:13, fontWeight:700, cursor:"pointer", flexShrink:0 }}>−</button>
+                                  <span style={{ fontWeight:700, width:28, textAlign:"center", flexShrink:0, color:"#b3413a" }}>-{entry.out.qty}</span>
+                                  <button onClick={() => adjustMovement("out", entry.out, 1)} style={{ width:24, height:24, borderRadius:6, border:"1px solid "+C.border, background:"#fff", color:C.text, fontSize:13, fontWeight:700, cursor:"pointer", flexShrink:0 }}>＋</button>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ))}
                     </div>
                   ))}
                 </div>
-              )}
-              {mo.outList.length > 0 && (
-                <div>
-                  <div style={{ fontSize:12, fontWeight:700, color:C.sub, marginBottom:4 }}>使用した商品</div>
-                  {mo.outList.map(([name, entry]) => (
-                    <div key={name} style={{ display:"flex", alignItems:"center", gap:8, fontSize:12.5, padding:"3px 0" }}>
-                      <span style={{ flex:1, minWidth:0 }}>{name}{entry.amount > 0 && <span style={{ color:C.sub, fontSize:10.5 }}> ({yen(entry.amount)})</span>}</span>
-                      <button onClick={() => adjustMovement("out", entry, -1)} style={{ width:26, height:26, borderRadius:7, border:"1px solid "+C.border, background:"#fff", color:C.text, fontSize:14, fontWeight:700, cursor:"pointer", flexShrink:0 }}>−</button>
-                      <span style={{ fontWeight:700, width:30, textAlign:"center", flexShrink:0 }}>-{entry.qty}</span>
-                      <button onClick={() => adjustMovement("out", entry, 1)} style={{ width:26, height:26, borderRadius:7, border:"1px solid "+C.border, background:"#fff", color:C.text, fontSize:14, fontWeight:700, cursor:"pointer", flexShrink:0 }}>＋</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))
+              ))}
+            </React.Fragment>
+          )
         )}
 
         {!loading && !loadError && view !== "history" && Object.keys(grouped).length === 0 && (
