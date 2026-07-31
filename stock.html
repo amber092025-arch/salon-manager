@@ -449,6 +449,19 @@ function App() {
 
   const stockColor = p => (p.stock||0) < (p.minStock||3) ? C.red : (p.stock||0) < (p.minStock||3)*2 ? C.orange : C.green;
 
+  const toggleGroupSelect = (items) => {
+    const ids = items.filter(p => !p.placeholder).map(p => p.id);
+    setSelectedIds(prev => {
+      const n = new Set(prev);
+      const allIn = ids.length > 0 && ids.every(id => n.has(id));
+      ids.forEach(id => allIn ? n.delete(id) : n.add(id));
+      return n;
+    });
+  };
+  const groupAllSelected = (items) => {
+    const ids = items.filter(p => !p.placeholder).map(p => p.id);
+    return ids.length > 0 && ids.every(id => selectedIds.has(id));
+  };
   const toggleSelect = (id) => setSelectedIds(prev => {
     const n = new Set(prev);
     if (n.has(id)) n.delete(id); else n.add(id);
@@ -672,7 +685,15 @@ function App() {
           <div key={cat} style={css.card}>
             <div onClick={() => setOpenCats(prev=>({...prev,[cat]:!catOpen}))}
               style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer" }}>
-              <div style={{ fontWeight:800, fontSize:15, color:C.accent }}>{cat}</div>
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                {selectMode && (
+                  <div onClick={e => { e.stopPropagation(); toggleGroupSelect(Object.values(subs).flat()); }}
+                    style={{ width:22, height:22, borderRadius:6, border:"2px solid "+(groupAllSelected(Object.values(subs).flat())?C.accent:C.border), background:groupAllSelected(Object.values(subs).flat())?C.accent:"#fff", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, cursor:"pointer" }}>
+                    {groupAllSelected(Object.values(subs).flat()) && <span style={{ color:"#fff", fontSize:13, fontWeight:800 }}>✓</span>}
+                  </div>
+                )}
+                <div style={{ fontWeight:800, fontSize:15, color:C.accent }}>{cat}</div>
+              </div>
               <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                 <span style={{ fontSize:12, color:C.sub }}>{catTotal}品目</span>
                 <span style={{ fontSize:12, color:C.sub }}>{catOpen?"▲":"▼"}</span>
@@ -692,7 +713,15 @@ function App() {
                 <div key={sub} style={{ padding:"8px 0", borderBottom:"1px solid "+C.border, marginTop:6 }}>
                   <div onClick={() => setOpenSubs(prev=>({...prev,[subKey]:!subOpen}))}
                     style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer", marginBottom:subOpen?4:0 }}>
-                    <div style={{ fontSize:12, color:C.sub, fontWeight:700 }}>{sub}</div>
+                    <div style={{ display:"flex", alignItems:"center", gap:7 }}>
+                      {selectMode && (
+                        <div onClick={e => { e.stopPropagation(); toggleGroupSelect(realItems); }}
+                          style={{ width:20, height:20, borderRadius:6, border:"2px solid "+(groupAllSelected(realItems)?C.accent:C.border), background:groupAllSelected(realItems)?C.accent:"#fff", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, cursor:"pointer" }}>
+                          {groupAllSelected(realItems) && <span style={{ color:"#fff", fontSize:12, fontWeight:800 }}>✓</span>}
+                        </div>
+                      )}
+                      <div style={{ fontSize:12, color:C.sub, fontWeight:700 }}>{sub}</div>
+                    </div>
                     <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                       <span style={{ fontSize:11, color:C.sub }}>{realItems.length}品目</span>
                       <span style={{ fontSize:11, color:C.sub }}>{subOpen?"▲":"▼"}</span>

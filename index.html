@@ -4381,7 +4381,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.31-c"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.31-d"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -6204,6 +6204,19 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
   const soldMap  = {};
   visits.forEach(v => v.products.forEach(p => { soldMap[p.productId] = (soldMap[p.productId]||0) + p.qty; }));
 
+  const toggleGroupSelect = (items) => {
+    const ids = items.filter(p => !p.placeholder).map(p => p.id);
+    setSelectedIds(prev => {
+      const n = new Set(prev);
+      const allIn = ids.length > 0 && ids.every(id => n.has(id));
+      ids.forEach(id => allIn ? n.delete(id) : n.add(id));
+      return n;
+    });
+  };
+  const groupAllSelected = (items) => {
+    const ids = items.filter(p => !p.placeholder).map(p => p.id);
+    return ids.length > 0 && ids.every(id => selectedIds.has(id));
+  };
   const toggleSelect = (id) => setSelectedIds(prev => {
     const n = new Set(prev);
     if (n.has(id)) n.delete(id); else n.add(id);
@@ -6513,6 +6526,12 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                         <button onClick={e => { e.stopPropagation(); deleteProdCategory(cat); }}
                           style={{ width:24,height:24,borderRadius:"50%",background:C.red,border:"none",color:"#fff",fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,lineHeight:1 }}>－</button>
                       )}
+                      {selectMode && (
+                        <div onClick={e => { e.stopPropagation(); toggleGroupSelect(Object.values(subs).flat()); }}
+                          style={{ width:22, height:22, borderRadius:6, border:"2px solid "+(groupAllSelected(Object.values(subs).flat())?"#E8DCC3":"#666"), background:groupAllSelected(Object.values(subs).flat())?"#E8DCC3":"transparent", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, cursor:"pointer" }}>
+                          {groupAllSelected(Object.values(subs).flat()) && <span style={{ color:"#2a2218", fontSize:13, fontWeight:800 }}>✓</span>}
+                        </div>
+                      )}
                       <span style={{ fontWeight:800, fontSize:15, color:"#fff" }}>{cat}</span>
                       {catLow > 0 && <span style={{ background:C.red, color:"#fff", fontSize:10, fontWeight:700, borderRadius:20, padding:"2px 8px" }}>要発注{catLow}品</span>}
                     </div>
@@ -6553,6 +6572,12 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                               ) : (
                                 <>
                                   <div onClick={()=>setOpenSubs(prev=>({...prev,[subKey]:!subOpen}))} style={{ display:"flex", alignItems:"center", gap:8, flex:1, cursor:"pointer" }}>
+                                    {selectMode && (
+                                      <div onClick={e => { e.stopPropagation(); toggleGroupSelect(items); }}
+                                        style={{ width:20, height:20, borderRadius:6, border:"2px solid "+(groupAllSelected(items)?"#7a6848":C.border), background:groupAllSelected(items)?"#7a6848":"#fff", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, cursor:"pointer" }}>
+                                        {groupAllSelected(items) && <span style={{ color:"#fff", fontSize:12, fontWeight:800 }}>✓</span>}
+                                      </div>
+                                    )}
                                     <span style={{ fontSize:13, fontWeight:700, color:C.sub, display:"flex", alignItems:"center", gap:4 }}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={C.sub} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg> {sub}</span>
                                     <span style={{ color:C.sub, fontSize:12 }}>{subOpen?"▲":"▼"}</span>
                                   </div>
