@@ -128,6 +128,7 @@ function App() {
   const [modal, setModal] = useState(null); // { mode:"add"|"edit", id? }
   const [selectMode, setSelectMode] = useState(false);
   const [openCats, setOpenCats] = useState({});
+  const [searchText, setSearchText] = useState(""); // 商品名・商品コードのあいまい検索
   const [openSubs, setOpenSubs] = useState({});
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkEditModal, setBulkEditModal] = useState(null);
@@ -311,9 +312,12 @@ function App() {
   // ── グルーピング（業務/店販） ──
   const grouped = useMemo(() => {
     const isShop = c => shopCats.includes(c);
+    const q = normalize(searchText.trim());
     const filtered = products.filter(p => {
       const cat = p.category || "未分類";
-      return view === "hanbai" ? isShop(cat) : !isShop(cat);
+      if ((view === "hanbai" ? !isShop(cat) : isShop(cat))) return false;
+      if (!q) return true;
+      return normalize(p.name).includes(q) || normalize(p.productCode||"").includes(q) || normalize(p.subCategory||"").includes(q);
     });
     const map = {};
     filtered.forEach(p => {
@@ -323,7 +327,7 @@ function App() {
       map[cat][sub].push(p);
     });
     return map;
-  }, [products, view, shopCats]);
+  }, [products, view, shopCats, searchText]);
 
   const existingCats = useMemo(() => {
     const isShop = c => shopCats.includes(c);
@@ -561,6 +565,16 @@ function App() {
             </button>
           ))}
         </div>
+        {view !== "history" && (
+          <div style={{ position:"relative", marginTop:10 }}>
+            <input value={searchText} onChange={e => setSearchText(e.target.value)} placeholder="商品名・商品コードで検索"
+              style={{ width:"100%", boxSizing:"border-box", padding:"10px 36px 10px 14px", borderRadius:12, border:"1px solid "+C.border, fontSize:14, background:"#fff", outline:"none" }} />
+            {searchText && (
+              <button onClick={() => setSearchText("")}
+                style={{ position:"absolute", right:6, top:"50%", transform:"translateY(-50%)", width:26, height:26, borderRadius:"50%", border:"none", background:C.bg, color:C.sub, fontSize:14, fontWeight:700, cursor:"pointer" }}>×</button>
+            )}
+          </div>
+        )}
         <div style={{ display:"flex", justifyContent:"flex-end", gap:14, marginTop:8 }}>
           {view !== "history" && (
             <div style={{ display:"flex", alignItems:"center", gap:6, marginRight:"auto" }}>
@@ -652,7 +666,7 @@ function App() {
         )}
 
         {!loading && !loadError && view !== "history" && Object.entries(grouped).map(([cat, subs]) => {
-          const catOpen = openCats[cat] === true;
+          const catOpen = openCats[cat] === true || searchText.trim() !== "";
           const catTotal = Object.values(subs).flat().filter(p=>!p.placeholder).length;
           return (
           <div key={cat} style={css.card}>
@@ -667,7 +681,7 @@ function App() {
             {catOpen && Object.entries(subs).map(([sub, items]) => {
               const realItems = items.filter(p => !p.placeholder);
               const subKey = cat+"_"+sub;
-              const subOpen = openSubs[subKey] === true;
+              const subOpen = openSubs[subKey] === true || searchText.trim() !== "";
               if (realItems.length === 0) return (
                 <div key={sub} style={{ padding:"8px 0", borderBottom:"1px solid "+C.border, marginTop:6 }}>
                   <div style={{ fontSize:12, color:C.sub, fontWeight:700 }}>{sub}</div>
