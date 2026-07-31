@@ -4363,11 +4363,22 @@ function StylupPromptTab({ setTab, notify }) {
 
 const APPT_COLORS = ["#C8A15A", "#e8829a", "#e8a864", "#7a9aba", "#9a88c8", "#72b08a"];
 const PE_COLORS = ["#8a8a8a", "#3fb98a", "#e8924a", "#9a7fd4", "#e0668a", "#5aa8e8", "#e05a4a"];
+
+// ドラッグ並べ替え用: 最も近いスクロール可能な親要素を探す(画面端での自動スクロールに使用)
+function findScrollParent(el) {
+  let cur = el && el.parentElement;
+  while (cur) {
+    const st = window.getComputedStyle(cur);
+    if (/(auto|scroll)/.test(st.overflowY) && cur.scrollHeight > cur.clientHeight) return cur;
+    cur = cur.parentElement;
+  }
+  return null;
+}
 const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.30-b"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.30-c"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -5949,21 +5960,40 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
     e.preventDefault(); e.stopPropagation();
     const row = e.currentTarget.closest("[data-prow]");
     const rowH = row ? row.getBoundingClientRect().height : 60;
-    const d = { id: p.id, product: p, fromIdx: idx, toIdx: idx, dy: 0, rowH, startY: e.clientY };
+    const container = findScrollParent(row);
+    const d = { id: p.id, product: p, fromIdx: idx, toIdx: idx, dy: 0, rowH, startY: e.clientY, lastY: e.clientY, container, startScroll: container ? container.scrollTop : 0, edgeDir: 0 };
     prodDragRef.current = d;
     setProdDrag(d);
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+    const loop = () => {
+      const cur = prodDragRef.current;
+      if (!cur) return;
+      if (cur.container && cur.edgeDir !== 0) {
+        cur.container.scrollTop += cur.edgeDir * 9;
+        recalcProdDrag(cur.lastY);
+      }
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
   };
-  const moveProdDrag = (e) => {
+  const recalcProdDrag = (clientY) => {
     const d = prodDragRef.current;
     if (!d) return;
     const list = prodListOf(d.product);
-    const dy = e.clientY - d.startY;
+    const scrollDelta = d.container ? d.container.scrollTop - d.startScroll : 0;
+    const dy = (clientY - d.startY) + scrollDelta;
     const toIdx = Math.max(0, Math.min(list.length - 1, d.fromIdx + Math.round(dy / d.rowH)));
-    const nd = { ...d, dy, toIdx };
+    let edgeDir = 0;
+    if (d.container) {
+      const rect = d.container.getBoundingClientRect();
+      if (clientY < rect.top + 70) edgeDir = -1;
+      else if (clientY > rect.bottom - 70) edgeDir = 1;
+    }
+    const nd = { ...d, dy, toIdx, lastY: clientY, edgeDir };
     prodDragRef.current = nd;
     setProdDrag(nd);
   };
+  const moveProdDrag = (e) => { if (prodDragRef.current) recalcProdDrag(e.clientY); };
   const endProdDrag = () => {
     const d = prodDragRef.current;
     prodDragRef.current = null;
@@ -7344,20 +7374,41 @@ function SettingsTab({ menus, setMenus, products, setProducts, notify, setTab })
     e.preventDefault(); e.stopPropagation();
     const row = e.currentTarget.closest("[data-mrow]");
     const rowH = row ? row.getBoundingClientRect().height : 50;
-    const d = { id: m.id, fromIdx: idx, toIdx: idx, dy: 0, rowH, startY: e.clientY };
+    const container = findScrollParent(row);
+    const d = { id: m.id, fromIdx: idx, toIdx: idx, dy: 0, rowH, startY: e.clientY, lastY: e.clientY, container, startScroll: container ? container.scrollTop : 0, edgeDir: 0 };
     menuDragRef.current = d;
     setMenuDrag(d);
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+    // 画面端に指がある間、自動でスクロールし続けるループ(ドラッグ終了で自然に停止)
+    const loop = () => {
+      const cur = menuDragRef.current;
+      if (!cur) return;
+      if (cur.container && cur.edgeDir !== 0) {
+        cur.container.scrollTop += cur.edgeDir * 9;
+        recalcMenuDrag(cur.lastY);
+      }
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
   };
-  const moveMenuDrag = (e) => {
+  const recalcMenuDrag = (clientY) => {
     const d = menuDragRef.current;
     if (!d) return;
-    const dy = e.clientY - d.startY;
+    // スクロールした分もドラッグ量に加算する(スクロール中も行が指に追従し、行き先判定もズレない)
+    const scrollDelta = d.container ? d.container.scrollTop - d.startScroll : 0;
+    const dy = (clientY - d.startY) + scrollDelta;
     const toIdx = Math.max(0, Math.min(catMenus.length - 1, d.fromIdx + Math.round(dy / d.rowH)));
-    const nd = { ...d, dy, toIdx };
+    let edgeDir = 0;
+    if (d.container) {
+      const rect = d.container.getBoundingClientRect();
+      if (clientY < rect.top + 70) edgeDir = -1;
+      else if (clientY > rect.bottom - 70) edgeDir = 1;
+    }
+    const nd = { ...d, dy, toIdx, lastY: clientY, edgeDir };
     menuDragRef.current = nd;
     setMenuDrag(nd);
   };
+  const moveMenuDrag = (e) => { if (menuDragRef.current) recalcMenuDrag(e.clientY); };
   const endMenuDrag = () => {
     const d = menuDragRef.current;
     menuDragRef.current = null;
