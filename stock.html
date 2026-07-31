@@ -120,6 +120,9 @@ function App() {
 
   const [products, setProducts] = useState([]);
   const [shopCats, setShopCats] = useState([]);
+  const [movements, setMovements] = useState([]);
+  const [recordDate, setRecordDate] = useState(""); // 入出庫の記録日(空欄=今日)。過去日付での入庫記録に使う
+  const [movLoading, setMovLoading] = useState(false);
 
   const emptyForm = { name:"", code:"", category:"", subCategory:"", price:"", cost:"", stock:"", minStock:"3" };
   const [modal, setModal] = useState(null); // { mode:"add"|"edit", id? }
@@ -191,10 +194,12 @@ function App() {
     try {
       for (const m of targets) {
         const cur = products.find(x => x.id === m.product.id) || m.product;
-        const ns = scanModal.dir === "out" ? Math.max(0, (cur.stock||0) - m.qty) : (cur.stock||0) + m.qty;
+        const delta = scanModal.dir === "out" ? -m.qty : m.qty;
+        const ns = Math.max(0, (cur.stock||0) + delta);
         const res = await fetch(SUPABASE_URL + "/rest/v1/products?id=eq." + m.product.id, { method:"PATCH", headers:HDRS, body: JSON.stringify({ stock: ns }) });
         if (!res.ok) throw new Error();
         setProducts(prev => prev.map(x => x.id===m.product.id ? { ...x, stock: ns } : x));
+        logStockMovement(cur, delta);
       }
       notify(targets.length + "品を" + (scanModal.dir==="out"?"出庫":"入庫") + "しました ✓");
       setScanModal(null);
@@ -222,6 +227,16 @@ function App() {
   };
   useEffect(() => { if (authed) { setLoading(true); reload(); } }, [authed]);
 
+  useEffect(() => {
+    if (!authed || view !== "history" || movements.length > 0 || movLoading) return;
+    setMovLoading(true);
+    fetch(SUPABASE_URL + "/rest/v1/stock_movements?select=product_name,category,delta,created_at&order=created_at.desc&limit=2000", { headers: HDRS })
+      .then(res => res.ok ? res.json() : Promise.reject())
+      .then(rows => setMovements(rows))
+      .catch(() => notify("入出庫履歴の取得に失敗しました", "error"))
+      .finally(() => setMovLoading(false));
+  }, [authed, view]);
+
   // ── PIN（経費ページと共通：settings.expensePin） ──
   const tryUnlock = async (v) => {
     setChecking(true);
@@ -240,6 +255,31 @@ function App() {
   };
   const lock = () => { localStorage.removeItem("stock_auth"); setAuthed(false); };
 
+  // ── 入出庫履歴を月ごと・商品ごとに集計 ──
+  const monthlyMovements = useMemo(() => {
+    const byMonth = {}; // { "YYYY-MM": { in: {productName: qty}, out: {productName: qty}, inTotal, outTotal } }
+    for (const m of movements) {
+      const month = (m.created_at || "").slice(0, 7);
+      if (!month) continue;
+      byMonth[month] = byMonth[month] || { in: {}, out: {}, inTotal: 0, outTotal: 0 };
+      const bucket = byMonth[month];
+      if (m.delta > 0) {
+        bucket.in[m.product_name] = (bucket.in[m.product_name] || 0) + m.delta;
+        bucket.inTotal += m.delta;
+      } else if (m.delta < 0) {
+        bucket.out[m.product_name] = (bucket.out[m.product_name] || 0) + (-m.delta);
+        bucket.outTotal += (-m.delta);
+      }
+    }
+    return Object.keys(byMonth).sort().reverse().map(month => ({
+      month,
+      inTotal: byMonth[month].inTotal,
+      outTotal: byMonth[month].outTotal,
+      inList: Object.entries(byMonth[month].in).sort((a,b) => b[1]-a[1]),
+      outList: Object.entries(byMonth[month].out).sort((a,b) => b[1]-a[1]),
+    }));
+  }, [movements]);
+
   // ── グルーピング（業務/店販） ──
   const grouped = useMemo(() => {
     const isShop = c => shopCats.includes(c);
@@ -249,7 +289,7 @@ function App() {
     });
     const map = {};
     filtered.forEach(p => {
-      const cat = p.category || "未分類"; const sub = p.subCategory || "一般";
+      const cat = p.category || "未分類"; const sub = (p.subCategory && p.subCategory !== "一般") ? p.subCategory : "未分類";
       if (!map[cat]) map[cat] = {};
       if (!map[cat][sub]) map[cat][sub] = [];
       map[cat][sub].push(p);
@@ -353,12 +393,25 @@ function App() {
     setSaving(false);
   };
 
+  const logStockMovement = async (p, delta) => {
+    if (!delta) return;
+    try {
+      const row = { product_id: p.id, product_name: p.name, category: p.category || null, delta };
+      if (recordDate) row.created_at = recordDate + "T12:00:00+09:00"; // 記録日が指定されていればその日付で記録(未指定=今日)
+      await fetch(SUPABASE_URL + "/rest/v1/stock_movements", {
+        method: "POST", headers: HDRS,
+        body: JSON.stringify([row]),
+      });
+    } catch (e) { /* 履歴の記録に失敗しても在庫数自体の更新は成功させたいので握りつぶす */ }
+  };
+
   const changeStock = async (p, delta) => {
     const ns = Math.max(0, (p.stock||0) + delta);
     setProducts(prev => prev.map(x => x.id===p.id ? { ...x, stock: ns } : x));
     try {
       const res = await fetch(SUPABASE_URL + "/rest/v1/products?id=eq." + p.id, { method:"PATCH", headers:HDRS, body: JSON.stringify({ stock: ns }) });
       if (!res.ok) throw new Error();
+      logStockMovement(p, delta);
     } catch(e) { notify("保存に失敗しました","error"); }
   };
 
@@ -473,14 +526,33 @@ function App() {
           </div>
         </div>
         <div style={{ display:"flex", gap:8 }}>
-          {[["gyomu","業務"],["hanbai","店販"]].map(([k,l]) => (
+          {[["gyomu","業務"],["hanbai","店販"],["history","入出庫履歴"]].map(([k,l]) => (
             <button key={k} onClick={() => setView(k)}
               style={{ flex:1, padding:"9px 0", borderRadius:20, border:"1.5px solid "+(view===k?C.accent:C.border), background:view===k?C.accent:"#fff", color:view===k?"#fff":C.text, fontWeight:700, fontSize:13, cursor:"pointer" }}>
               {l}
             </button>
           ))}
         </div>
-        <div style={{ display:"flex", justifyContent:"flex-end", marginTop:8 }}>
+        <div style={{ display:"flex", justifyContent:"flex-end", gap:14, marginTop:8 }}>
+          {view !== "history" && (
+            <div style={{ display:"flex", alignItems:"center", gap:6, marginRight:"auto" }}>
+              <span style={{ fontSize:12, color:C.sub, fontWeight:700 }}>記録日</span>
+              <input type="date" value={recordDate} onChange={e => setRecordDate(e.target.value)}
+                style={{ border:"1px solid "+C.border, borderRadius:8, padding:"4px 8px", fontSize:12, background:"#fff", color:C.text }} />
+              {recordDate
+                ? <button onClick={() => setRecordDate("")} style={{ background:"none", border:"none", color:C.red, fontSize:11, fontWeight:700, cursor:"pointer" }}>解除</button>
+                : <span style={{ fontSize:10.5, color:C.sub }}>未選択=今日</span>}
+            </div>
+          )}
+          {selectMode && (
+            <button onClick={() => {
+              const allIds = Object.values(grouped).flatMap(subs => Object.values(subs).flat()).filter(p => !p.placeholder).map(p => p.id);
+              setSelectedIds(prev => prev.size >= allIds.length && allIds.length > 0 ? new Set() : new Set(allIds));
+            }}
+              style={{ background:"none", border:"none", color:C.accent, fontSize:13, fontWeight:700, cursor:"pointer", padding:"4px 2px" }}>
+              {(() => { const total = Object.values(grouped).flatMap(subs => Object.values(subs).flat()).filter(p => !p.placeholder).length; return selectedIds.size >= total && total > 0 ? "全解除" : "全選択"; })()}
+            </button>
+          )}
           <button onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
             style={{ background:"none", border:"none", color:selectMode?C.red:C.accent, fontSize:13, fontWeight:700, cursor:"pointer", padding:"4px 2px" }}>
             {selectMode ? "選択をやめる" : "商品を選択して一括編集"}
@@ -497,11 +569,53 @@ function App() {
           </div>
         )}
 
-        {!loading && !loadError && Object.keys(grouped).length === 0 && (
+        {!loading && !loadError && view === "history" && (
+          movLoading ? (
+            <div style={{ textAlign:"center", color:C.sub, fontSize:14, padding:"40px 0" }}>読み込み中...</div>
+          ) : monthlyMovements.length === 0 ? (
+            <div style={{ textAlign:"center", color:C.sub, fontSize:13, padding:"30px 0", lineHeight:1.7 }}>まだ履歴がありません。<br/>「＋」での増減や、納品書読み取りでの入出庫を行うと、ここに月ごとの記録が表示されます。</div>
+          ) : monthlyMovements.map(mo => (
+            <div key={mo.month} style={{ ...css.card, marginBottom:12 }}>
+              <div style={{ fontWeight:800, fontSize:15, marginBottom:10 }}>{mo.month.replace("-","年")}月</div>
+              <div style={{ display:"flex", gap:10, marginBottom:12 }}>
+                <div style={{ flex:1, background:"#eefaf3", borderRadius:10, padding:"8px 12px" }}>
+                  <div style={{ fontSize:11, color:"#2a8a5f" }}>入庫合計</div>
+                  <div style={{ fontSize:18, fontWeight:800, color:"#2a8a5f" }}>{mo.inTotal}点</div>
+                </div>
+                <div style={{ flex:1, background:"#fff3f0", borderRadius:10, padding:"8px 12px" }}>
+                  <div style={{ fontSize:11, color:"#b3413a" }}>出庫合計(使用)</div>
+                  <div style={{ fontSize:18, fontWeight:800, color:"#b3413a" }}>{mo.outTotal}点</div>
+                </div>
+              </div>
+              {mo.inList.length > 0 && (
+                <div style={{ marginBottom:10 }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:C.sub, marginBottom:4 }}>入庫した商品</div>
+                  {mo.inList.map(([name, qty]) => (
+                    <div key={name} style={{ display:"flex", justifyContent:"space-between", fontSize:12.5, padding:"3px 0" }}>
+                      <span>{name}</span><span style={{ fontWeight:700 }}>+{qty}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {mo.outList.length > 0 && (
+                <div>
+                  <div style={{ fontSize:12, fontWeight:700, color:C.sub, marginBottom:4 }}>使用した商品</div>
+                  {mo.outList.map(([name, qty]) => (
+                    <div key={name} style={{ display:"flex", justifyContent:"space-between", fontSize:12.5, padding:"3px 0" }}>
+                      <span>{name}</span><span style={{ fontWeight:700 }}>-{qty}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))
+        )}
+
+        {!loading && !loadError && view !== "history" && Object.keys(grouped).length === 0 && (
           <div style={{ textAlign:"center", color:C.sub, fontSize:13, padding:"30px 0" }}>商品がありません。「＋商品を追加」から登録してください</div>
         )}
 
-        {!loading && !loadError && Object.entries(grouped).map(([cat, subs]) => {
+        {!loading && !loadError && view !== "history" && Object.entries(grouped).map(([cat, subs]) => {
           const catOpen = openCats[cat] === true;
           const catTotal = Object.values(subs).flat().filter(p=>!p.placeholder).length;
           return (

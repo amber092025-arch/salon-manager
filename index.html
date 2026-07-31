@@ -4364,6 +4364,9 @@ function StylupPromptTab({ setTab, notify }) {
 const APPT_COLORS = ["#C8A15A", "#e8829a", "#e8a864", "#7a9aba", "#9a88c8", "#72b08a"];
 const PE_COLORS = ["#8a8a8a", "#3fb98a", "#e8924a", "#9a7fd4", "#e0668a", "#5aa8e8", "#e05a4a"];
 
+// サブカテゴリの表示・グルーピング名: 未設定と旧「一般」はどちらも「未分類」として扱う
+function subCatName(s) { return (s && s !== "一般") ? s : "未分類"; }
+
 // ドラッグ並べ替え用: 最も近いスクロール可能な親要素を探す(画面端での自動スクロールに使用)
 function findScrollParent(el) {
   let cur = el && el.parentElement;
@@ -4378,7 +4381,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.31-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.07.31-c"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -5941,8 +5944,10 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
   const [editCatName, setEditCatName] = useState("");
   const [deleteProdCatMode, setDeleteProdCatMode] = useState(false);
   const [prodSortMode, setProdSortMode] = useState(false);
+  const [sortSelIds, setSortSelIds] = useState(new Set()); // 並び替えモード中の複数選択(チェックした商品をまとめて移動)
+  const toggleSortSel = (id) => setSortSelIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const moveProduct = (p, dir) => {
-    const list = (catMap[p.category||"未分類"]||{})[p.subCategory||"一般"]||[];
+    const list = (catMap[p.category||"未分類"]||{})[subCatName(p.subCategory)]||[];
     const idx = list.findIndex(x => x.id === p.id);
     const j = idx + dir;
     if (j < 0 || j >= list.length) return;
@@ -5955,7 +5960,7 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
   // ── 三本線ハンドルのドラッグ並べ替え(メニュー並べ替えと同方式。サブカテゴリ内のリスト単位で並べ替え) ──
   const [prodDrag, setProdDrag] = useState(null); // { id, listKey, fromIdx, toIdx, dy, rowH, startY }
   const prodDragRef = useRef(null);
-  const prodListOf = (p) => (catMap[p.category||"未分類"]||{})[p.subCategory||"一般"]||[];
+  const prodListOf = (p) => (catMap[p.category||"未分類"]||{})[subCatName(p.subCategory)]||[];
   const startProdDrag = (e, p, idx) => {
     e.preventDefault(); e.stopPropagation();
     const row = e.currentTarget.closest("[data-prow]");
@@ -6000,9 +6005,19 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
     setProdDrag(null);
     if (!d || d.toIdx === d.fromIdx) return;
     const list = prodListOf(d.product);
-    const newList = [...list];
-    const [moved] = newList.splice(d.fromIdx, 1);
-    newList.splice(d.toIdx, 0, moved);
+    let newList;
+    if (sortSelIds.has(d.id) && [...sortSelIds].filter(id => list.some(x => x.id === id)).length > 1) {
+      // チェック済み商品をまとめて移動: 選択外の商品リストの中の落とし先位置に、選択済みを元の順のままブロック挿入
+      const selectedInOrder = list.filter(x => sortSelIds.has(x.id));
+      const rest = list.filter(x => !sortSelIds.has(x.id));
+      const insertAt = list.slice(0, d.toIdx + (d.toIdx > d.fromIdx ? 1 : 0)).filter(x => !sortSelIds.has(x.id)).length;
+      newList = [...rest];
+      newList.splice(Math.min(insertAt, newList.length), 0, ...selectedInOrder);
+    } else {
+      newList = [...list];
+      const [moved] = newList.splice(d.fromIdx, 1);
+      newList.splice(d.toIdx, 0, moved);
+    }
     let orders = list.map(x => x.sortOrder||0).sort((a,b)=>a-b);
     if (new Set(orders).size !== orders.length) orders = newList.map((_, i) => Date.now() + i);
     const orderById = {};
@@ -6228,20 +6243,20 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
   const catMap = {};
   [...products].sort((a,b)=>(a.sortOrder||0)-(b.sortOrder||0)).forEach(p => {
     const cat = p.category || "未分類";
-    const sub = p.subCategory || "一般";
+    const sub = subCatName(p.subCategory);
     if (!catMap[cat]) catMap[cat] = {};
     if (!catMap[cat][sub]) catMap[cat][sub] = [];
     catMap[cat][sub].push(p);
   });
 
   const allCats = [...new Set(products.map(p => p.category || "未分類"))];
-  const allSubs = (cat) => [...new Set(products.filter(p => (p.category||"未分類") === cat).map(p => p.subCategory || "一般"))];
+  const allSubs = (cat) => [...new Set(products.filter(p => (p.category||"未分類") === cat).map(p => subCatName(p.subCategory)))];
 
 
 
   const saveAddProduct = async () => {
     if (!addForm.name || (addIsShop && !addForm.price)) return notify("商品名と価格を入力してください", "error");
-    const newP = { name: addForm.name, price: parseInt(addForm.price)||0, cost: parseInt(addForm.cost)||0, stock: parseInt(addForm.stock)||0, minStock: parseInt(addForm.minStock)||3, category: addForm.category || "未分類", subCategory: addForm.subCategory || "一般", photos: addForm.photos||[], description: addForm.description||"", isPublic: addForm.isPublic||false };
+    const newP = { name: addForm.name, price: parseInt(addForm.price)||0, cost: parseInt(addForm.cost)||0, stock: parseInt(addForm.stock)||0, minStock: parseInt(addForm.minStock)||3, category: addForm.category || "未分類", subCategory: addForm.subCategory || "未分類", photos: addForm.photos||[], description: addForm.description||"", isPublic: addForm.isPublic||false };
     await addProduct(newP);
     setAddForm({ name:"", price:"", cost:"", stock:"", minStock:"3", category:"", subCategory:"", photos:[], description:"", isPublic:false });
     setView("gyomu");
@@ -6409,7 +6424,7 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                     style={{ padding:"10px 10px", borderRadius:10, border:`1.5px solid ${deleteProdCatMode ? C.red : C.border}`, background:"#fff", color: deleteProdCatMode ? C.red : C.sub, fontWeight:700, fontSize:12, cursor:"pointer", whiteSpace:"nowrap" }}>
                     {deleteProdCatMode ? "完了" : "編集/削除"}
                   </button>
-                  <button onClick={() => setProdSortMode(p => !p)}
+                  <button onClick={() => setProdSortMode(p => { if (p) setSortSelIds(new Set()); return !p; })}
                     style={{ padding:"10px 10px", borderRadius:10, border:`1.5px solid ${prodSortMode ? "#7a6848" : C.border}`, background: prodSortMode ? "#f5f0e8" : "#fff", color: prodSortMode ? "#7a6848" : C.sub, fontWeight:700, fontSize:12, cursor:"pointer", whiteSpace:"nowrap" }}>
                     {prodSortMode ? "完了" : "並び替え"}
                   </button>
@@ -6421,6 +6436,13 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                 {selectMode && (
                   <div style={{ display:"flex", alignItems:"center", gap:10, background:"#f5f0e8", border:"1.5px solid #7a6848", borderRadius:12, padding:"10px 12px", marginBottom:8 }}>
                     <div style={{ fontSize:13, fontWeight:700, color:"#2a2218", whiteSpace:"nowrap" }}>{selectedIds.size}件選択中</div>
+                    <button onClick={() => {
+                      const allIds = Object.values(catMap).flatMap(subs => Object.values(subs).flat()).filter(p => !p.placeholder).map(p => p.id);
+                      setSelectedIds(prev => prev.size >= allIds.length ? new Set() : new Set(allIds));
+                    }}
+                      style={{ padding:"9px 12px", borderRadius:10, border:"1.5px solid #7a6848", background:"#fff", color:"#7a6848", fontWeight:800, fontSize:13, cursor:"pointer", whiteSpace:"nowrap" }}>
+                      {(() => { const total = Object.values(catMap).flatMap(subs => Object.values(subs).flat()).filter(p => !p.placeholder).length; return selectedIds.size >= total && total > 0 ? "全解除" : "全選択"; })()}
+                    </button>
                     <button onClick={() => setBulkEditModal({ category:"", subCategory:"", price:"", cost:"", minStock:"", use:{} })} disabled={selectedIds.size===0}
                       style={{ flex:1, padding:"9px 0", borderRadius:10, border:"none", background:selectedIds.size===0?C.sub:"#7a6848", color:"#fff", fontWeight:800, fontSize:13, cursor:"pointer" }}>
                       一括編集
@@ -6449,12 +6471,12 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                           await saveShopCatList(newList);
                         }
                         // Supabaseにプレースホルダー商品として保存
-                        const newP = { name:`（${catName}の商品を追加）`, price:0, cost:0, stock:0, min_stock:3, category:catName, sub_category:"一般", placeholder:true };
+                        const newP = { name:`（${catName}の商品を追加）`, price:0, cost:0, stock:0, min_stock:3, category:catName, sub_category:"未分類", placeholder:true };
                         const { data, error } = await sb.from("products").insert([newP]).select();
                         if (!error && data && data[0]) {
-                          setProducts(p => [...p, { id:data[0].id, name:newP.name, price:0, cost:0, stock:0, minStock:3, category:catName, subCategory:"一般", placeholder:true, photos:[], description:"", isPublic:false }]);
+                          setProducts(p => [...p, { id:data[0].id, name:newP.name, price:0, cost:0, stock:0, minStock:3, category:catName, subCategory:"未分類", placeholder:true, photos:[], description:"", isPublic:false }]);
                         } else {
-                          setProducts(p => [...p, { id:Date.now(), name:newP.name, price:0, cost:0, stock:0, minStock:3, category:catName, subCategory:"一般", placeholder:true }]);
+                          setProducts(p => [...p, { id:Date.now(), name:newP.name, price:0, cost:0, stock:0, minStock:3, category:catName, subCategory:"未分類", placeholder:true }]);
                         }
                         notify(`「${catName}」(${newCatType==="hanbahin"?"店販":"業務"})を追加しました ✓`);
                         setNewCatName(""); setNewCatType("gyomu"); setShowAddCat(false);
@@ -6571,6 +6593,12 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                                 style={{ padding:"12px 16px", borderBottom:`1px solid ${C.border}`, cursor:(selectMode&&!p.placeholder)?"pointer":"default", background:(selectMode&&selectedIds.has(p.id))?"#f5f0e8":(prodDrag&&p.id===prodDrag.id)?"#fff":"transparent", position:"relative", transform:rowTransform, transition:rowTransition, zIndex:rowZ, boxShadow:rowShadow, userSelect: prodDrag ? "none" : "auto", WebkitUserSelect: prodDrag ? "none" : "auto" }}>
                                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
                                   <div style={{ flex:1, display:"flex", alignItems:"flex-start", gap:10 }}>
+                                    {prodSortMode && !selectMode && !p.placeholder && (
+                                      <div onClick={e => { e.stopPropagation(); toggleSortSel(p.id); }}
+                                        style={{ width:22, height:22, borderRadius:6, border:`2px solid ${sortSelIds.has(p.id)?"#7a6848":C.border}`, background:sortSelIds.has(p.id)?"#7a6848":"#fff", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, marginTop:1, cursor:"pointer" }}>
+                                        {sortSelIds.has(p.id) && <span style={{ color:"#fff", fontSize:13, fontWeight:800 }}>✓</span>}
+                                      </div>
+                                    )}
                                     {selectMode && !p.placeholder && (
                                       <div style={{ width:22, height:22, borderRadius:6, border:`2px solid ${selectedIds.has(p.id)?"#7a6848":C.border}`, background:selectedIds.has(p.id)?"#7a6848":"#fff", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, marginTop:1 }}>
                                         {selectedIds.has(p.id) && <span style={{ color:"#fff", fontSize:13, fontWeight:800 }}>✓</span>}
@@ -6623,7 +6651,7 @@ function InventoryTab({ products, setProducts, addProduct, updateProduct, delete
                                           {delta>0?"+":""}{delta}
                                         </button>
                                       ))}
-                                      <button onClick={async ()=>{setEditingProd(p.id);setEditProdForm({name:p.name,price:p.price,cost:p.cost||0,stock:p.stock||0,minStock:p.minStock||3,category:p.category,subCategory:p.subCategory||"一般",photos:[],description:p.description||"",isPublic:p.isPublic||false});const ph=await sb.from("products").select("photos").eq("id",p.id);if(ph.data&&ph.data[0])setEditProdForm(prev=>({...prev,photos:ph.data[0].photos||[]}));}} style={{ padding:"8px 10px", borderRadius:8, border:`1px solid ${C.border}`, background:"#fff", color:C.sub, fontSize:13, cursor:"pointer", display:"flex", alignItems:"center" }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.sub} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+                                      <button onClick={async ()=>{setEditingProd(p.id);setEditProdForm({name:p.name,price:p.price,cost:p.cost||0,stock:p.stock||0,minStock:p.minStock||3,category:p.category,subCategory:subCatName(p.subCategory),photos:[],description:p.description||"",isPublic:p.isPublic||false});const ph=await sb.from("products").select("photos").eq("id",p.id);if(ph.data&&ph.data[0])setEditProdForm(prev=>({...prev,photos:ph.data[0].photos||[]}));}} style={{ padding:"8px 10px", borderRadius:8, border:`1px solid ${C.border}`, background:"#fff", color:C.sub, fontSize:13, cursor:"pointer", display:"flex", alignItems:"center" }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.sub} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
                                       <button onClick={()=>deleteProduct(p.id)} style={{ padding:"8px 10px", borderRadius:8, border:`1px solid ${C.red}`, background:"#fff", color:C.red, fontSize:13, cursor:"pointer", display:"flex", alignItems:"center" }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.red} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
                                     </div>
                                   </>
