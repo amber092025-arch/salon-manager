@@ -106,7 +106,7 @@ const css = {
   label: { fontSize:12, color:C.sub, fontWeight:700, marginBottom:6 },
 };
 
-const STOCK_VERSION = "v2026.08.01-a"; // このファイルのバージョン(ヘッダーに表示、アップロード反映確認用)
+const STOCK_VERSION = "v2026.08.01-b"; // このファイルのバージョン(ヘッダーに表示、アップロード反映確認用)
 
 function App() {
   const [authed, setAuthed] = useState(localStorage.getItem("stock_auth") === "1");
@@ -539,6 +539,33 @@ function App() {
     } catch(e) { notify("保存に失敗しました","error"); }
   };
 
+  // ── 店販→業務 卸し ──
+  const [transferModal, setTransferModal] = useState(null); // { source, qty, targetId, targetSearch }
+  const [transferSaving, setTransferSaving] = useState(false);
+  const doTransfer = async () => {
+    const { source, qty, targetId } = transferModal;
+    const q = Number(qty);
+    if (!q || q <= 0) return notify("数量を入力してください","error");
+    if (q > (source.stock||0)) return notify("店販側の在庫数を超えています","error");
+    const target = products.find(x => x.id === targetId);
+    if (!target) return notify("卸し先の業務商品を選択してください","error");
+    setTransferSaving(true);
+    try {
+      const newSourceStock = (source.stock||0) - q;
+      const newTargetStock = (target.stock||0) + q;
+      const [r1, r2] = await Promise.all([
+        fetch(SUPABASE_URL + "/rest/v1/products?id=eq." + source.id, { method:"PATCH", headers:HDRS, body: JSON.stringify({ stock: newSourceStock }) }),
+        fetch(SUPABASE_URL + "/rest/v1/products?id=eq." + target.id, { method:"PATCH", headers:HDRS, body: JSON.stringify({ stock: newTargetStock }) }),
+      ]);
+      if (!r1.ok || !r2.ok) throw new Error();
+      setProducts(prev => prev.map(x => x.id===source.id ? {...x, stock:newSourceStock} : x.id===target.id ? {...x, stock:newTargetStock} : x));
+      await Promise.all([ logStockMovement(source, -q), logStockMovement(target, q) ]);
+      notify(`${source.name} を ${q}個、${target.name}(業務)に卸しました ✓`);
+      setTransferModal(null);
+    } catch (e) { notify("卸しの保存に失敗しました","error"); }
+    setTransferSaving(false);
+  };
+
   const stockColor = p => (p.stock||0) < (p.minStock||3) ? C.red : (p.stock||0) < (p.minStock||3)*2 ? C.orange : C.green;
 
   const toggleGroupSelect = (items) => {
@@ -956,6 +983,10 @@ function App() {
                       </div>
                       {!selectMode && (
                         <div style={{ display:"flex", gap:6, justifyContent:"flex-end", marginTop:6 }}>
+                          {view === "hanbai" && (
+                            <button onClick={() => setTransferModal({ source:p, qty:1, targetId:null, targetSearch:"" })}
+                              style={{ fontSize:12, color:"#7a9aba", background:"none", border:"1px solid #7a9aba", borderRadius:8, padding:"4px 12px", cursor:"pointer" }}>業務に卸す</button>
+                          )}
                           <button onClick={() => openEdit(p)}
                             style={{ fontSize:12, color:C.accent, background:"none", border:"1px solid "+C.accent, borderRadius:8, padding:"4px 12px", cursor:"pointer" }}>編集</button>
                           <button onClick={() => deleteProduct(p)}
@@ -971,6 +1002,72 @@ function App() {
           );
         })}
       </div>
+
+      {/* 店販→業務 卸しモーダル */}
+      {transferModal && (() => {
+        const isShop = c => shopCats.includes(c);
+        const gyomuProducts = products.filter(x => !x.placeholder && !isShop(x.category||""));
+        const q = transferModal.targetSearch.trim();
+        const qn = q ? (typeof normalize === "function" ? normalize(q) : q.toLowerCase()) : "";
+        const candidates = (qn
+          ? gyomuProducts.filter(x => (typeof normalize === "function" ? normalize(x.name) : x.name.toLowerCase()).includes(qn))
+          : gyomuProducts.filter(x => x.name === transferModal.source.name).concat(gyomuProducts.filter(x => x.name !== transferModal.source.name))
+        ).slice(0, 30);
+        const target = products.find(x => x.id === transferModal.targetId);
+        return (
+          <div style={{ position:"fixed", inset:0, zIndex:960, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px 16px", boxSizing:"border-box" }}>
+            <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.5)" }} onClick={() => setTransferModal(null)} />
+            <div style={{ position:"relative", zIndex:1, background:"#fff", borderRadius:16, padding:20, width:"100%", maxWidth:420, maxHeight:"85vh", overflowY:"auto", WebkitOverflowScrolling:"touch" }}>
+              <div style={{ fontWeight:800, fontSize:16, marginBottom:4 }}>業務に卸す</div>
+              <div style={{ fontSize:12.5, color:C.sub, marginBottom:16 }}>{transferModal.source.name}(店販・在庫{transferModal.source.stock||0})を業務用に振り替えます</div>
+
+              <div style={{ fontSize:12, fontWeight:700, color:C.sub, marginBottom:6 }}>数量</div>
+              <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16 }}>
+                <button onClick={() => setTransferModal(m => ({...m, qty: Math.max(1, Number(m.qty||1)-1)}))}
+                  style={{ width:34, height:34, borderRadius:10, border:"1px solid "+C.border, background:"#fff", fontSize:18, fontWeight:700, cursor:"pointer" }}>−</button>
+                <input type="number" inputMode="numeric" value={transferModal.qty} onChange={e => setTransferModal(m => ({...m, qty: e.target.value.replace(/[^0-9]/g,"")}))}
+                  style={{ width:60, textAlign:"center", fontSize:18, fontWeight:800, border:"1px solid "+C.border, borderRadius:10, padding:"6px 0" }} />
+                <button onClick={() => setTransferModal(m => ({...m, qty: Number(m.qty||0)+1}))}
+                  style={{ width:34, height:34, borderRadius:10, border:"1px solid "+C.border, background:"#fff", fontSize:18, fontWeight:700, cursor:"pointer" }}>＋</button>
+              </div>
+
+              <div style={{ fontSize:12, fontWeight:700, color:C.sub, marginBottom:6 }}>卸し先(業務側の商品)</div>
+              {target ? (
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background:"#f5ede0", borderRadius:10, padding:"10px 12px", marginBottom:10 }}>
+                  <div>
+                    <div style={{ fontSize:13, fontWeight:700 }}>{target.name}</div>
+                    <div style={{ fontSize:11, color:C.sub }}>現在庫{target.stock||0} → 卸し後{(target.stock||0)+Number(transferModal.qty||0)}</div>
+                  </div>
+                  <button onClick={() => setTransferModal(m => ({...m, targetId:null}))}
+                    style={{ fontSize:12, color:C.sub, background:"none", border:"none", cursor:"pointer" }}>変更</button>
+                </div>
+              ) : (
+                <React.Fragment>
+                  <input value={transferModal.targetSearch} onChange={e => setTransferModal(m => ({...m, targetSearch:e.target.value}))}
+                    placeholder="業務商品を検索(空欄で候補を表示)"
+                    style={{ width:"100%", boxSizing:"border-box", padding:"9px 12px", borderRadius:10, border:"1px solid "+C.border, fontSize:13, marginBottom:8 }} />
+                  <div style={{ maxHeight:180, overflowY:"auto", border:"1px solid "+C.border, borderRadius:10, marginBottom:16 }}>
+                    {candidates.length === 0 ? (
+                      <div style={{ padding:12, fontSize:12, color:C.sub, textAlign:"center" }}>該当する業務商品がありません</div>
+                    ) : candidates.map(c => (
+                      <div key={c.id} onClick={() => setTransferModal(m => ({...m, targetId:c.id}))}
+                        style={{ padding:"9px 12px", borderBottom:"1px solid "+C.border, cursor:"pointer", fontSize:12.5 }}>
+                        {c.name}{c.name===transferModal.source.name && <span style={{ color:"#2a8a5f", fontSize:10.5, marginLeft:6 }}>(同名)</span>}
+                        <span style={{ color:C.sub, fontSize:11 }}> ・在庫{c.stock||0}</span>
+                      </div>
+                    ))}
+                  </div>
+                </React.Fragment>
+              )}
+
+              <div style={{ display:"flex", gap:8, marginTop: target ? 6 : 0 }}>
+                <button onClick={() => setTransferModal(null)} style={{ flex:1, padding:"11px 0", borderRadius:10, border:"1px solid "+C.border, background:"#fff", color:C.sub, fontWeight:700, fontSize:13 }}>キャンセル</button>
+                <button onClick={doTransfer} disabled={transferSaving || !target} style={{ flex:2, padding:"11px 0", borderRadius:10, border:"none", background:(transferSaving||!target)?C.sub:"#7a9aba", color:"#fff", fontWeight:800, fontSize:13 }}>{transferSaving ? "処理中..." : "この内容で卸す"}</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 追加/編集モーダル */}
       {modal && (
