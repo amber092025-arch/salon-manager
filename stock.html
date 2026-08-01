@@ -273,10 +273,8 @@ function App() {
   };
 
   const monthlyMovements = useMemo(() => {
-    const costOf = (m) => {
-      const p = products.find(x => x.id === m.product_id) || products.find(x => x.name === m.product_name);
-      return p ? (p.cost || 0) : 0;
-    };
+    const productOf = (m) => products.find(x => x.id === m.product_id) || products.find(x => x.name === m.product_name);
+    const costOf = (m) => { const p = productOf(m); return p ? (p.cost || 0) : 0; };
     const isShop = c => shopCats.includes(c);
     const inMonth = movements.filter(m => jstMonthKey(m.created_at) === historyMonthKey);
 
@@ -285,9 +283,13 @@ function App() {
     for (const m of inMonth) {
       const side = m.delta > 0 ? "in" : m.delta < 0 ? "out" : null;
       if (!side) continue;
-      const typeKey = isShop(m.category || "") ? "店販" : "業務";
-      const cat = m.category || "未分類";
-      const sub = m.sub_category || "未分類";
+      const p = productOf(m);
+      // 記録(movement)自体にカテゴリ/サブカテゴリが無い場合(sub_category追加前の古い履歴)は、
+      // 商品の現在のカテゴリ/サブカテゴリで代用する(商品が削除済みなら未分類のまま)
+      const cat = m.category || (p ? (p.category || "未分類") : "未分類");
+      const rawSub = m.sub_category || (p ? p.subCategory : null);
+      const sub = (rawSub && rawSub !== "一般") ? rawSub : "未分類";
+      const typeKey = isShop(cat) ? "店販" : "業務";
       const qty = Math.abs(m.delta);
       const amount = qty * costOf(m);
       tree[typeKey] = tree[typeKey] || {};
