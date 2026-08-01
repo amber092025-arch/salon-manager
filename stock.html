@@ -106,6 +106,8 @@ const css = {
   label: { fontSize:12, color:C.sub, fontWeight:700, marginBottom:6 },
 };
 
+const STOCK_VERSION = "v2026.08.01-a"; // このファイルのバージョン(ヘッダーに表示、アップロード反映確認用)
+
 function App() {
   const [authed, setAuthed] = useState(localStorage.getItem("stock_auth") === "1");
   const [pinInput, setPinInput] = useState("");
@@ -357,6 +359,49 @@ function App() {
   };
 
   // ── グルーピング（業務/店販） ──
+  // ── アラート(要発注)関連 ──
+  const [alertExcludedTypes, setAlertExcludedTypes] = useState(new Set());
+  const [alertExcludedCats, setAlertExcludedCats] = useState(new Set());
+  const [alertExcludedSubs, setAlertExcludedSubs] = useState(new Set());
+  const toggleExcluded = (setFn, key) => setFn(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+
+  const lowStockAlert = useMemo(() => {
+    const isShop = c => shopCats.includes(c);
+    return products
+      .filter(p => !p.placeholder && (p.stock||0) <= (p.minStock||0))
+      .map(p => ({
+        ...p,
+        typeKey: isShop(p.category||"") ? "店販" : "業務",
+        catKey: p.category || "未分類",
+        subKey: (p.subCategory && p.subCategory !== "一般") ? p.subCategory : "未分類",
+      }))
+      .sort((a,b) => (a.stock - a.minStock) - (b.stock - b.minStock)); // 不足が大きいものを上に
+  }, [products, shopCats]);
+
+  const alertCatOptions = useMemo(() => [...new Set(lowStockAlert.map(p => p.catKey))].sort(), [lowStockAlert]);
+  const alertSubOptions = useMemo(() => [...new Set(lowStockAlert.map(p => p.subKey))].sort(), [lowStockAlert]);
+
+  const filteredAlert = useMemo(() => lowStockAlert.filter(p =>
+    !alertExcludedTypes.has(p.typeKey) && !alertExcludedCats.has(p.catKey) && !alertExcludedSubs.has(p.subKey)
+  ), [lowStockAlert, alertExcludedTypes, alertExcludedCats, alertExcludedSubs]);
+
+  const alertTree = useMemo(() => {
+    const tree = {};
+    for (const p of filteredAlert) {
+      tree[p.typeKey] = tree[p.typeKey] || {};
+      tree[p.typeKey][p.catKey] = tree[p.typeKey][p.catKey] || {};
+      tree[p.typeKey][p.catKey][p.subKey] = tree[p.typeKey][p.catKey][p.subKey] || [];
+      tree[p.typeKey][p.catKey][p.subKey].push(p);
+    }
+    return Object.keys(tree).sort().map(typeKey => ({
+      typeKey,
+      cats: Object.keys(tree[typeKey]).sort().map(cat => ({
+        cat,
+        subs: Object.keys(tree[typeKey][cat]).sort().map(sub => ({ sub, items: tree[typeKey][cat][sub] })),
+      })),
+    }));
+  }, [filteredAlert]);
+
   const grouped = useMemo(() => {
     const isShop = c => shopCats.includes(c);
     const q = normalize(searchText.trim());
@@ -607,7 +652,7 @@ function App() {
       {/* ヘッダー */}
       <div style={{ position:"sticky", top:0, zIndex:100, background:C.bg, padding:"14px 16px 10px", borderBottom:"1px solid "+C.border }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
-          <div style={{ fontWeight:800, fontSize:17, color:C.text }}>在庫管理</div>
+          <div style={{ fontWeight:800, fontSize:17, color:C.text }}>在庫管理 <span style={{ fontSize:10, fontWeight:400, color:C.sub }}>{STOCK_VERSION}</span></div>
           <div style={{ display:"flex", gap:8 }}>
             <button onClick={() => { setLoading(true); reload(); }} style={{ background:"none", border:"1px solid "+C.border, borderRadius:10, padding:"6px 10px", cursor:"pointer" }}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.sub} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
@@ -617,15 +662,18 @@ function App() {
             </button>
           </div>
         </div>
-        <div style={{ display:"flex", gap:8 }}>
-          {[["gyomu","業務"],["hanbai","店販"],["history","入出庫履歴"]].map(([k,l]) => (
+        <div style={{ display:"flex", gap:6 }}>
+          {[["gyomu","業務"],["hanbai","店販"],["history","入出庫履歴"],["alert","アラート"]].map(([k,l]) => (
             <button key={k} onClick={() => setView(k)}
-              style={{ flex:1, padding:"9px 0", borderRadius:20, border:"1.5px solid "+(view===k?C.accent:C.border), background:view===k?C.accent:"#fff", color:view===k?"#fff":C.text, fontWeight:700, fontSize:13, cursor:"pointer" }}>
+              style={{ flex:1, padding:"9px 0", borderRadius:20, border:"1.5px solid "+(view===k?C.accent:C.border), background:view===k?C.accent:"#fff", color:view===k?"#fff":C.text, fontWeight:700, fontSize:12, cursor:"pointer", position:"relative" }}>
               {l}
+              {k==="alert" && lowStockAlert.length > 0 && (
+                <span style={{ position:"absolute", top:-6, right:-4, background:C.red, color:"#fff", fontSize:10, fontWeight:800, borderRadius:10, minWidth:16, height:16, padding:"0 4px", display:"flex", alignItems:"center", justifyContent:"center" }}>{lowStockAlert.length}</span>
+              )}
             </button>
           ))}
         </div>
-        {view !== "history" && (
+        {view !== "history" && view !== "alert" && (
           <div style={{ position:"relative", marginTop:10 }}>
             <input value={searchText} onChange={e => setSearchText(e.target.value)} placeholder="商品名・商品コードで検索"
               style={{ width:"100%", boxSizing:"border-box", padding:"10px 36px 10px 14px", borderRadius:12, border:"1px solid "+C.border, fontSize:14, background:"#fff", outline:"none" }} />
@@ -636,7 +684,7 @@ function App() {
           </div>
         )}
         <div style={{ display:"flex", justifyContent:"flex-end", gap:14, marginTop:8 }}>
-          {view !== "history" && (
+          {view !== "history" && view !== "alert" && (
             <div style={{ display:"flex", alignItems:"center", gap:6, marginRight:"auto" }}>
               <span style={{ fontSize:12, color:C.sub, fontWeight:700 }}>記録日</span>
               <input type="date" value={recordDate} onChange={e => setRecordDate(e.target.value)}
@@ -655,10 +703,12 @@ function App() {
               {(() => { const total = Object.values(grouped).flatMap(subs => Object.values(subs).flat()).filter(p => !p.placeholder).length; return selectedIds.size >= total && total > 0 ? "全解除" : "全選択"; })()}
             </button>
           )}
+          {view !== "alert" && (
           <button onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
             style={{ background:"none", border:"none", color:selectMode?C.red:C.accent, fontSize:13, fontWeight:700, cursor:"pointer", padding:"4px 2px" }}>
             {selectMode ? "選択をやめる" : "商品を選択して一括編集"}
           </button>
+          )}
         </div>
       </div>
 
@@ -756,11 +806,83 @@ function App() {
           )
         )}
 
-        {!loading && !loadError && view !== "history" && Object.keys(grouped).length === 0 && (
+        {view === "alert" && (
+          <React.Fragment>
+            {lowStockAlert.length === 0 ? (
+              <div style={{ textAlign:"center", color:C.sub, fontSize:13, padding:"30px 0", lineHeight:1.7 }}>要発注の商品はありません。<br/>在庫数が最小在庫以下になると、ここに表示されます。</div>
+            ) : (
+              <React.Fragment>
+                <div style={{ ...css.card, marginBottom:12 }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:C.sub, marginBottom:8 }}>絞り込み</div>
+                  <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+                    {["業務","店販"].map(t => (
+                      <label key={t} onClick={() => toggleExcluded(setAlertExcludedTypes, t)}
+                        style={{ display:"flex", alignItems:"center", gap:6, padding:"6px 12px", borderRadius:20, border:"1.5px solid "+(alertExcludedTypes.has(t)?C.border:C.accent), background:alertExcludedTypes.has(t)?"#fff":"#f5ede0", cursor:"pointer" }}>
+                        <div style={{ width:16, height:16, borderRadius:4, border:"2px solid "+(alertExcludedTypes.has(t)?C.border:C.accent), background:alertExcludedTypes.has(t)?"#fff":C.accent, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                          {!alertExcludedTypes.has(t) && <span style={{ color:"#fff", fontSize:10, fontWeight:800 }}>✓</span>}
+                        </div>
+                        <span style={{ fontSize:12.5, fontWeight:700, color:C.text }}>{t}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:alertSubOptions.length ? 10 : 0 }}>
+                    {alertCatOptions.map(cat => (
+                      <label key={cat} onClick={() => toggleExcluded(setAlertExcludedCats, cat)}
+                        style={{ display:"flex", alignItems:"center", gap:5, padding:"4px 10px", borderRadius:14, border:"1px solid "+(alertExcludedCats.has(cat)?C.border:C.accent), background:alertExcludedCats.has(cat)?"#fff":"#f5ede0", cursor:"pointer" }}>
+                        <div style={{ width:13, height:13, borderRadius:3, border:"1.5px solid "+(alertExcludedCats.has(cat)?C.border:C.accent), background:alertExcludedCats.has(cat)?"#fff":C.accent, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                          {!alertExcludedCats.has(cat) && <span style={{ color:"#fff", fontSize:8, fontWeight:800 }}>✓</span>}
+                        </div>
+                        <span style={{ fontSize:11.5, color:C.text }}>{cat}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                    {alertSubOptions.map(sub => (
+                      <label key={sub} onClick={() => toggleExcluded(setAlertExcludedSubs, sub)}
+                        style={{ display:"flex", alignItems:"center", gap:5, padding:"4px 10px", borderRadius:14, border:"1px solid "+(alertExcludedSubs.has(sub)?C.border:"#9a7c50"), background:alertExcludedSubs.has(sub)?"#fff":"#efe6d6", cursor:"pointer" }}>
+                        <div style={{ width:13, height:13, borderRadius:3, border:"1.5px solid "+(alertExcludedSubs.has(sub)?C.border:"#9a7c50"), background:alertExcludedSubs.has(sub)?"#fff":"#9a7c50", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                          {!alertExcludedSubs.has(sub) && <span style={{ color:"#fff", fontSize:8, fontWeight:800 }}>✓</span>}
+                        </div>
+                        <span style={{ fontSize:11.5, color:C.text }}>{sub}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {filteredAlert.length === 0 ? (
+                  <div style={{ textAlign:"center", color:C.sub, fontSize:13, padding:"20px 0" }}>この絞り込み条件に一致する商品はありません</div>
+                ) : alertTree.map(t => (
+                  <div key={t.typeKey} style={{ ...css.card, marginBottom:12 }}>
+                    <div style={{ fontWeight:800, fontSize:15, color:C.accent, marginBottom:10 }}>{t.typeKey}</div>
+                    {t.cats.map(c => (
+                      <div key={c.cat} style={{ marginBottom:10 }}>
+                        <div style={{ fontSize:13, fontWeight:700, color:C.text, background:C.bg, borderRadius:8, padding:"6px 8px", marginBottom:4 }}>{c.cat}</div>
+                        {c.subs.map(s => (
+                          <div key={s.sub} style={{ marginBottom:6, paddingLeft:10 }}>
+                            <div style={{ fontSize:12, fontWeight:700, color:C.sub, marginBottom:2 }}>{s.sub}</div>
+                            {s.items.map(p => (
+                              <div key={p.id} onClick={() => openEdit(p)}
+                                style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", cursor:"pointer" }}>
+                                <span style={{ fontSize:12.5, color:C.text }}>{p.name}</span>
+                                <span style={{ fontSize:12, fontWeight:700, color:(p.stock||0)===0?C.red:C.orange, flexShrink:0, marginLeft:8 }}>在庫{p.stock||0} / 最小{p.minStock||0}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </React.Fragment>
+            )}
+          </React.Fragment>
+        )}
+
+        {!loading && !loadError && view !== "history" && view !== "alert" && Object.keys(grouped).length === 0 && (
           <div style={{ textAlign:"center", color:C.sub, fontSize:13, padding:"30px 0" }}>商品がありません。「＋商品を追加」から登録してください</div>
         )}
 
-        {!loading && !loadError && view !== "history" && Object.entries(grouped).map(([cat, subs]) => {
+        {!loading && !loadError && view !== "history" && view !== "alert" && Object.entries(grouped).map(([cat, subs]) => {
           const catOpen = openCats[cat] === true || searchText.trim() !== "";
           const catTotal = Object.values(subs).flat().filter(p=>!p.placeholder).length;
           return (
