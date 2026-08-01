@@ -258,6 +258,7 @@ function App() {
 
   // ── 入出庫履歴を「選択中の月」だけ、業務/店販→カテゴリ→サブカテゴリで集計 ──
   const [historyMonthOffset, setHistoryMonthOffset] = useState(0); // 0=今月、-1=先月、+1=来月
+  const [historyFilter, setHistoryFilter] = useState("all"); // "all" | "in" | "out" — 入庫合計/出庫合計ボックスをタップして切替
   const historyTarget = (() => { const d = new Date(); d.setMonth(d.getMonth() + historyMonthOffset); return d; })();
   const historyMonthKey = historyTarget.getFullYear() + "-" + String(historyTarget.getMonth()+1).padStart(2,"0");
   const historyMonthLabel = historyTarget.getFullYear() + "年" + (historyTarget.getMonth()+1) + "月";
@@ -672,12 +673,12 @@ function App() {
 
         {view === "history" && (
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:6, marginTop:10, marginBottom:14 }}>
-            <button onClick={() => setHistoryMonthOffset(o => o-1)}
+            <button onClick={() => { setHistoryMonthOffset(o => o-1); setHistoryFilter("all"); }}
               style={{ background:C.bg, border:"1px solid "+C.border, borderRadius:8, padding:"5px 12px", fontWeight:700, cursor:"pointer", fontSize:13, color:C.text }}>＜前月</button>
-            <button onClick={() => setHistoryMonthOffset(0)}
+            <button onClick={() => { setHistoryMonthOffset(0); setHistoryFilter("all"); }}
               style={{ background:"#E8DCC3", border:"none", borderRadius:8, padding:"5px 12px", fontWeight:700, cursor:"pointer", fontSize:12, color:"#2a2218" }}>今月</button>
             <div style={{ fontWeight:800, fontSize:15, color:C.text, flex:1, textAlign:"center" }}>{historyMonthLabel}</div>
-            <button onClick={() => setHistoryMonthOffset(o => o+1)}
+            <button onClick={() => { setHistoryMonthOffset(o => o+1); setHistoryFilter("all"); }}
               style={{ background:C.bg, border:"1px solid "+C.border, borderRadius:8, padding:"5px 12px", fontWeight:700, cursor:"pointer", fontSize:13, color:C.text }}>次月＞</button>
           </div>
         )}
@@ -690,39 +691,44 @@ function App() {
           ) : (
             <React.Fragment>
               <div style={{ ...css.card, marginBottom:12, display:"flex", gap:10 }}>
-                <div style={{ flex:1, background:"#eefaf3", borderRadius:10, padding:"8px 12px" }}>
-                  <div style={{ fontSize:11, color:"#2a8a5f" }}>入庫合計(全体)</div>
+                <div onClick={() => setHistoryFilter(f => f === "in" ? "all" : "in")}
+                  style={{ flex:1, background:"#eefaf3", borderRadius:10, padding:"8px 12px", cursor:"pointer", border:"2px solid "+(historyFilter==="in"?"#2a8a5f":"transparent") }}>
+                  <div style={{ fontSize:11, color:"#2a8a5f" }}>入庫合計(全体){historyFilter==="in" && " ✓表示中"}</div>
                   <div style={{ fontSize:18, fontWeight:800, color:"#2a8a5f" }}>{monthlyMovements.grand.inQty}点</div>
                   <div style={{ fontSize:12, fontWeight:700, color:"#2a8a5f" }}>{yen(monthlyMovements.grand.inAmount)}</div>
                 </div>
-                <div style={{ flex:1, background:"#fff3f0", borderRadius:10, padding:"8px 12px" }}>
-                  <div style={{ fontSize:11, color:"#b3413a" }}>出庫合計(全体・使用)</div>
+                <div onClick={() => setHistoryFilter(f => f === "out" ? "all" : "out")}
+                  style={{ flex:1, background:"#fff3f0", borderRadius:10, padding:"8px 12px", cursor:"pointer", border:"2px solid "+(historyFilter==="out"?"#b3413a":"transparent") }}>
+                  <div style={{ fontSize:11, color:"#b3413a" }}>出庫合計(全体・使用){historyFilter==="out" && " ✓表示中"}</div>
                   <div style={{ fontSize:18, fontWeight:800, color:"#b3413a" }}>{monthlyMovements.grand.outQty}点</div>
                   <div style={{ fontSize:12, fontWeight:700, color:"#b3413a" }}>{yen(monthlyMovements.grand.outAmount)}</div>
                 </div>
               </div>
+              {historyFilter !== "all" && (
+                <div onClick={() => setHistoryFilter("all")} style={{ textAlign:"center", fontSize:12, color:C.accent, fontWeight:700, cursor:"pointer", marginTop:-6, marginBottom:12 }}>両方表示に戻す ×</div>
+              )}
 
-              {monthlyMovements.typeList.map(t => (
+              {monthlyMovements.typeList.filter(t => historyFilter==="all" || (historyFilter==="in"?t.inQty:t.outQty) > 0).map(t => (
                 <div key={t.typeKey} style={{ ...css.card, marginBottom:12 }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
                     <div style={{ fontWeight:800, fontSize:15, color:C.accent }}>{t.typeKey}</div>
                     <div style={{ fontSize:11.5, color:C.sub }}>入庫 {yen(t.inAmount)} / 出庫 {yen(t.outAmount)}</div>
                   </div>
-                  {t.catList.map(c => (
+                  {t.catList.filter(c => historyFilter==="all" || (historyFilter==="in"?c.inQty:c.outQty) > 0).map(c => (
                     <div key={c.cat} style={{ marginBottom:10, paddingLeft:2 }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 8px", background:C.bg, borderRadius:8, marginBottom:4 }}>
                         <div style={{ fontSize:13, fontWeight:700, color:C.text }}>{c.cat}</div>
                         <div style={{ fontSize:11, color:C.sub }}>入 {yen(c.inAmount)} / 出 {yen(c.outAmount)}</div>
                       </div>
-                      {c.subList.map(s => (
+                      {c.subList.filter(s => historyFilter==="all" || (historyFilter==="in"?s.inQty:s.outQty) > 0).map(s => (
                         <div key={s.sub} style={{ marginBottom:6, paddingLeft:10 }}>
                           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:2 }}>
                             <div style={{ fontSize:12, fontWeight:700, color:C.sub }}>{s.sub}</div>
                             <div style={{ fontSize:10.5, color:C.sub }}>入 {yen(s.inAmount)} / 出 {yen(s.outAmount)}</div>
                           </div>
-                          {s.entries.map(([name, entry]) => (
+                          {s.entries.filter(([, entry]) => (historyFilter!=="out" && entry.in) || (historyFilter!=="in" && entry.out)).map(([name, entry]) => (
                             <div key={name}>
-                              {entry.in && (
+                              {historyFilter !== "out" && entry.in && (
                                 <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:12.5, padding:"3px 0" }}>
                                   <span style={{ flex:1, minWidth:0 }}>{name}{entry.in.amount > 0 && <span style={{ color:C.sub, fontSize:10.5 }}> ({yen(entry.in.amount)})</span>}</span>
                                   <button onClick={() => adjustMovement("in", entry.in, -1)} style={{ width:24, height:24, borderRadius:6, border:"1px solid "+C.border, background:"#fff", color:C.text, fontSize:13, fontWeight:700, cursor:"pointer", flexShrink:0 }}>−</button>
@@ -730,7 +736,7 @@ function App() {
                                   <button onClick={() => adjustMovement("in", entry.in, 1)} style={{ width:24, height:24, borderRadius:6, border:"1px solid "+C.border, background:"#fff", color:C.text, fontSize:13, fontWeight:700, cursor:"pointer", flexShrink:0 }}>＋</button>
                                 </div>
                               )}
-                              {entry.out && (
+                              {historyFilter !== "in" && entry.out && (
                                 <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:12.5, padding:"3px 0" }}>
                                   <span style={{ flex:1, minWidth:0 }}>{name}{entry.out.amount > 0 && <span style={{ color:C.sub, fontSize:10.5 }}> ({yen(entry.out.amount)})</span>}</span>
                                   <button onClick={() => adjustMovement("out", entry.out, -1)} style={{ width:24, height:24, borderRadius:6, border:"1px solid "+C.border, background:"#fff", color:C.text, fontSize:13, fontWeight:700, cursor:"pointer", flexShrink:0 }}>−</button>
