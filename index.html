@@ -3606,8 +3606,107 @@ const STYLE_MODEL_OPTIONS = {
   age: ["設定しない","キッズ","10代","20代","30代","40代","50代","60代以上"],
 };
 
+// SalonBoardのスタイル登録画面へ自動入力するコードを生成する。
+// 顔型/年代/髪量/髪質/太さ/クセの区分コードはSalonBoard側のフォーム構造(事実情報)に基づく対応表。
+const SB_FACE_CODE = {"丸型":"1","卵型":"2","四角":"3","逆三角":"4","ベース":"5","面長":"6"};
+const SB_AGE_CODE = {"キッズ":"0","10代":"1","20代":"2","30代":"3","40代":"4","50代":"5","60代以上":"6"};
+const SB_VOL_CODE = {"少ない":"1","普通":"2","多い":"3"};
+const SB_TEX_CODE = {"柔らかい":"1","普通":"2","硬い":"3"};
+const SB_THICK_CODE = {"細い":"1","普通":"2","太い":"3"};
+const SB_CURL_CODE = {"なし":"1","少し":"2","強い":"3"};
+
+function buildStyleSalonBoardScript(s) {
+  const img = (s.images || []).find(Boolean) || "";
+  let imgB64 = "", imgMime = "image/jpeg";
+  const m = img.match(/^data:([^;]+);base64,(.+)$/);
+  if (m) { imgMime = m[1]; imgB64 = m[2]; }
+
+  const D = {
+    styleName: s.styleName || "",
+    comment: s.stylistComment || "",
+    menu: s.menuText || "",
+    tags: (s.hashtags || []).slice(0, 20),
+    catCode: s.category === "mens" ? "SG02" : "SG01",
+    length: s.length || "",
+    faceCode: SB_FACE_CODE[s.modelFace] || "",
+    ageCode: SB_AGE_CODE[s.modelAge] || "",
+    volCode: SB_VOL_CODE[s.modelVolume] || "",
+    texCode: SB_TEX_CODE[s.modelTexture] || "",
+    thickCode: SB_THICK_CODE[s.modelThickness] || "",
+    curlCode: SB_CURL_CODE[s.modelCurl] || "",
+    imgB64, imgMime,
+  };
+
+  // テンプレート文字列のプレースホルダをJSONで安全に埋め込む(バッククォート等の混入を避けるため)
+  return [
+    '(async function(){',
+    '"use strict";',
+    'var D=' + JSON.stringify(D) + ';',
+    'function q(s){return document.querySelector(s);}',
+    'function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}',
+    'async function waitFor(sel,to){to=to||8000;var end=Date.now()+to;while(Date.now()<end){var el=q(sel);if(el)return el;await sleep(150);}return null;}',
+    'function setValue(sel,v){var el=q(sel);if(!el)return false;el.value=v||"";el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));return true;}',
+    'function setSelectByLabel(sel,label){var el=q(sel);if(!el||!label)return false;for(var i=0;i<el.options.length;i++){var o=el.options[i];if(o.textContent.trim()===label||o.textContent.includes(label)){el.value=o.value;el.dispatchEvent(new Event("change",{bubbles:true}));return true;}}return false;}',
+    'function setRadio(name,val){if(!val)return false;var r=document.querySelector(\'input[name="\'+name+\'"][value="\'+val+\'"]\');if(r){r.checked=true;r.dispatchEvent(new Event("change",{bubbles:true}));return true;}return false;}',
+    'function b64toFile(b64,name,mime){var bin=atob(b64);var arr=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);return new File([arr],name||"photo.jpg",{type:mime||"image/jpeg"});}',
+    'async function injectFile(inputSel,file){var input=await waitFor(inputSel);if(!input)return false;var dt=new DataTransfer();dt.items.add(file);input.files=dt.files;input.dispatchEvent(new Event("change",{bubbles:true}));return true;}',
+    'try{',
+    '  if(!location.hostname.includes("salonboard.com")){alert("SALON BOARDのスタイル登録画面で実行してください");return;}',
+    '  setValue("input#styleNameTxt",D.styleName);',
+    '  setValue("textarea#stylistCommentTxt",D.comment);',
+    '  setValue("textarea#menuDetailTxt",D.menu);',
+    '  setRadio("frmStyleEditStyleDto.styleCategoryCd",D.catCode);',
+    '  if(D.length)setSelectByLabel(D.catCode==="SG01"?"select#ladiesHairLengthCd":"select#mensHairLengthCd",D.length);',
+    '  setRadio("frmStyleEditStyleModelDto.modelFaceTypeKbn",D.faceCode);',
+    '  setRadio("frmStyleEditStyleModelDto.modelAgeKbn",D.ageCode);',
+    '  setRadio("frmStyleEditStyleModelDto.modelHairVolumeKbn",D.volCode);',
+    '  setRadio("frmStyleEditStyleModelDto.modelHairTypeKbn",D.texCode);',
+    '  setRadio("frmStyleEditStyleModelDto.modelHairThicknessKbn",D.thickCode);',
+    '  setRadio("frmStyleEditStyleModelDto.modelHairCurlyKbn",D.curlCode);',
+    '  var tagInput=q("input#hashTagTxt");',
+    '  var tagAddBtn=q("button.jsc_style_edit-editCommon__tag--addBtn");',
+    '  if(tagInput&&tagAddBtn&&D.tags.length){',
+    '    for(var i=0;i<D.tags.length;i++){',
+    '      tagInput.focus();tagInput.value=D.tags[i];',
+    '      tagInput.dispatchEvent(new Event("input",{bubbles:true}));',
+    '      tagInput.dispatchEvent(new Event("change",{bubbles:true}));',
+    '      await sleep(200);',
+    '      if(tagAddBtn.disabled)tagAddBtn.disabled=false;',
+    '      tagAddBtn.click();',
+    '      await sleep(300);',
+    '    }',
+    '    tagInput.value="";tagInput.dispatchEvent(new Event("input",{bubbles:true}));',
+    '  }',
+    '  if(D.imgB64){',
+    '    var trg=q("#FRONT_IMG_ID_PC_NEW_NO_PHOTO, img#FRONT_IMG_ID_IMG");',
+    '    if(trg)trg.click();',
+    '    await sleep(600);',
+    '    await injectFile(\'input#formFile, input[name="formFile"], input.jscImageUploaderModalInput\',b64toFile(D.imgB64,"photo.jpg",D.imgMime));',
+    '    await sleep(1200);',
+    '    var sub=q(".jscImageUploaderModalSubmitButton, .imageUploaderModalSubmitButton");',
+    '    if(sub)sub.click();',
+    '  }',
+    '  alert("入力しました。内容を確認して「登録」ボタンを押してください。");',
+    '}catch(err){alert("エラー: "+err.message);}',
+    '})();',
+  ].join("\n");
+}
+
 function StyleListTab({ setTab, notify, styles, menus, deleteStyle, setEditingStyleId }) {
   const couponName = (id) => { const m = menus.find(x => x.id === id); return m ? m.name : ""; };
+  const [sbModal, setSbModal] = useState(null); // { style, script } | { loading: true }
+  const openSalonBoardExport = async (s) => {
+    setSbModal({ loading: true });
+    try {
+      const r = await sbRetry(() => sb.from("styles").select("*").eq("id", s.id));
+      if (r.error || !r.data || !r.data[0]) throw new Error();
+      const full = fromDb.style(r.data[0]);
+      setSbModal({ style: full, script: buildStyleSalonBoardScript(full) });
+    } catch (e) {
+      notify("スタイル情報の取得に失敗しました", "error");
+      setSbModal(null);
+    }
+  };
   return (
     <div style={{ background: C.bg, minHeight: "100vh" }}>
       <div style={{ background: "#fff", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.border}` }}>
@@ -3643,9 +3742,55 @@ function StyleListTab({ setTab, notify, styles, menus, deleteStyle, setEditingSt
               style={{ background: "none", border: "none", color: "#ff6b6b", fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0, alignSelf: "flex-start", padding: 4 }}>
               削除
             </button>
+            <button onClick={(e) => { e.stopPropagation(); openSalonBoardExport(s); }}
+              style={{ background: "none", border: "1px solid #7a9aba", borderRadius: 8, color: "#7a9aba", fontSize: 11, fontWeight: 700, cursor: "pointer", flexShrink: 0, alignSelf: "flex-start", padding: "4px 8px", marginTop: 4 }}>
+              SalonBoardへ
+            </button>
           </div>
         ))}
       </div>
+
+      {sbModal && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 970, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px 16px", boxSizing: "border-box" }}>
+          <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)" }} onClick={() => setSbModal(null)} />
+          <div style={{ position: "relative", zIndex: 1, background: "#fff", borderRadius: 16, padding: 20, width: "100%", maxWidth: 460, maxHeight: "85vh", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+            {sbModal.loading ? (
+              <div style={{ textAlign: "center", color: C.sub, fontSize: 13, padding: "30px 0" }}>読み込み中...</div>
+            ) : (
+              <React.Fragment>
+                <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>SalonBoard登録用コード</div>
+                <div style={{ fontSize: 12, color: C.sub, marginBottom: 14, lineHeight: 1.6 }}>
+                  「{sbModal.style.styleName || "このスタイル"}」の内容を、SALON BOARDのスタイル登録画面に自動で入力するコードです。実行後は必ず内容を確認してから「登録」ボタンを押してください。写真・区分コードの対応はSALON BOARD側の仕様変更で動かなくなる場合があります。
+                </div>
+
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.sub, marginBottom: 6 }}>① PC(Mac)で使う場合</div>
+                <div style={{ fontSize: 11.5, color: C.sub, marginBottom: 10, lineHeight: 1.7 }}>
+                  SALON BOARDのスタイル登録画面を開く → F12(またはSafariの「開発」→「JavaScriptコンソールを表示」) → 下のコードを貼り付けてEnter
+                </div>
+                <textarea readOnly value={sbModal.script} onClick={e => e.target.select()}
+                  style={{ width: "100%", boxSizing: "border-box", height: 90, fontSize: 10, fontFamily: "monospace", border: "1px solid " + C.border, borderRadius: 8, padding: 8, marginBottom: 8, resize: "none" }} />
+                <button onClick={() => { navigator.clipboard.writeText(sbModal.script); notify("コピーしました ✓"); }}
+                  style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "1px solid #7a9aba", background: "#fff", color: "#7a9aba", fontWeight: 700, fontSize: 13, cursor: "pointer", marginBottom: 16 }}>
+                  📋 このコードをコピー
+                </button>
+
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.sub, marginBottom: 6 }}>② iPhone/iPadで使う場合(ブックマークレット)</div>
+                <div style={{ fontSize: 11.5, color: C.sub, marginBottom: 10, lineHeight: 1.7 }}>
+                  1. Safariで適当なページをブックマークに追加(名前は「スタイル登録」など)<br/>
+                  2. ブックマークを編集→URL欄を全部削除→下の「ブックマークレットをコピー」の内容を貼り付けて保存<br/>
+                  3. SALON BOARDのスタイル登録画面を開き、そのブックマークをタップして実行
+                </div>
+                <button onClick={() => { navigator.clipboard.writeText("javascript:" + encodeURIComponent(sbModal.script)); notify("ブックマークレットをコピーしました ✓"); }}
+                  style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "none", background: "#7a9aba", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer", marginBottom: 16 }}>
+                  🔖 ブックマークレットをコピー
+                </button>
+
+                <button onClick={() => setSbModal(null)} style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "1px solid " + C.border, background: "#fff", color: C.sub, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>閉じる</button>
+              </React.Fragment>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -4385,7 +4530,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.01-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.01-b"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
