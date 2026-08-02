@@ -1593,6 +1593,7 @@ function CheckoutPage({ visit: v, customer: c, menus: allMenus, products: allPro
 
   const removeMenu = (idx) => setEditMenus(p => p.filter((_, i) => i !== idx));
   const updateMenuPrice = (idx, val) => setEditMenus(p => p.map((m, i) => i === idx ? { ...m, price: parseInt(val) || 0 } : m));
+  const updateProdPrice = (idx, val) => setEditProds(p => p.map((pr, i) => i === idx ? { ...pr, price: parseInt(val) || 0 } : pr));
   const addMenu = (m) => { setEditMenus(p => [...p, { menuId: m.id, name: m.name, price: m.price }]); setShowMenuPicker(false); };
   const removeProd = (idx) => setEditProds(p => p.filter((_, i) => i !== idx));
   const addProd = (p2) => { setEditProds(p => [...p, { productId: p2.id, name: p2.name, price: p2.price, qty: 1 }]); setShowProdPicker(false); };
@@ -1637,8 +1638,11 @@ function CheckoutPage({ visit: v, customer: c, menus: allMenus, products: allPro
           {/* 店販 rows */}
           {editProds.map((p2, idx) => (
             <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: `1px solid ${C.border}` }}>
-              <span style={{ flex: 1, fontSize: 14, color: C.green }}>{p2.name}</span>
-              <span style={{ fontSize: 13, color: C.sub }}>¥{(p2.price * p2.qty).toLocaleString()}</span>
+              <span style={{ flex: 1, fontSize: 14, color: C.green }}>{p2.name}{p2.qty > 1 && <span style={{ color: C.sub, fontSize: 12 }}> ×{p2.qty}</span>}</span>
+              <input type="number" value={p2.price} onChange={e => !paid && updateProdPrice(idx, e.target.value)}
+                readOnly={paid}
+                style={{ width: 80, border: `1px solid ${C.border}`, borderRadius: 6, padding: "4px 8px", fontSize: 13, textAlign: "right", background: paid ? C.bg : "#fff", color: paid ? C.sub : C.text }} />
+              <span style={{ fontSize: 12, color: C.sub }}>円</span>
               {!paid && <button onClick={() => removeProd(idx)} style={{ background: "none", border: "none", color: C.red, fontSize: 16, cursor: "pointer" }}>✕</button>}
               {paid && <span style={{ width: 22 }} />}
             </div>
@@ -4381,7 +4385,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.07.31-d"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.01-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
