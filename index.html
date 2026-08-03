@@ -3779,14 +3779,16 @@ function buildStyleSalonBoardScript(s) {
     '    R["写真確定ボタン"]=!!sub;',
     '    if(sub)sub.click();',
     '  }',
+    '  var groups=[["顔型","frmStyleEditStyleModelDto.modelFaceTypeKbn"],["年代","frmStyleEditStyleModelDto.modelAgeKbn"],["髪量","frmStyleEditStyleModelDto.modelHairVolumeKbn"],["髪質","frmStyleEditStyleModelDto.modelHairTypeKbn"],["太さ","frmStyleEditStyleModelDto.modelHairThicknessKbn"],["クセ","frmStyleEditStyleModelDto.modelHairCurlyKbn"]];',
+    '  function labelFor(el){var t="";var lab=el.closest("label");if(lab)t=lab.textContent.trim();if(!t&&el.nextElementSibling)t=el.nextElementSibling.textContent.trim();if(!t&&el.parentElement)t=el.parentElement.textContent.trim();return t?t.slice(0,20):"(不明)";}',
     '  var dump=[];',
-    '  document.querySelectorAll("input,textarea,select").forEach(function(el){',
-    '    if(dump.length>=150)return;',
-    '    var lbl=(el.id?("#"+el.id):"")+(el.name?(" name="+el.name):"");',
-    '    if(!lbl)lbl="(id/name無し)";',
-    '    dump.push(el.tagName.toLowerCase()+"["+(el.type||"")+"] "+lbl);',
+    '  groups.forEach(function(g){',
+    '    dump.push("### "+g[0]+" ("+g[1]+")");',
+    '    document.querySelectorAll(\'input[name="\'+g[1]+\'"]\').forEach(function(r){',
+    '      dump.push("value="+r.value+" label="+labelFor(r));',
+    '    });',
     '  });',
-    '  var report="■入力結果\\n"+Object.keys(R).map(function(k){return k+": "+(R[k]?"○":"×");}).join("\\n")+"\\n\\n■ページ内のフォーム項目一覧(参考)\\n"+dump.join("\\n");',
+    '  var report="■入力結果\\n"+Object.keys(R).map(function(k){return k+": "+(R[k]?"○":"×");}).join("\\n")+"\\n\\n■顔型/年代/髪量/髪質/太さ/クセの実際のvalue一覧\\n"+dump.join("\\n");',
     '  var ta=document.createElement("textarea");',
     '  ta.value=report;',
     '  ta.style.cssText="position:fixed;top:8px;left:8px;right:8px;height:75vh;z-index:999999;font-size:11px;background:#fff;border:3px solid #ff3b30;padding:8px;box-sizing:border-box;";',
@@ -4636,7 +4638,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.03-b"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.03-c"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
