@@ -3703,10 +3703,11 @@ const SB_THICK_CODE = {"細い":"1","普通":"2","太い":"3"};
 const SB_CURL_CODE = {"なし":"1","少し":"2","強い":"3"};
 
 function buildStyleSalonBoardScript(s) {
-  const img = (s.images || []).find(Boolean) || "";
-  let imgB64 = "", imgMime = "image/jpeg";
-  const m = img.match(/^data:([^;]+);base64,(.+)$/);
-  if (m) { imgMime = m[1]; imgB64 = m[2]; }
+  // スタイル写真は最大3枚(前/横/後ろの想定順)保存されているので、それぞれbase64データと形式を取り出す
+  const imgs = (s.images || []).slice(0, 3).map(img => {
+    const mm = (img || "").match(/^data:([^;]+);base64,(.+)$/);
+    return mm ? { b64: mm[2], mime: mm[1] } : null;
+  });
 
   const D = {
     styleName: s.styleName || "",
@@ -3721,7 +3722,7 @@ function buildStyleSalonBoardScript(s) {
     texCode: SB_TEX_CODE[s.modelTexture] || "",
     thickCode: SB_THICK_CODE[s.modelThickness] || "",
     curlCode: SB_CURL_CODE[s.modelCurl] || "",
-    imgB64, imgMime,
+    imgs,
   };
 
   // テンプレート文字列のプレースホルダをJSONで安全に埋め込む(バッククォート等の混入を避けるため)
@@ -3773,16 +3774,23 @@ function buildStyleSalonBoardScript(s) {
     '    }',
     '    tagInput.value="";tagInput.dispatchEvent(new Event("input",{bubbles:true}));',
     '  }',
-    '  if(D.imgB64){',
-    '    var trg=q("#FRONT_IMG_ID_PC_NEW_NO_PHOTO, img#FRONT_IMG_ID_IMG");',
-    '    R["写真枠"]=!!trg;',
+    // 写真枠3つ(前/横/後ろ)を順番に処理。前(FRONT)のトリガーセレクタは実機で動作確認済み、
+    // 横(SIDE)・後ろ(BACK)は隠しinputのname(SIDE_IMG_ID/BACK_IMG_ID、実機診断で確認済み)から
+    // 同じ命名規則と推測して組み立てている(未検証、要実機確認)。
+    '  var slots=[["FRONT_IMG_ID","写真1(前)"],["SIDE_IMG_ID","写真2(横)"],["BACK_IMG_ID","写真3(後ろ)"]];',
+    '  for(var pi=0;pi<slots.length;pi++){',
+    '    var slotName=slots[pi][0],label=slots[pi][1],picD=D.imgs[pi];',
+    '    if(!picD)continue;',
+    '    var trg=q("#"+slotName+"_PC_NEW_NO_PHOTO, img#"+slotName+"_IMG");',
+    '    R[label+"枠"]=!!trg;',
     '    if(trg)trg.click();',
     '    await sleep(600);',
-    '    R["写真挿入"]=await injectFile(\'input#formFile, input[name="formFile"], input.jscImageUploaderModalInput\',b64toFile(D.imgB64,"photo.jpg",D.imgMime));',
+    '    R[label+"挿入"]=await injectFile(\'input#formFile, input[name="formFile"], input.jscImageUploaderModalInput\',b64toFile(picD.b64,"photo"+(pi+1)+".jpg",picD.mime));',
     '    await sleep(1200);',
     '    var sub=q(".jscImageUploaderModalSubmitButton, .imageUploaderModalSubmitButton");',
-    '    R["写真確定ボタン"]=!!sub;',
+    '    R[label+"確定"]=!!sub;',
     '    if(sub)sub.click();',
+    '    await sleep(500);',
     '  }',
     '  var lines=Object.keys(R).map(function(k){return k+": "+(R[k]?"○":"×");});',
     '  alert("入力結果\\n"+lines.join("\\n")+"\\n\\n内容を確認して「登録」ボタンを押してください。");',
@@ -4642,7 +4650,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.03-e"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.03-f"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
