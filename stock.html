@@ -42,28 +42,67 @@ const normalize = s => (s||"").toLowerCase()
   .replace(/[Ａ-Ｚａ-ｚ０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0xFEE0));
 
 // 音声入力共通フック：マイクボタンから検索欄などにテキストを流し込む(iOS Safari前提、非対応ブラウザではsupported=falseでボタン自体を出さない)
-// status: idle→starting(タップ直後、認識サービス接続待ち)→listening(接続完了、実際に聞き取り中)
+// status: idle→starting(タップ直後〜接続+安全バッファ待ち)→listening(合図音を鳴らして「話してOK」を通知)
+// onstartが発火しても実際の音声キャプチャがすぐには安定しないため、onstart後にREADY_BUFFER_MSだけ余裕を持たせてから合図音+赤表示にしている
+const READY_BUFFER_MS = 500;
+
 const useVoiceInput = (onResult) => {
   const [status, setStatus] = useState("idle");
   const recRef = useRef(null);
+  const bufferTimerRef = useRef(null);
+  const audioCtxRef = useRef(null);
   const SR = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  const clearBufferTimer = () => { if (bufferTimerRef.current) { clearTimeout(bufferTimerRef.current); bufferTimerRef.current = null; } };
+
+  const playReadyBeep = () => {
+    try {
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.15);
+    } catch (e) {}
+  };
 
   const toggle = () => {
     if (status === "listening") { recRef.current && recRef.current.stop(); return; }
     if (status === "starting" || !SR) return;
+
+    // タップ直後(ユーザー操作と直結したタイミング)でAudioContextを用意しておく。
+    // setTimeoutの中で新規生成すると自動再生制限で音が鳴らないことがあるため、ここで先に確保する
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) {
+        if (!audioCtxRef.current) audioCtxRef.current = new AC();
+        if (audioCtxRef.current.state === "suspended") audioCtxRef.current.resume();
+      }
+    } catch (e) {}
+
     setStatus("starting");
     try {
       const rec = new SR();
       rec.lang = "ja-JP";
       rec.interimResults = false;
       rec.continuous = false;
-      rec.onstart = () => setStatus("listening");
+      rec.onstart = () => {
+        bufferTimerRef.current = setTimeout(() => {
+          setStatus("listening");
+          playReadyBeep();
+        }, READY_BUFFER_MS);
+      };
       rec.onresult = (e) => {
         const text = e.results[e.results.length - 1][0].transcript;
         onResult(text);
       };
-      rec.onerror = () => setStatus("idle");
-      rec.onend = () => { setStatus("idle"); recRef.current = null; };
+      rec.onerror = () => { clearBufferTimer(); setStatus("idle"); };
+      rec.onend = () => { clearBufferTimer(); setStatus("idle"); recRef.current = null; };
       recRef.current = rec;
       rec.start();
     } catch (err) { setStatus("idle"); }
@@ -137,7 +176,7 @@ const css = {
   label: { fontSize:12, color:C.sub, fontWeight:700, marginBottom:6 },
 };
 
-const STOCK_VERSION = "v2026.08.03-b"; // このファイルのバージョン(ヘッダーに表示、アップロード反映確認用)
+const STOCK_VERSION = "v2026.08.03-c"; // このファイルのバージョン(ヘッダーに表示、アップロード反映確認用)
 
 function App() {
   const [authed, setAuthed] = useState(localStorage.getItem("stock_auth") === "1");
