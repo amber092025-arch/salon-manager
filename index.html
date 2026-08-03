@@ -3728,11 +3728,14 @@ function buildStyleSalonBoardScript(s) {
   // 顔型/年代/髪量/髪質/太さ/クセの6項目は、ページ読み込み直後にはまだDOMに現れず少し遅れて描画されるため、
   // 要素が出現するまで待ってから設定するsetRadioWaitを使う(value自体の対応表は元から正しかったことを実機診断で確認済み)。
   // 各項目の成功/失敗は簡易チェックリストとして毎回alertで表示する(今後SalonBoard側の仕様変更があった際の早期発見用)。
+  // done()はShortcuts「Webページ上でJavaScriptを実行」から呼ばれた場合のみcompletion()を呼ぶ安全なラッパー。
+  // 通常のブックマークレットとして実行した場合はcompletionが存在しないため何もしない(同じコードが両方で動く)。
   return [
     '(async function(){',
     '"use strict";',
     'var D=' + JSON.stringify(D) + ';',
     'var R={};',
+    'function done(v){if(typeof completion==="function")completion(v);}',
     'function q(s){return document.querySelector(s);}',
     'function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}',
     'async function waitFor(sel,to){to=to||8000;var end=Date.now()+to;while(Date.now()<end){var el=q(sel);if(el)return el;await sleep(150);}return null;}',
@@ -3743,7 +3746,7 @@ function buildStyleSalonBoardScript(s) {
     'function b64toFile(b64,name,mime){var bin=atob(b64);var arr=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);return new File([arr],name||"photo.jpg",{type:mime||"image/jpeg"});}',
     'async function injectFile(inputSel,file){var input=await waitFor(inputSel);if(!input)return false;var dt=new DataTransfer();dt.items.add(file);input.files=dt.files;input.dispatchEvent(new Event("change",{bubbles:true}));return true;}',
     'try{',
-    '  if(!location.hostname.includes("salonboard.com")){alert("SALON BOARDのスタイル登録画面で実行してください");return;}',
+    '  if(!location.hostname.includes("salonboard.com")){alert("SALON BOARDのスタイル登録画面で実行してください");done(false);return;}',
     '  R["スタイル名"]=setValue("input#styleNameTxt",D.styleName);',
     '  R["コメント"]=setValue("textarea#stylistCommentTxt",D.comment);',
     '  R["メニュー"]=setValue("textarea#menuDetailTxt",D.menu);',
@@ -3783,7 +3786,8 @@ function buildStyleSalonBoardScript(s) {
     '  }',
     '  var lines=Object.keys(R).map(function(k){return k+": "+(R[k]?"○":"×");});',
     '  alert("入力結果\\n"+lines.join("\\n")+"\\n\\n内容を確認して「登録」ボタンを押してください。");',
-    '}catch(err){alert("エラー: "+err.message);}',
+    '  done(true);',
+    '}catch(err){alert("エラー: "+err.message);done(false);}',
     '})();',
   ].join("\n");
 }
@@ -3870,14 +3874,26 @@ function StyleListTab({ setTab, notify, styles, menus, deleteStyle, setEditingSt
                   📋 このコードをコピー
                 </button>
 
-                <div style={{ fontSize: 12, fontWeight: 700, color: C.sub, marginBottom: 6 }}>② iPhone/iPadで使う場合(ブックマークレット)</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.sub, marginBottom: 6 }}>② iPhone/iPadで使う場合(ショートカット・おすすめ)</div>
+                <div style={{ fontSize: 11.5, color: C.sub, marginBottom: 10, lineHeight: 1.7 }}>
+                  1. 「ショートカット」アプリで新規作成→「Webページ上でJavaScriptを実行」を追加(初回は「スクリプトの実行を許可」をON)<br/>
+                  2. JavaScriptの入力欄をタップ→候補に出る「クリップボード」を選ぶ(それだけが内容になるようにする)<br/>
+                  3. 詳細(ⓘ)で「共有シートに表示」をON、対応する種類は「Safariのwebページ」のみに<br/>
+                  4. SALON BOARDのスタイル登録画面を開く→下の「コピー」→共有ボタンからこのショートカットを実行
+                </div>
+                <button onClick={() => { navigator.clipboard.writeText(sbModal.script); notify("コピーしました ✓"); }}
+                  style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "none", background: "#7a9aba", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer", marginBottom: 16 }}>
+                  📋 コードをコピー(ショートカット用)
+                </button>
+
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.sub, marginBottom: 6 }}>③ iPhone/iPadで使う場合(ブックマークレット)</div>
                 <div style={{ fontSize: 11.5, color: C.sub, marginBottom: 10, lineHeight: 1.7 }}>
                   1. Safariで適当なページをブックマークに追加(名前は「スタイル登録」など)<br/>
                   2. ブックマークを編集→URL欄を全部削除→下の「ブックマークレットをコピー」の内容を貼り付けて保存<br/>
                   3. SALON BOARDのスタイル登録画面を開き、そのブックマークをタップして実行
                 </div>
                 <button onClick={() => { navigator.clipboard.writeText("javascript:" + encodeURIComponent(sbModal.script)); notify("ブックマークレットをコピーしました ✓"); }}
-                  style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "none", background: "#7a9aba", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer", marginBottom: 16 }}>
+                  style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "1px solid #7a9aba", background: "#fff", color: "#7a9aba", fontWeight: 700, fontSize: 13, cursor: "pointer", marginBottom: 16 }}>
                   🔖 ブックマークレットをコピー
                 </button>
 
@@ -4626,7 +4642,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.03-d"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.03-e"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
