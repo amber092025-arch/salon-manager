@@ -27,8 +27,9 @@
     width: 100%; padding: 18px; font-size: 17px; font-weight: 600;
     border: none; border-radius: 14px; background: #2a2a28; color: #fff;
   }
+  button.starting { background: #6b6660; }
   button.listening { background: #c23b3b; }
-  button:disabled { background: #cfcac2; }
+  button:disabled { opacity: .85; }
   #result { min-height: 60px; font-size: 16px; line-height: 1.6; padding: 10px 2px 4px; }
   #log { font-size: 12px; color: #8a8580; white-space: pre-wrap; margin-top: 8px; }
   .tip { font-size: 12px; color: #8a8580; margin-top: 18px; line-height: 1.6; }
@@ -78,14 +79,25 @@
   } else {
     let recognition = null;
     let listening = false;
+    let starting = false;
+    let tapTime = 0;
 
     btn.addEventListener('click', () => {
       if (listening) {
         recognition && recognition.stop();
         return;
       }
+      if (starting) return;
+
       resultEl.textContent = '';
       logEl.textContent = '';
+      starting = true;
+      tapTime = performance.now();
+      btn.disabled = true;
+      btn.classList.add('starting');
+      btn.textContent = '起動中…';
+      log('tap');
+
       try {
         recognition = new SR();
         recognition.lang = 'ja-JP';
@@ -93,10 +105,14 @@
         recognition.continuous = false;
 
         recognition.onstart = () => {
+          const lag = Math.round(performance.now() - tapTime);
+          starting = false;
           listening = true;
+          btn.disabled = false;
+          btn.classList.remove('starting');
           btn.classList.add('listening');
           btn.textContent = '🔴 聞き取り中…(タップで停止)';
-          log('onstart');
+          log('onstart (tap→開始: ' + lag + 'ms)');
         };
         recognition.onresult = (e) => {
           let text = '';
@@ -110,12 +126,19 @@
         };
         recognition.onend = () => {
           listening = false;
-          btn.classList.remove('listening');
+          starting = false;
+          btn.disabled = false;
+          btn.classList.remove('listening', 'starting');
           btn.textContent = '🎤 タップして話す';
           log('onend');
+          recognition = null;
         };
         recognition.start();
       } catch (err) {
+        starting = false;
+        btn.disabled = false;
+        btn.classList.remove('starting');
+        btn.textContent = '🎤 タップして話す';
         log('例外: ' + err.message);
       }
     });
