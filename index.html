@@ -3725,10 +3725,13 @@ function buildStyleSalonBoardScript(s) {
   };
 
   // テンプレート文字列のプレースホルダをJSONで安全に埋め込む(バッククォート等の混入を避けるため)
+  // ※診断強化版: 実機で「写真だけ入って他は入らない」との報告を受け、各項目の成功/失敗を記録し、
+  //   ページ内の実際のフォーム項目一覧を書き出すようにしている(セレクタ不一致の原因特定用)
   return [
     '(async function(){',
     '"use strict";',
     'var D=' + JSON.stringify(D) + ';',
+    'var R={};',
     'function q(s){return document.querySelector(s);}',
     'function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}',
     'async function waitFor(sel,to){to=to||8000;var end=Date.now()+to;while(Date.now()<end){var el=q(sel);if(el)return el;await sleep(150);}return null;}',
@@ -3739,19 +3742,20 @@ function buildStyleSalonBoardScript(s) {
     'async function injectFile(inputSel,file){var input=await waitFor(inputSel);if(!input)return false;var dt=new DataTransfer();dt.items.add(file);input.files=dt.files;input.dispatchEvent(new Event("change",{bubbles:true}));return true;}',
     'try{',
     '  if(!location.hostname.includes("salonboard.com")){alert("SALON BOARDのスタイル登録画面で実行してください");return;}',
-    '  setValue("input#styleNameTxt",D.styleName);',
-    '  setValue("textarea#stylistCommentTxt",D.comment);',
-    '  setValue("textarea#menuDetailTxt",D.menu);',
-    '  setRadio("frmStyleEditStyleDto.styleCategoryCd",D.catCode);',
-    '  if(D.length)setSelectByLabel(D.catCode==="SG01"?"select#ladiesHairLengthCd":"select#mensHairLengthCd",D.length);',
-    '  setRadio("frmStyleEditStyleModelDto.modelFaceTypeKbn",D.faceCode);',
-    '  setRadio("frmStyleEditStyleModelDto.modelAgeKbn",D.ageCode);',
-    '  setRadio("frmStyleEditStyleModelDto.modelHairVolumeKbn",D.volCode);',
-    '  setRadio("frmStyleEditStyleModelDto.modelHairTypeKbn",D.texCode);',
-    '  setRadio("frmStyleEditStyleModelDto.modelHairThicknessKbn",D.thickCode);',
-    '  setRadio("frmStyleEditStyleModelDto.modelHairCurlyKbn",D.curlCode);',
+    '  R["スタイル名"]=setValue("input#styleNameTxt",D.styleName);',
+    '  R["コメント"]=setValue("textarea#stylistCommentTxt",D.comment);',
+    '  R["メニュー"]=setValue("textarea#menuDetailTxt",D.menu);',
+    '  R["カテゴリ"]=setRadio("frmStyleEditStyleDto.styleCategoryCd",D.catCode);',
+    '  if(D.length){R["レングス"]=setSelectByLabel(D.catCode==="SG01"?"select#ladiesHairLengthCd":"select#mensHairLengthCd",D.length);}',
+    '  R["顔型"]=setRadio("frmStyleEditStyleModelDto.modelFaceTypeKbn",D.faceCode);',
+    '  R["年代"]=setRadio("frmStyleEditStyleModelDto.modelAgeKbn",D.ageCode);',
+    '  R["髪量"]=setRadio("frmStyleEditStyleModelDto.modelHairVolumeKbn",D.volCode);',
+    '  R["髪質"]=setRadio("frmStyleEditStyleModelDto.modelHairTypeKbn",D.texCode);',
+    '  R["太さ"]=setRadio("frmStyleEditStyleModelDto.modelHairThicknessKbn",D.thickCode);',
+    '  R["クセ"]=setRadio("frmStyleEditStyleModelDto.modelHairCurlyKbn",D.curlCode);',
     '  var tagInput=q("input#hashTagTxt");',
     '  var tagAddBtn=q("button.jsc_style_edit-editCommon__tag--addBtn");',
+    '  R["ハッシュタグ欄"]=!!(tagInput&&tagAddBtn);',
     '  if(tagInput&&tagAddBtn&&D.tags.length){',
     '    for(var i=0;i<D.tags.length;i++){',
     '      tagInput.focus();tagInput.value=D.tags[i];',
@@ -3766,14 +3770,29 @@ function buildStyleSalonBoardScript(s) {
     '  }',
     '  if(D.imgB64){',
     '    var trg=q("#FRONT_IMG_ID_PC_NEW_NO_PHOTO, img#FRONT_IMG_ID_IMG");',
+    '    R["写真枠"]=!!trg;',
     '    if(trg)trg.click();',
     '    await sleep(600);',
-    '    await injectFile(\'input#formFile, input[name="formFile"], input.jscImageUploaderModalInput\',b64toFile(D.imgB64,"photo.jpg",D.imgMime));',
+    '    R["写真挿入"]=await injectFile(\'input#formFile, input[name="formFile"], input.jscImageUploaderModalInput\',b64toFile(D.imgB64,"photo.jpg",D.imgMime));',
     '    await sleep(1200);',
     '    var sub=q(".jscImageUploaderModalSubmitButton, .imageUploaderModalSubmitButton");',
+    '    R["写真確定ボタン"]=!!sub;',
     '    if(sub)sub.click();',
     '  }',
-    '  alert("入力しました。内容を確認して「登録」ボタンを押してください。");',
+    '  var dump=[];',
+    '  document.querySelectorAll("input,textarea,select").forEach(function(el){',
+    '    if(dump.length>=150)return;',
+    '    var lbl=(el.id?("#"+el.id):"")+(el.name?(" name="+el.name):"");',
+    '    if(!lbl)lbl="(id/name無し)";',
+    '    dump.push(el.tagName.toLowerCase()+"["+(el.type||"")+"] "+lbl);',
+    '  });',
+    '  var report="■入力結果\\n"+Object.keys(R).map(function(k){return k+": "+(R[k]?"○":"×");}).join("\\n")+"\\n\\n■ページ内のフォーム項目一覧(参考)\\n"+dump.join("\\n");',
+    '  var ta=document.createElement("textarea");',
+    '  ta.value=report;',
+    '  ta.style.cssText="position:fixed;top:8px;left:8px;right:8px;height:75vh;z-index:999999;font-size:11px;background:#fff;border:3px solid #ff3b30;padding:8px;box-sizing:border-box;";',
+    '  document.body.appendChild(ta);',
+    '  ta.focus();ta.select();',
+    '  alert("診断結果をページ上部に表示しました。全部選択してコピーし、Claudeに貼り付けてください(閉じるにはこの赤枠の外を触ってください)。");',
     '}catch(err){alert("エラー: "+err.message);}',
     '})();',
   ].join("\n");
@@ -4617,7 +4636,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.03-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.03-b"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
