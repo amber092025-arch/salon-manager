@@ -41,6 +41,35 @@ const normalize = s => (s||"").toLowerCase()
   .replace(/[\u30A1-\u30F6]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0x60))
   .replace(/[Ａ-Ｚａ-ｚ０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0xFEE0));
 
+// 音声入力共通フック：マイクボタンから検索欄などにテキストを流し込む(iOS Safari前提、非対応ブラウザではsupported=falseでボタン自体を出さない)
+const useVoiceInput = (onResult) => {
+  const [listening, setListening] = useState(false);
+  const recRef = useRef(null);
+  const SR = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  const toggle = () => {
+    if (listening) { recRef.current && recRef.current.stop(); return; }
+    if (!SR) return;
+    try {
+      const rec = new SR();
+      rec.lang = "ja-JP";
+      rec.interimResults = false;
+      rec.continuous = false;
+      rec.onstart = () => setListening(true);
+      rec.onresult = (e) => {
+        const text = e.results[e.results.length - 1][0].transcript;
+        onResult(text);
+      };
+      rec.onerror = () => setListening(false);
+      rec.onend = () => { setListening(false); recRef.current = null; };
+      recRef.current = rec;
+      rec.start();
+    } catch (err) { setListening(false); }
+  };
+
+  return { listening, toggle, supported: !!SR };
+};
+
 // ネットワーク起因の一時的な失敗を吸収するため、失敗時は少し待って自動で再試行する
 const withRetry = async (fn, attempts = 3, delayMs = 1000) => {
   let lastErr;
@@ -106,7 +135,7 @@ const css = {
   label: { fontSize:12, color:C.sub, fontWeight:700, marginBottom:6 },
 };
 
-const STOCK_VERSION = "v2026.08.01-b"; // このファイルのバージョン(ヘッダーに表示、アップロード反映確認用)
+const STOCK_VERSION = "v2026.08.03-a"; // このファイルのバージョン(ヘッダーに表示、アップロード反映確認用)
 
 function App() {
   const [authed, setAuthed] = useState(localStorage.getItem("stock_auth") === "1");
@@ -131,6 +160,7 @@ function App() {
   const [selectMode, setSelectMode] = useState(false);
   const [openCats, setOpenCats] = useState({});
   const [searchText, setSearchText] = useState(""); // 商品名・商品コードのあいまい検索
+  const voiceSearch = useVoiceInput(setSearchText);
   const [openSubs, setOpenSubs] = useState({});
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkEditModal, setBulkEditModal] = useState(null);
@@ -703,7 +733,13 @@ function App() {
         {view !== "history" && view !== "alert" && (
           <div style={{ position:"relative", marginTop:10 }}>
             <input value={searchText} onChange={e => setSearchText(e.target.value)} placeholder="商品名・商品コードで検索"
-              style={{ width:"100%", boxSizing:"border-box", padding:"10px 36px 10px 14px", borderRadius:12, border:"1px solid "+C.border, fontSize:14, background:"#fff", outline:"none" }} />
+              style={{ width:"100%", boxSizing:"border-box", padding:"10px 68px 10px 14px", borderRadius:12, border:"1px solid "+C.border, fontSize:14, background:"#fff", outline:"none" }} />
+            {voiceSearch.supported && (
+              <button onClick={voiceSearch.toggle}
+                style={{ position:"absolute", right: searchText ? 38 : 6, top:"50%", transform:"translateY(-50%)", width:26, height:26, borderRadius:"50%", border:"none", background:voiceSearch.listening?C.red:C.bg, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer" }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={voiceSearch.listening?"#fff":C.sub} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+              </button>
+            )}
             {searchText && (
               <button onClick={() => setSearchText("")}
                 style={{ position:"absolute", right:6, top:"50%", transform:"translateY(-50%)", width:26, height:26, borderRadius:"50%", border:"none", background:C.bg, color:C.sub, fontSize:14, fontWeight:700, cursor:"pointer" }}>×</button>
