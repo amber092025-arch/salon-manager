@@ -3725,6 +3725,19 @@ function buildBlogSalonBoardScript(b) {
     'async function waitFor(sel,to){to=to||8000;var end=Date.now()+to;while(Date.now()<end){var el=q(sel);if(el)return el;await sleep(150);}return null;}',
     'function setValue(sel,v){var el=q(sel);if(!el)return false;el.value=v||"";el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));return true;}',
     'async function setValueWait(sel,v,to){var el=await waitFor(sel,to||5000);if(!el)return false;el.value=v||"";el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));return true;}',
+    'function escapeHtml(s){return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}',
+    'async function waitGlobal(name,to){to=to||5000;var end=Date.now()+to;while(Date.now()<end){if(window[name])return window[name];await sleep(150);}return null;}',
+    'async function setNicEditContent(editorId,text){',
+    '  var html=escapeHtml(text).replace(/\\n/g,"<br>");',
+    '  try{',
+    '    var NE=await waitGlobal("nicEditors",4000);',
+    '    if(NE){',
+    '      var ed=NE.findEditor(editorId);',
+    '      if(ed){ed.setContent(html);return true;}',
+    '    }',
+    '  }catch(e){}',
+    '  return await setValueWait("textarea#"+editorId,text); // nicEditが無い/見つからない場合のフォールバック',
+    '}',
     'function setSelectByLabel(sel,label){var el=q(sel);if(!el||!label)return false;for(var i=0;i<el.options.length;i++){var o=el.options[i];if(o.textContent.trim()===label||o.textContent.includes(label)){el.value=o.value;el.dispatchEvent(new Event("change",{bubbles:true}));return true;}}return false;}',
     'function selectFirstNonBlank(sel){var el=q(sel);if(!el)return false;for(var i=0;i<el.options.length;i++){if(el.options[i].value){el.value=el.options[i].value;el.dispatchEvent(new Event("change",{bubbles:true}));return true;}}return false;}',
     'function b64toFile(b64,name,mime){var bin=atob(b64);var arr=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);return new File([arr],name||"blog.jpg",{type:mime||"image/jpeg"});}',
@@ -3736,7 +3749,7 @@ function buildBlogSalonBoardScript(b) {
     '  R["タイトル"]=setValue("input#blogTitle",D.title);',
     '  R["投稿者"]=selectFirstNonBlank("select#stylistId");',
     '  R["カテゴリ"]=D.category?setSelectByLabel("select#blogCategoryCd",D.category):null;',
-    '  for(var ti=0;ti<5;ti++){R["文章"+(ti+1)]=await setValueWait("textarea#blogContents"+(ti+1),D.texts[ti]||"");}',
+    '  for(var ti=0;ti<5;ti++){R["文章"+(ti+1)]=await setNicEditContent("blogContents"+(ti+1),D.texts[ti]||"");}',
     '  for(var ii=0;ii<D.images.length;ii++){',
     '    var pic=D.images[ii];',
     '    if(!pic)continue;',
@@ -3749,21 +3762,8 @@ function buildBlogSalonBoardScript(b) {
     '    R["写真"+(ii+1)+"確定"]=!!confirmBtn;',
     '    if(confirmBtn){confirmBtn.click();await sleep(1000);}',
     '  }',
-    '  var t1=q("textarea#blogContents1");',
-    '  R["文章1の実際の値"]=t1?("["+t1.value.slice(0,20)+"]"):"(要素なし)";',
-    '  var ceList=[];',
-    '  document.querySelectorAll("[contenteditable], [contenteditable=true]").forEach(function(el){',
-    '    if(ceList.length>=20)return;',
-    '    ceList.push(el.tagName.toLowerCase()+(el.id?("#"+el.id):"")+(el.className?("."+String(el.className).replace(/\\s+/g,".")):""));',
-    '  });',
-    '  var lines=Object.keys(R).map(function(k){return k+": "+(R[k]===null?"(対象外)":R[k]===true?"○":R[k]===false?"×":R[k]);});',
-    '  var report="■入力結果\\n"+lines.join("\\n")+"\\n\\n■contenteditable要素(見た目のプレビューが別仕組みの場合の手がかり)\\n"+(ceList.length?ceList.join("\\n"):"(見つかりませんでした)");',
-    '  var ta=document.createElement("textarea");',
-    '  ta.value=report;',
-    '  ta.style.cssText="position:fixed;top:8px;left:8px;right:8px;height:75vh;z-index:999999;font-size:11px;background:#fff;border:3px solid #ff3b30;padding:8px;box-sizing:border-box;";',
-    '  document.body.appendChild(ta);',
-    '  ta.focus();ta.select();',
-    '  alert("画像が意図した位置に入っているか確認してください。文章欄の診断結果もページ上部に表示したので、全部選択してコピーし、Claudeに貼り付けてください。");',
+    '  var lines=Object.keys(R).map(function(k){return k+": "+(R[k]===null?"(対象外)":R[k]?"○":"×");});',
+    '  alert("入力結果\\n"+lines.join("\\n")+"\\n\\n※文章と写真の位置関係を必ず確認してください。内容を確認して「確認する」ボタンを押してください。");',
     '}catch(err){alert("エラー: "+err.message);done(false);}',
     '})();',
   ].join("\n");
@@ -5220,7 +5220,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.04-r"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.04-s"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
