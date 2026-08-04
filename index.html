@@ -106,6 +106,7 @@ const toDb = {
   product: (p) => ({ name:p.name, price:p.price||0, cost:p.cost||0, stock:p.stock||0, min_stock:p.minStock||3, category:p.category||null, sub_category:p.subCategory||null, placeholder:p.placeholder||false, photos:p.photos||[], description:p.description||null, is_public:p.isPublic||false, sort_order:p.sortOrder||Date.now() }),
   visit: (v) => ({ customer_id:v.customerId, date:v.date, time:v.time||null, menus:v.menus||[], products:v.products||[], drug_cost:v.drugCost||0, payment_method:v.paymentMethod||"cash", total:v.total||0, notes:v.notes||null, images:v.images||[], customer_type:v.customerType||"existing", hpb_point:v.hpbPoint||0, paid:v.paid||false, duration:v.duration||60, appointment_id:v.appointmentId||null, tags:v.tags||[], style_name:v.styleName||null, style_comment:v.styleComment||null, is_public:v.isPublic||false, paid_at:v.paidAt||null }),
   style: (s) => ({ images:s.images||[], cover_image:s.coverImage||null, category:s.category||"ladies", length:s.length||"", stylist_name:s.stylistName||"", stylist_comment:s.stylistComment||"", style_name:s.styleName||"", menu_flags:s.menuFlags||[], menu_text:s.menuText||"", coupon_menu_id:s.couponMenuId||null, hashtags:s.hashtags||[], model_volume:s.modelVolume||"", model_texture:s.modelTexture||"", model_thickness:s.modelThickness||"", model_curl:s.modelCurl||"", model_face:s.modelFace||"", model_age:s.modelAge||"", sort_order:s.sortOrder||Date.now() }),
+  blog: (b) => ({ images:b.images||[], cover_image:b.coverImage||null, category:b.category||"", title:b.title||"", body:b.body||"", coupon_menu_id:b.couponMenuId||null, author_name:b.authorName||"", sort_order:b.sortOrder||Date.now() }),
   appointment: (a) => ({ customer_id:a.customerId, date:a.date, time:a.time||null, end_time:a.endTime||null, duration:a.duration||60, menu_ids:a.menuIds||[], notes:a.notes||null, color:a.color||"#00b4a6", paid:a.paid||false, shimeika:a.shimeika||"shimeika", customer_type:a.customerType||"existing" }),
   privateEvent: (e) => ({ title:e.title||"予定", date:e.date, time:e.time||null, end_time:e.endTime||null, memo:e.memo||null, color:e.color||"#9a9088", is_shared:e.isShared!==false, recurrence:e.recurrence||"none", recurrence_until:e.recurrenceUntil||null }),
 };
@@ -115,6 +116,7 @@ const fromDb = {
   product: (r) => ({ id:r.id, name:r.name, price:r.price||0, cost:r.cost||0, stock:r.stock||0, minStock:r.min_stock||3, category:r.category||"", subCategory:r.sub_category||"", placeholder:r.placeholder||false, photos:r.photos||[], description:r.description||"", isPublic:r.is_public||false, sortOrder:r.sort_order||0 }),
   visit: (r) => { var pd={}; try{pd=r.photo_data?JSON.parse(r.photo_data):{};}catch(e){} return { id:r.id, customerId:r.customer_id, date:r.date, time:r.time||"", menus:r.menus||[], products:r.products||[], drugCost:r.drug_cost||0, paymentMethod:r.payment_method||"cash", total:r.total||0, notes:r.notes||"", images:r.images||[], beforeImgs:pd.before||[], afterImgs:pd.after||[], otherImgs:pd.other||[], customerType:r.customer_type||"existing", hpbPoint:r.hpb_point||0, paid:r.paid||false, duration:r.duration||60, appointmentId:r.appointment_id||null, tags:r.tags||[], styleName:r.style_name||"", styleComment:r.style_comment||"", isPublic:r.is_public||false, paidAt:r.paid_at||null }; },
   style: (r) => ({ id:r.id, images:r.images||[], coverImage:r.cover_image||null, category:r.category||"ladies", length:r.length||"", stylistName:r.stylist_name||"", stylistComment:r.stylist_comment||"", styleName:r.style_name||"", menuFlags:r.menu_flags||[], menuText:r.menu_text||"", couponMenuId:r.coupon_menu_id||null, hashtags:r.hashtags||[], modelVolume:r.model_volume||"", modelTexture:r.model_texture||"", modelThickness:r.model_thickness||"", modelCurl:r.model_curl||"", modelFace:r.model_face||"", modelAge:r.model_age||"", sortOrder:r.sort_order||0, createdAt:r.created_at||null }),
+  blog: (r) => ({ id:r.id, images:r.images||[], coverImage:r.cover_image||null, category:r.category||"", title:r.title||"", body:r.body||"", couponMenuId:r.coupon_menu_id||null, authorName:r.author_name||"", sortOrder:r.sort_order||0, createdAt:r.created_at||null }),
   appointment: (r) => ({ id:r.id, customerId:r.customer_id, date:r.date, time:r.time||"", endTime:r.end_time||"", duration:r.duration||60, menuIds:r.menu_ids||[], notes:r.notes||"", color:r.color||"#00b4a6", paid:r.paid||false, shimeika:r.shimeika||"shimeika", customerType:r.customer_type||"existing", hpbPoint:r.hpb_point||0, bookingStatus:r.booking_status||"confirmed" }),
   privateEvent: (r) => ({ id:r.id, title:r.title||"予定", date:r.date, time:r.time||"", endTime:r.end_time||"", memo:r.memo||"", color:r.color||"#9a9088", isShared:r.is_shared!==false, recurrence:r.recurrence||"none", recurrenceUntil:r.recurrence_until||"" }),
 };
@@ -368,6 +370,8 @@ function App() {
   const [privateEvents, setPrivateEvents] = useState([]); // プライベート予定(お客様に紐付かない予約表ブロック)
   const [styles, setStyles] = useState([]); // スタイル掲載情報(その他→スタイル管理)
   const [editingStyleId, setEditingStyleId] = useState(null); // スタイルフォームで編集中のid(null=新規)
+  const [blogs, setBlogs] = useState([]); // ブログ投稿情報(その他→ブログ管理)
+  const [editingBlogId, setEditingBlogId] = useState(null); // ブログフォームで編集中のid(null=新規)
   const [weekOffset, setWeekOffset] = useState(0);
   const [viewMode, setViewMode] = useState("week");
   const [dayOffset, setDayOffset] = useState(0);
@@ -491,7 +495,7 @@ function App() {
       }
 
       // ② 残りのデータを並列取得（各クエリ最大3回リトライ。visitsは写真カラム除外の軽量版）
-      const [c, m, p, v, a, tc, ti, st, pe] = await Promise.all([
+      const [c, m, p, v, a, tc, ti, st, bg, pe] = await Promise.all([
         sbRetry(() => sb.from("customers").select().order("name")),
         sbRetry(() => sb.from("menus").select("id,name,price,duration,category,tags,show_tilde,sort_order,menu_kind,target_customer,is_bookable").order("sort_order")),
         sbRetry(() => sb.from("products").select("id,name,price,cost,stock,min_stock,category,sub_category,placeholder,description,is_public,sort_order").order("sort_order")),
@@ -500,6 +504,7 @@ function App() {
         sbRetry(() => sb.from("tag_categories").select().order("sort_order")),
         sbRetry(() => sb.from("tag_items").select().order("sort_order")),
         sbRetry(() => sb.from("styles").select("id,style_name,category,length,coupon_menu_id,hashtags,sort_order,created_at,cover_image,stylist_name").order("created_at", {ascending:false})),
+        sbRetry(() => sb.from("blogs").select("id,title,category,coupon_menu_id,sort_order,created_at,cover_image,author_name").order("created_at", {ascending:false})),
         sbRetry(() => sb.from("private_events").select().order("date")),
       ]);
       // 重要データ（顧客・来店・予約・メニュー）が1つでも読めなかったらバナー表示
@@ -519,6 +524,7 @@ function App() {
       if (!v.error) setVisits(v.data.map(fromDb.visit));
       if (!a.error) setAppointments(a.data.map(fromDb.appointment));
       if (!st.error && st.data) setStyles(st.data.map(fromDb.style));
+      if (!bg.error && bg.data) setBlogs(bg.data.map(fromDb.blog));
       if (!pe.error && pe.data) setPrivateEvents(pe.data.map(fromDb.privateEvent));
       if (!tc.error && !ti.error) {
         const items = ti.data || [];
@@ -779,6 +785,32 @@ function App() {
     setStyles(p => p.filter(s => s.id !== id));
   }, []);
 
+  const addBlog = useCallback(async (b) => {
+    const { data, error } = await sb.from("blogs").insert([toDb.blog(b)]).select();
+    if (error) { notify("保存に失敗しました", "error"); return null; }
+    const saved = fromDb.blog(data[0]);
+    setBlogs(p => [saved, ...p]);
+    return saved;
+  }, []);
+
+  const updateBlog = useCallback(async (id, changes) => {
+    const dbChanges = {};
+    if ("images" in changes) dbChanges.images = changes.images;
+    if ("coverImage" in changes) dbChanges.cover_image = changes.coverImage;
+    if ("category" in changes) dbChanges.category = changes.category;
+    if ("title" in changes) dbChanges.title = changes.title;
+    if ("body" in changes) dbChanges.body = changes.body;
+    if ("couponMenuId" in changes) dbChanges.coupon_menu_id = changes.couponMenuId;
+    if ("authorName" in changes) dbChanges.author_name = changes.authorName;
+    await sb.from("blogs").update(dbChanges).eq("id", id);
+    setBlogs(p => p.map(b => b.id === id ? { ...b, ...changes } : b));
+  }, []);
+
+  const deleteBlog = useCallback(async (id) => {
+    await sb.from("blogs").delete().eq("id", id);
+    setBlogs(p => p.filter(b => b.id !== id));
+  }, []);
+
   const addAppointment = useCallback(async (a) => {
     const { data, error } = await sb.from("appointments").insert([toDb.appointment(a)]);
     if (error) return notify("保存に失敗しました", "error");
@@ -1023,6 +1055,8 @@ function App() {
         {tab === "mergeCustomers" && <MergeCustomersTab setTab={setTab} notify={notify} customers={customers} setCustomers={setCustomers} setVisits={setVisits} setAppointments={setAppointments} />}
         {tab === "styleList" && <StyleListTab setTab={setTab} notify={notify} styles={styles} menus={menus} deleteStyle={deleteStyle} setEditingStyleId={setEditingStyleId} />}
         {tab === "styleForm" && <StyleFormTab setTab={setTab} notify={notify} menus={menus} styles={styles} editingStyleId={editingStyleId} addStyle={addStyle} updateStyle={updateStyle} />}
+        {tab === "blogList" && <BlogListTab setTab={setTab} notify={notify} blogs={blogs} menus={menus} deleteBlog={deleteBlog} setEditingBlogId={setEditingBlogId} />}
+        {tab === "blogForm" && <BlogFormTab setTab={setTab} notify={notify} menus={menus} blogs={blogs} editingBlogId={editingBlogId} addBlog={addBlog} updateBlog={updateBlog} />}
         {tab === "tagSettings" && <TagSettingsTab setTab={setTab} notify={notify} tagCategories={tagCategories} setTagCategories={setTagCategories} />}
         {tab === "appointments" && <AppointmentsTab appointments={appointments} setAppointments={setAppointmentsW} customers={customers} setCustomers={setCustomers} visits={visits} setVisits={setVisitsW} products={products} menus={menus} notify={notify} setTab={setTab} bizHours={bizHours} closedDaysOfWeek={closedDaysOfWeek} personalHolidays={personalHolidays} openKarteDetail={openKarteDetail} addCustomer={addCustomer} addVisit={addVisit} addAppointment={addAppointment} deleteAppointment={deleteAppointment} privateEvents={privateEvents} addPrivateEvent={addPrivateEvent} updatePrivateEvent={updatePrivateEvent} deletePrivateEvent={deletePrivateEvent} pendingCustomerId={pendingCustomerId} setPendingCustomerId={setPendingCustomerId} weekOffset={weekOffset} setWeekOffset={setWeekOffset} viewMode={viewMode} setViewMode={setViewMode} dayOffset={dayOffset} setDayOffset={setDayOffset} monthOffset={monthOffset} setMonthOffset={setMonthOffset} shopCategoryList={shopCategoryList} slotUnit={lineBooking.slotUnit} />}
         {tab === "inventory" && <InventoryTab products={products} setProducts={setProductsW} addProduct={addProduct} updateProduct={updateProduct} deleteProduct={deleteProduct} notify={notify} setTab={setTab} visits={visits} purchaseCosts={purchaseCosts} setPurchaseCosts={setPurchaseCosts} purchaseMakers={purchaseMakers} setPurchaseMakers={setPurchaseMakers} purchasePayMethods={purchasePayMethods} setPurchasePayMethods={setPurchasePayMethods} purchaseCategories={purchaseCategories} setPurchaseCategories={setPurchaseCategories} />}
@@ -3397,6 +3431,11 @@ function MoreTab({ setTab }) {
       svg: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#b5548a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
     },
     {
+      tab: "blogList", label: "ブログ管理", sub: "ブログ記事の登録・編集",
+      iconBg: "#fff0e6", iconColor: "#e8924a",
+      svg: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e8924a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+    },
+    {
       tab: "reportAnalysis", href: "report.html", label: "レポート分析", sub: "HPBサロンレポートPDFのPV推移などを見る",
       iconBg: "#fff3e8", iconColor: "#e8924a",
       svg: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e8924a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
@@ -3688,6 +3727,43 @@ const SB_TEX_CODE = {"柔らかい":"1","普通":"2","硬い":"3"};
 const SB_THICK_CODE = {"細い":"1","普通":"2","太い":"3"};
 const SB_CURL_CODE = {"なし":"1","少し":"2","強い":"3"};
 
+// ブログ編集画面はまだ実機診断ができていないため、まずは「ブログ編集 入力」画面のフォーム項目一覧を
+// ダンプする診断版にしている(スタイルの時と同じ最初のステップ)。実際のセレクタが分かり次第、本入力に対応する。
+function buildBlogSalonBoardScript(b) {
+  const D = {
+    title: b.title || "",
+    body: b.body || "",
+    category: b.category || "",
+    authorName: b.authorName || "",
+  };
+  return [
+    '(async function(){',
+    '"use strict";',
+    'var D=' + JSON.stringify(D) + ';',
+    'var completed=false;',
+    'function done(v){if(completed)return;completed=true;if(typeof completion==="function")completion(v);}',
+    'try{',
+    '  if(!location.hostname.includes("salonboard.com")){alert("SALON BOARDのブログ編集 入力画面で実行してください");done(false);return;}',
+    '  done(true);',
+    '  var dump=[];',
+    '  document.querySelectorAll("input,textarea,select").forEach(function(el){',
+    '    if(dump.length>=150)return;',
+    '    var lbl=(el.id?("#"+el.id):"")+(el.name?(" name="+el.name):"");',
+    '    if(!lbl)lbl="(id/name無し)";',
+    '    dump.push(el.tagName.toLowerCase()+"["+(el.type||"")+"] "+lbl);',
+    '  });',
+    '  var report="■このブログの内容(参考)\\nタイトル: "+D.title+"\\n投稿者: "+D.authorName+"\\nカテゴリ: "+D.category+"\\n\\n■ページ内のフォーム項目一覧\\n"+dump.join("\\n");',
+    '  var ta=document.createElement("textarea");',
+    '  ta.value=report;',
+    '  ta.style.cssText="position:fixed;top:8px;left:8px;right:8px;height:75vh;z-index:999999;font-size:11px;background:#fff;border:3px solid #ff3b30;padding:8px;box-sizing:border-box;";',
+    '  document.body.appendChild(ta);',
+    '  ta.focus();ta.select();',
+    '  alert("診断結果をページ上部に表示しました。全部選択してコピーし、Claudeに貼り付けてください。");',
+    '}catch(err){alert("エラー: "+err.message);done(false);}',
+    '})();',
+  ].join("\n");
+}
+
 function buildStyleSalonBoardScript(s) {
   // スタイル写真は最大3枚(前/横/後ろの想定順)保存されているので、それぞれbase64データと形式を取り出す
   const imgs = (s.images || []).slice(0, 3).map(img => {
@@ -3898,6 +3974,101 @@ function StyleListTab({ setTab, notify, styles, menus, deleteStyle, setEditingSt
                 <button onClick={() => { navigator.clipboard.writeText("javascript:" + encodeURIComponent(sbModal.script)); notify("ブックマークレットをコピーしました ✓"); }}
                   style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "1px solid #7a9aba", background: "#fff", color: "#7a9aba", fontWeight: 700, fontSize: 13, cursor: "pointer", marginBottom: 16 }}>
                   🔖 ブックマークレットをコピー
+                </button>
+
+                <button onClick={() => setSbModal(null)} style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "1px solid " + C.border, background: "#fff", color: C.sub, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>閉じる</button>
+              </React.Fragment>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BlogListTab({ setTab, notify, blogs, menus, deleteBlog, setEditingBlogId }) {
+  const [sbModal, setSbModal] = useState(null); // { blog, script } | { loading: true }
+  const openSalonBoardExport = async (b) => {
+    setSbModal({ loading: true });
+    try {
+      const r = await sbRetry(() => sb.from("blogs").select("*").eq("id", b.id));
+      if (r.error || !r.data || !r.data[0]) throw new Error();
+      const full = fromDb.blog(r.data[0]);
+      setSbModal({ blog: full, script: buildBlogSalonBoardScript(full) });
+    } catch (e) {
+      notify("ブログ情報の取得に失敗しました", "error");
+      setSbModal(null);
+    }
+  };
+  return (
+    <div style={{ background: C.bg, minHeight: "100vh" }}>
+      <div style={{ background: "#fff", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.border}` }}>
+        <button onClick={() => setTab("more")} style={{ background: "none", border: "none", color: "#7a6848", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>← メニュー</button>
+        <div style={{ fontWeight: 800, fontSize: 16 }}>ブログ管理</div>
+        <div style={{ width: 60 }} />
+      </div>
+      <div style={{ padding: 16 }}>
+        <button onClick={() => { setEditingBlogId(null); setTab("blogForm"); }}
+          style={{ width: "100%", padding: 14, borderRadius: 12, border: "none", background: "#e8924a", color: "#fff", fontWeight: 800, fontSize: 15, cursor: "pointer", marginBottom: 16 }}>
+          ＋ 新規ブログ作成
+        </button>
+        {blogs.length === 0 && (
+          <div style={{ textAlign: "center", color: C.sub, fontSize: 13, padding: "30px 0" }}>まだブログが登録されていません</div>
+        )}
+        {blogs.map((b, i) => (
+          <div key={b.id} onClick={() => { setEditingBlogId(b.id); setTab("blogForm"); }}
+            style={{ display: "flex", gap: 12, background: "#fff", borderRadius: 14, padding: 12, marginBottom: 12, border: `1px solid ${C.border}`, cursor: "pointer" }}>
+            <div style={{ width: 66, height: 66, borderRadius: 10, background: b.coverImage ? "transparent" : "#f0ece4", flexShrink: 0, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {b.coverImage ? <img src={b.coverImage} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 10, color: C.sub }}>No.{blogs.length - i}</span>}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 11, color: C.sub, fontWeight: 700 }}>No.{blogs.length - i}{b.category ? "　" + b.category : ""}</div>
+              <div style={{ fontSize: 14, fontWeight: 800, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{b.title || "(タイトル未設定)"}</div>
+              {b.authorName && <div style={{ fontSize: 11, color: C.sub, marginTop: 4 }}>投稿者: {b.authorName}</div>}
+            </div>
+            <button onClick={(e) => { e.stopPropagation(); if (window.confirm(`「${b.title || "このブログ"}」を削除しますか？`)) deleteBlog(b.id); }}
+              style={{ background: "none", border: "none", color: "#ff6b6b", fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0, alignSelf: "flex-start", padding: 4 }}>
+              削除
+            </button>
+            <button onClick={(e) => { e.stopPropagation(); openSalonBoardExport(b); }}
+              style={{ background: "none", border: "1px solid #7a9aba", borderRadius: 8, color: "#7a9aba", fontSize: 11, fontWeight: 700, cursor: "pointer", flexShrink: 0, alignSelf: "flex-start", padding: "4px 8px", marginTop: 4 }}>
+              SalonBoardへ
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {sbModal && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 970, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px 16px", boxSizing: "border-box" }}>
+          <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)" }} onClick={() => setSbModal(null)} />
+          <div style={{ position: "relative", zIndex: 1, background: "#fff", borderRadius: 16, padding: 20, width: "100%", maxWidth: 460, maxHeight: "85vh", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+            {sbModal.loading ? (
+              <div style={{ textAlign: "center", color: C.sub, fontSize: 13, padding: "30px 0" }}>読み込み中...</div>
+            ) : (
+              <React.Fragment>
+                <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>SalonBoard診断コード(ブログ)</div>
+                <div style={{ fontSize: 12, color: C.sub, marginBottom: 14, lineHeight: 1.6 }}>
+                  ブログはまだ実機でのセレクタ確認ができていないため、まずは診断版です。SALON BOARDの「ブログ編集 入力」画面で実行すると、フォーム項目の一覧が画面上部に表示されるので、それを全選択してコピーし、Claudeに送ってください。本入力は次のステップで対応します。
+                </div>
+
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.sub, marginBottom: 6 }}>① PC(Mac)で使う場合</div>
+                <div style={{ fontSize: 11.5, color: C.sub, marginBottom: 10, lineHeight: 1.7 }}>
+                  SALON BOARDの「ブログ編集 入力」画面を開く → F12(またはSafariの「開発」→「JavaScriptコンソールを表示」) → 下のコードを貼り付けてEnter
+                </div>
+                <textarea readOnly value={sbModal.script} onClick={e => e.target.select()}
+                  style={{ width: "100%", boxSizing: "border-box", height: 90, fontSize: 10, fontFamily: "monospace", border: "1px solid " + C.border, borderRadius: 8, padding: 8, marginBottom: 8, resize: "none" }} />
+                <button onClick={() => { navigator.clipboard.writeText(sbModal.script); notify("コピーしました ✓"); }}
+                  style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "1px solid #7a9aba", background: "#fff", color: "#7a9aba", fontWeight: 700, fontSize: 13, cursor: "pointer", marginBottom: 16 }}>
+                  📋 このコードをコピー
+                </button>
+
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.sub, marginBottom: 6 }}>② iPhone/iPadで使う場合(ショートカット)</div>
+                <div style={{ fontSize: 11.5, color: C.sub, marginBottom: 10, lineHeight: 1.7 }}>
+                  スタイルの時に作った「Webページ上でJavaScriptを実行」のショートカットがそのまま使えます(クリップボードの中身がこの診断コードに変わるだけ)。
+                </div>
+                <button onClick={() => { navigator.clipboard.writeText(sbModal.script); notify("コピーしました ✓"); }}
+                  style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "none", background: "#7a9aba", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer", marginBottom: 16 }}>
+                  📋 コードをコピー(ショートカット用)
                 </button>
 
                 <button onClick={() => setSbModal(null)} style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "1px solid " + C.border, background: "#fff", color: C.sub, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>閉じる</button>
@@ -4280,6 +4451,191 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
         <div style={{ fontSize: 11, color: C.sub, marginTop: 10, lineHeight: 1.7, textAlign: "center" }}>
           この内容はアプリ内の記録用です。実際のサロンボードへの掲載は、これまでどおり手動での入力が必要です。
         </div>
+      </div>
+    </div>
+  );
+}
+
+function BlogFormTab({ setTab, notify, menus, blogs, editingBlogId, addBlog, updateBlog }) {
+  const editing = editingBlogId ? blogs.find(b => b.id === editingBlogId) : null;
+  const [form, setForm] = useState(() => editing ? {
+    images: [], category: editing.category || "", title: editing.title || "", body: editing.body || "",
+    couponMenuId: editing.couponMenuId || "", authorName: editing.authorName || "",
+  } : {
+    images: [], category: "", title: "", body: "", couponMenuId: "", authorName: "",
+  });
+  const [dataLoaded, setDataLoaded] = useState(!editing);
+  const [saving, setSaving] = useState(false);
+  const fileRefs = [useRef(), useRef(), useRef(), useRef()];
+
+  // 編集時のみ、この1件分をフル取得(スタイルと同じ方針：一覧は軽量列のみのため)
+  useEffect(() => {
+    if (!editing) return;
+    (async () => {
+      const r = await sbRetry(() => sb.from("blogs").select("*").eq("id", editing.id));
+      if (!r.error && r.data && r.data[0]) {
+        const full = fromDb.blog(r.data[0]);
+        setForm(p => ({ ...p, images: full.images || [], category: full.category || "", title: full.title || "", body: full.body || "", couponMenuId: full.couponMenuId || "", authorName: full.authorName || "" }));
+        setDataLoaded(true);
+      }
+    })();
+  }, [editing && editing.id]);
+
+  // ブログ写真はスタイルと違い決まった縦横比の指定がSalonBoard側に見当たらないため、
+  // 元の縦横比のまま最大辺1000pxにリサイズするだけにしている(クロップしない)
+  const processBlogImage = (dataUrl, cb) => {
+    const img = new Image();
+    img.onload = () => {
+      const maxDim = 1000;
+      let w = img.width, h = img.height;
+      if (w > maxDim || h > maxDim) { const scale = maxDim / Math.max(w, h); w = Math.round(w * scale); h = Math.round(h * scale); }
+      const c = document.createElement("canvas"); c.width = w; c.height = h;
+      c.getContext("2d").drawImage(img, 0, 0, w, h);
+      const full = c.toDataURL("image/jpeg", 0.85);
+      const scale2 = 160 / Math.max(w, h);
+      const c2 = document.createElement("canvas"); c2.width = Math.round(w * scale2); c2.height = Math.round(h * scale2);
+      c2.getContext("2d").drawImage(img, 0, 0, c2.width, c2.height);
+      const thumb = c2.toDataURL("image/jpeg", 0.6);
+      cb(full, thumb);
+    };
+    img.src = dataUrl;
+  };
+  const handlePickImage = (idx, e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      processBlogImage(ev.target.result, (full, thumb) => {
+        setForm(p => { const next = [...p.images]; next[idx] = full; return { ...p, images: next }; });
+        if (idx === 0) setForm(p => ({ ...p, __coverImage: thumb }));
+      });
+    };
+    reader.readAsDataURL(f);
+    e.target.value = "";
+  };
+  const removeImage = (idx) => setForm(p => { const next = [...p.images]; next[idx] = null; return { ...p, images: next }; });
+
+  // 過去のブログで使われた投稿者名/カテゴリを集計し、選ぶだけで再利用できるようにする(スタイルと同じ発想)
+  const authorNames = useMemo(() => [...new Set(blogs.map(b => b.authorName).filter(Boolean))], [blogs]);
+  const categoryPool = useMemo(() => [...new Set(blogs.map(b => b.category).filter(Boolean))], [blogs]);
+  const lineBreakCount = (form.body.match(/\n/g) || []).length;
+
+  const save = async () => {
+    if (!dataLoaded) return notify("データの読み込みが完了していません。少し待ってから保存してください", "error");
+    if (!form.title.trim()) return notify("タイトルを入力してください", "error");
+    setSaving(true);
+    const images = form.images.filter(Boolean);
+    const coverImage = form.__coverImage || (editing ? editing.coverImage : null) || null;
+    const payload = { ...form, images, coverImage };
+    delete payload.__coverImage;
+    if (editing) await updateBlog(editing.id, payload);
+    else await addBlog(payload);
+    setSaving(false);
+    notify(editing ? "更新しました ✓" : "登録しました ✓");
+    setTab("blogList");
+  };
+
+  return (
+    <div style={{ background: C.bg, minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      <div style={{ background: "#fff", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.border}` }}>
+        <button onClick={() => setTab("blogList")} style={{ background: "none", border: "none", color: "#7a6848", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>← 一覧</button>
+        <div style={{ fontWeight: 800, fontSize: 16 }}>{editing ? "ブログ編集" : "新規ブログ作成"}</div>
+        <div style={{ width: 60 }} />
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch", padding: 16 }}>
+
+        {/* 画像(最大4枚) */}
+        <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 10 }}>ブログ写真(最大4枚)</div>
+          {!dataLoaded ? (
+            <div style={{ fontSize: 12, color: C.sub, padding: "8px 0" }}>データを読み込み中…（完了するまで変更できません）</div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+              {[0, 1, 2, 3].map(idx => (
+                <div key={idx}>
+                  {form.images[idx] ? (
+                    <div style={{ position: "relative" }}>
+                      <img src={form.images[idx]} alt="" style={{ width: "100%", aspectRatio: "1/1", objectFit: "cover", borderRadius: 8, border: `1px solid ${C.border}` }} />
+                      <button onClick={() => removeImage(idx)} style={{ width: "100%", marginTop: 6, padding: "5px 0", fontSize: 11, color: C.sub, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer" }}>削除</button>
+                    </div>
+                  ) : (
+                    <div onClick={() => fileRefs[idx].current && fileRefs[idx].current.click()}
+                      style={{ width: "100%", aspectRatio: "1/1", borderRadius: 8, border: `1.5px dashed ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: C.sub, fontSize: 22 }}>
+                      ＋
+                    </div>
+                  )}
+                  <input ref={fileRefs[idx]} type="file" accept="image/*" style={{ display: "none" }} onChange={e => handlePickImage(idx, e)} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 投稿者・カテゴリ */}
+        <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 6 }}>投稿者</div>
+          {authorNames.length > 0 && (
+            <select value="" onChange={e => { if (e.target.value) setForm(p => ({ ...p, authorName: e.target.value })); }}
+              style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 12px", fontSize: 13, marginBottom: 8, background: "#fff", color: C.sub, outline: "none" }}>
+              <option value="">既存の名前から選択…</option>
+              {authorNames.map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+          )}
+          <input type="text" value={form.authorName} onChange={e => setForm(p => ({ ...p, authorName: e.target.value }))}
+            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, marginBottom: 14, outline: "none" }} />
+
+          <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 6 }}>カテゴリ</div>
+          {categoryPool.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+              {categoryPool.map(cat => (
+                <button key={cat} onClick={() => setForm(p => ({ ...p, category: cat }))}
+                  style={{ padding: "6px 12px", borderRadius: 20, border: form.category === cat ? "1.5px solid #e8924a" : `1px solid ${C.border}`, background: form.category === cat ? "#fff3e8" : "#fff", color: form.category === cat ? "#e8924a" : C.sub, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                  {cat}
+                </button>
+              ))}
+            </div>
+          )}
+          <input type="text" value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value }))}
+            placeholder="例：おすすめスタイル"
+            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, outline: "none" }} />
+        </div>
+
+        {/* タイトル・本文 */}
+        <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ fontSize: 12, color: C.sub, fontWeight: 700 }}>タイトル *</div>
+            <div style={{ fontSize: 11, color: form.title.length >= 25 ? "#d9534f" : C.sub }}>{form.title.length}/25</div>
+          </div>
+          <input type="text" value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value.slice(0, 25) }))} maxLength={25}
+            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, marginBottom: 14, outline: "none" }} />
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ fontSize: 12, color: C.sub, fontWeight: 700 }}>本文</div>
+            <div style={{ fontSize: 11 }}>
+              <span style={{ color: form.body.length >= 1000 ? "#d9534f" : C.sub }}>{form.body.length}/1000</span>
+              <span style={{ marginLeft: 10, color: lineBreakCount >= 80 ? "#d9534f" : C.sub }}>改行{lineBreakCount}/80</span>
+            </div>
+          </div>
+          <textarea value={form.body} onChange={e => setForm(p => ({ ...p, body: e.target.value.slice(0, 1000) }))} rows={10}
+            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 13, lineHeight: 1.6, resize: "vertical", outline: "none", fontFamily: "inherit" }} />
+        </div>
+
+        {/* クーポン */}
+        <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 6 }}>クーポン</div>
+          <select value={form.couponMenuId} onChange={e => setForm(p => ({ ...p, couponMenuId: e.target.value }))}
+            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, background: "#fff", outline: "none" }}>
+            <option value="">未設定</option>
+            {menus.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </div>
+
+      </div>
+      <div style={{ background: "#fff", borderTop: `1px solid ${C.border}`, padding: 16 }}>
+        <button onClick={save} disabled={saving}
+          style={{ width: "100%", padding: 14, borderRadius: 12, border: "none", background: saving ? "#ccc" : "#e8924a", color: "#fff", fontWeight: 800, fontSize: 15, cursor: saving ? "default" : "pointer" }}>
+          {saving ? "保存中..." : (editing ? "更新する" : "登録する")}
+        </button>
       </div>
     </div>
   );
@@ -4772,7 +5128,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.04-k"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.04-l"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
