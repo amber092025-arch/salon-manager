@@ -106,7 +106,7 @@ const toDb = {
   product: (p) => ({ name:p.name, price:p.price||0, cost:p.cost||0, stock:p.stock||0, min_stock:p.minStock||3, category:p.category||null, sub_category:p.subCategory||null, placeholder:p.placeholder||false, photos:p.photos||[], description:p.description||null, is_public:p.isPublic||false, sort_order:p.sortOrder||Date.now() }),
   visit: (v) => ({ customer_id:v.customerId, date:v.date, time:v.time||null, menus:v.menus||[], products:v.products||[], drug_cost:v.drugCost||0, payment_method:v.paymentMethod||"cash", total:v.total||0, notes:v.notes||null, images:v.images||[], customer_type:v.customerType||"existing", hpb_point:v.hpbPoint||0, paid:v.paid||false, duration:v.duration||60, appointment_id:v.appointmentId||null, tags:v.tags||[], style_name:v.styleName||null, style_comment:v.styleComment||null, is_public:v.isPublic||false, paid_at:v.paidAt||null }),
   style: (s) => ({ images:s.images||[], cover_image:s.coverImage||null, category:s.category||"ladies", length:s.length||"", stylist_name:s.stylistName||"", stylist_comment:s.stylistComment||"", style_name:s.styleName||"", menu_flags:s.menuFlags||[], menu_text:s.menuText||"", coupon_menu_id:s.couponMenuId||null, hashtags:s.hashtags||[], model_volume:s.modelVolume||"", model_texture:s.modelTexture||"", model_thickness:s.modelThickness||"", model_curl:s.modelCurl||"", model_face:s.modelFace||"", model_age:s.modelAge||"", sort_order:s.sortOrder||Date.now() }),
-  blog: (b) => ({ images:b.images||[], cover_image:b.coverImage||null, category:b.category||"", title:b.title||"", body:b.body||"", coupon_menu_id:b.couponMenuId||null, author_name:b.authorName||"", sort_order:b.sortOrder||Date.now() }),
+  blog: (b) => ({ images:b.images||[], cover_image:b.coverImage||null, category:b.category||"", title:b.title||"", body:b.body||"", body_blocks:b.bodyBlocks||[], coupon_menu_id:b.couponMenuId||null, author_name:b.authorName||"", sort_order:b.sortOrder||Date.now() }),
   appointment: (a) => ({ customer_id:a.customerId, date:a.date, time:a.time||null, end_time:a.endTime||null, duration:a.duration||60, menu_ids:a.menuIds||[], notes:a.notes||null, color:a.color||"#00b4a6", paid:a.paid||false, shimeika:a.shimeika||"shimeika", customer_type:a.customerType||"existing" }),
   privateEvent: (e) => ({ title:e.title||"予定", date:e.date, time:e.time||null, end_time:e.endTime||null, memo:e.memo||null, color:e.color||"#9a9088", is_shared:e.isShared!==false, recurrence:e.recurrence||"none", recurrence_until:e.recurrenceUntil||null }),
 };
@@ -116,7 +116,7 @@ const fromDb = {
   product: (r) => ({ id:r.id, name:r.name, price:r.price||0, cost:r.cost||0, stock:r.stock||0, minStock:r.min_stock||3, category:r.category||"", subCategory:r.sub_category||"", placeholder:r.placeholder||false, photos:r.photos||[], description:r.description||"", isPublic:r.is_public||false, sortOrder:r.sort_order||0 }),
   visit: (r) => { var pd={}; try{pd=r.photo_data?JSON.parse(r.photo_data):{};}catch(e){} return { id:r.id, customerId:r.customer_id, date:r.date, time:r.time||"", menus:r.menus||[], products:r.products||[], drugCost:r.drug_cost||0, paymentMethod:r.payment_method||"cash", total:r.total||0, notes:r.notes||"", images:r.images||[], beforeImgs:pd.before||[], afterImgs:pd.after||[], otherImgs:pd.other||[], customerType:r.customer_type||"existing", hpbPoint:r.hpb_point||0, paid:r.paid||false, duration:r.duration||60, appointmentId:r.appointment_id||null, tags:r.tags||[], styleName:r.style_name||"", styleComment:r.style_comment||"", isPublic:r.is_public||false, paidAt:r.paid_at||null }; },
   style: (r) => ({ id:r.id, images:r.images||[], coverImage:r.cover_image||null, category:r.category||"ladies", length:r.length||"", stylistName:r.stylist_name||"", stylistComment:r.stylist_comment||"", styleName:r.style_name||"", menuFlags:r.menu_flags||[], menuText:r.menu_text||"", couponMenuId:r.coupon_menu_id||null, hashtags:r.hashtags||[], modelVolume:r.model_volume||"", modelTexture:r.model_texture||"", modelThickness:r.model_thickness||"", modelCurl:r.model_curl||"", modelFace:r.model_face||"", modelAge:r.model_age||"", sortOrder:r.sort_order||0, createdAt:r.created_at||null }),
-  blog: (r) => ({ id:r.id, images:r.images||[], coverImage:r.cover_image||null, category:r.category||"", title:r.title||"", body:r.body||"", couponMenuId:r.coupon_menu_id||null, authorName:r.author_name||"", sortOrder:r.sort_order||0, createdAt:r.created_at||null }),
+  blog: (r) => ({ id:r.id, images:r.images||[], coverImage:r.cover_image||null, category:r.category||"", title:r.title||"", body:r.body||"", bodyBlocks:r.body_blocks||[], couponMenuId:r.coupon_menu_id||null, authorName:r.author_name||"", sortOrder:r.sort_order||0, createdAt:r.created_at||null }),
   appointment: (r) => ({ id:r.id, customerId:r.customer_id, date:r.date, time:r.time||"", endTime:r.end_time||"", duration:r.duration||60, menuIds:r.menu_ids||[], notes:r.notes||"", color:r.color||"#00b4a6", paid:r.paid||false, shimeika:r.shimeika||"shimeika", customerType:r.customer_type||"existing", hpbPoint:r.hpb_point||0, bookingStatus:r.booking_status||"confirmed" }),
   privateEvent: (r) => ({ id:r.id, title:r.title||"予定", date:r.date, time:r.time||"", endTime:r.end_time||"", memo:r.memo||"", color:r.color||"#9a9088", isShared:r.is_shared!==false, recurrence:r.recurrence||"none", recurrenceUntil:r.recurrence_until||"" }),
 };
@@ -800,6 +800,7 @@ function App() {
     if ("category" in changes) dbChanges.category = changes.category;
     if ("title" in changes) dbChanges.title = changes.title;
     if ("body" in changes) dbChanges.body = changes.body;
+    if ("bodyBlocks" in changes) dbChanges.body_blocks = changes.bodyBlocks;
     if ("couponMenuId" in changes) dbChanges.coupon_menu_id = changes.couponMenuId;
     if ("authorName" in changes) dbChanges.author_name = changes.authorName;
     await sb.from("blogs").update(dbChanges).eq("id", id);
@@ -4416,15 +4417,18 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
 
 function BlogFormTab({ setTab, notify, menus, blogs, editingBlogId, addBlog, updateBlog }) {
   const editing = editingBlogId ? blogs.find(b => b.id === editingBlogId) : null;
+  const newBlockId = () => Date.now() + Math.random();
+  // bodyBlocksは本文を構成する部品の並び(文章ブロック/写真ブロック)。SalonBoardの本文は
+  // 「文章の途中に写真が挟まる」構成のため、images/bodyを分けずこの1本の並びで管理する
   const [form, setForm] = useState(() => editing ? {
-    images: [], category: editing.category || "", title: editing.title || "", body: editing.body || "",
+    bodyBlocks: [], category: editing.category || "", title: editing.title || "",
     couponMenuId: editing.couponMenuId || "", authorName: editing.authorName || "",
   } : {
-    images: [], category: "", title: "", body: "", couponMenuId: "", authorName: "",
+    bodyBlocks: [{ id: newBlockId(), type: "text", text: "" }], category: "", title: "", couponMenuId: "", authorName: "",
   });
   const [dataLoaded, setDataLoaded] = useState(!editing);
   const [saving, setSaving] = useState(false);
-  const fileRefs = [useRef(), useRef(), useRef(), useRef()];
+  const imageBlockFileRef = useRef();
 
   // 編集時のみ、この1件分をフル取得(スタイルと同じ方針：一覧は軽量列のみのため)
   useEffect(() => {
@@ -4433,7 +4437,15 @@ function BlogFormTab({ setTab, notify, menus, blogs, editingBlogId, addBlog, upd
       const r = await sbRetry(() => sb.from("blogs").select("*").eq("id", editing.id));
       if (!r.error && r.data && r.data[0]) {
         const full = fromDb.blog(r.data[0]);
-        setForm(p => ({ ...p, images: full.images || [], category: full.category || "", title: full.title || "", body: full.body || "", couponMenuId: full.couponMenuId || "", authorName: full.authorName || "" }));
+        let blocks = full.bodyBlocks && full.bodyBlocks.length ? full.bodyBlocks : null;
+        if (!blocks) {
+          // body_blocks列が無い(旧データ)場合、旧images+bodyから簡易的に組み立てる救済措置
+          blocks = [];
+          (full.images || []).forEach(img => blocks.push({ id: newBlockId(), type: "image", image: img }));
+          if (full.body) blocks.push({ id: newBlockId(), type: "text", text: full.body });
+          if (!blocks.length) blocks = [{ id: newBlockId(), type: "text", text: "" }];
+        }
+        setForm(p => ({ ...p, bodyBlocks: blocks, category: full.category || "", title: full.title || "", couponMenuId: full.couponMenuId || "", authorName: full.authorName || "" }));
         setDataLoaded(true);
       }
     })();
@@ -4458,25 +4470,39 @@ function BlogFormTab({ setTab, notify, menus, blogs, editingBlogId, addBlog, upd
     };
     img.src = dataUrl;
   };
-  const handlePickImage = (idx, e) => {
+
+  const imageBlockCount = form.bodyBlocks.filter(b => b.type === "image").length;
+  const addTextBlock = () => setForm(p => ({ ...p, bodyBlocks: [...p.bodyBlocks, { id: newBlockId(), type: "text", text: "" }] }));
+  const handleAddImageBlock = (e) => {
     const f = e.target.files && e.target.files[0];
+    e.target.value = "";
     if (!f) return;
+    if (imageBlockCount >= 4) { notify("写真は4枚までです", "error"); return; }
     const reader = new FileReader();
     reader.onload = ev => {
-      processBlogImage(ev.target.result, (full, thumb) => {
-        setForm(p => { const next = [...p.images]; next[idx] = full; return { ...p, images: next }; });
-        if (idx === 0) setForm(p => ({ ...p, __coverImage: thumb }));
+      processBlogImage(ev.target.result, (full) => {
+        setForm(p => ({ ...p, bodyBlocks: [...p.bodyBlocks, { id: newBlockId(), type: "image", image: full }] }));
       });
     };
     reader.readAsDataURL(f);
-    e.target.value = "";
   };
-  const removeImage = (idx) => setForm(p => { const next = [...p.images]; next[idx] = null; return { ...p, images: next }; });
+  const updateTextBlock = (id, text) => setForm(p => ({ ...p, bodyBlocks: p.bodyBlocks.map(b => b.id === id ? { ...b, text } : b) }));
+  const removeBlock = (id) => setForm(p => ({ ...p, bodyBlocks: p.bodyBlocks.filter(b => b.id !== id) }));
+  const moveBlock = (id, dir) => setForm(p => {
+    const arr = [...p.bodyBlocks];
+    const i = arr.findIndex(b => b.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= arr.length) return p;
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+    return { ...p, bodyBlocks: arr };
+  });
 
   // 過去のブログで使われた投稿者名/カテゴリを集計し、選ぶだけで再利用できるようにする(スタイルと同じ発想)
   const authorNames = useMemo(() => [...new Set(blogs.map(b => b.authorName).filter(Boolean))], [blogs]);
   const categoryPool = useMemo(() => [...new Set(blogs.map(b => b.category).filter(Boolean))], [blogs]);
-  const lineBreakCount = (form.body.match(/\n/g) || []).length;
+  const bodyPlainText = form.bodyBlocks.filter(b => b.type === "text").map(b => b.text).join("\n");
+  const bodyCharCount = bodyPlainText.length;
+  const lineBreakCount = (bodyPlainText.match(/\n/g) || []).length;
 
   // カルテ詳細にあった「ブログを書く」(AIへブログ生成プロンプトを渡す機能)をこちらへ移設。
   // カルテ側は来店1件のビフォーアフター写真枚数等を補足情報にしていたが、こちらはカテゴリのみ使う
@@ -4494,10 +4520,10 @@ function BlogFormTab({ setTab, notify, menus, blogs, editingBlogId, addBlog, upd
     if (!dataLoaded) return notify("データの読み込みが完了していません。少し待ってから保存してください", "error");
     if (!form.title.trim()) return notify("タイトルを入力してください", "error");
     setSaving(true);
-    const images = form.images.filter(Boolean);
-    const coverImage = form.__coverImage || (editing ? editing.coverImage : null) || null;
-    const payload = { ...form, images, coverImage };
-    delete payload.__coverImage;
+    // images/bodyはbodyBlocksから毎回導出する(一覧サムネイル用・簡易テキスト参照用に維持)
+    const images = form.bodyBlocks.filter(b => b.type === "image").map(b => b.image);
+    const coverImage = images[0] || null;
+    const payload = { ...form, images, coverImage, body: bodyPlainText };
     if (editing) await updateBlog(editing.id, payload);
     else await addBlog(payload);
     setSaving(false);
@@ -4525,33 +4551,6 @@ function BlogFormTab({ setTab, notify, menus, blogs, editingBlogId, addBlog, upd
               Geminiで
             </button>
           </div>
-        </div>
-
-        {/* 画像(最大4枚) */}
-        <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
-          <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 10 }}>ブログ写真(最大4枚)</div>
-          {!dataLoaded ? (
-            <div style={{ fontSize: 12, color: C.sub, padding: "8px 0" }}>データを読み込み中…（完了するまで変更できません）</div>
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
-              {[0, 1, 2, 3].map(idx => (
-                <div key={idx}>
-                  {form.images[idx] ? (
-                    <div style={{ position: "relative" }}>
-                      <img src={form.images[idx]} alt="" style={{ width: "100%", aspectRatio: "1/1", objectFit: "cover", borderRadius: 8, border: `1px solid ${C.border}` }} />
-                      <button onClick={() => removeImage(idx)} style={{ width: "100%", marginTop: 6, padding: "5px 0", fontSize: 11, color: C.sub, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer" }}>削除</button>
-                    </div>
-                  ) : (
-                    <div onClick={() => fileRefs[idx].current && fileRefs[idx].current.click()}
-                      style={{ width: "100%", aspectRatio: "1/1", borderRadius: 8, border: `1.5px dashed ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: C.sub, fontSize: 22 }}>
-                      ＋
-                    </div>
-                  )}
-                  <input ref={fileRefs[idx]} type="file" accept="image/*" style={{ display: "none" }} onChange={e => handlePickImage(idx, e)} />
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* 投稿者・カテゴリ */}
@@ -4595,12 +4594,44 @@ function BlogFormTab({ setTab, notify, menus, blogs, editingBlogId, addBlog, upd
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
             <div style={{ fontSize: 12, color: C.sub, fontWeight: 700 }}>本文</div>
             <div style={{ fontSize: 11 }}>
-              <span style={{ color: form.body.length >= 1000 ? "#d9534f" : C.sub }}>{form.body.length}/1000</span>
+              <span style={{ color: bodyCharCount >= 1000 ? "#d9534f" : C.sub }}>{bodyCharCount}/1000</span>
               <span style={{ marginLeft: 10, color: lineBreakCount >= 80 ? "#d9534f" : C.sub }}>改行{lineBreakCount}/80</span>
+              <span style={{ marginLeft: 10, color: imageBlockCount >= 4 ? "#d9534f" : C.sub }}>画像{imageBlockCount}/4</span>
             </div>
           </div>
-          <textarea value={form.body} onChange={e => setForm(p => ({ ...p, body: e.target.value.slice(0, 1000) }))} rows={10}
-            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 13, lineHeight: 1.6, resize: "vertical", outline: "none", fontFamily: "inherit" }} />
+          <div style={{ fontSize: 11, color: C.sub, marginBottom: 10, lineHeight: 1.6 }}>
+            SalonBoardと同じく、文章と写真を好きな順番に並べられます。↑↓で並び替え、写真は本文の途中にも挟めます。
+          </div>
+          {!dataLoaded ? (
+            <div style={{ fontSize: 12, color: C.sub, padding: "8px 0" }}>データを読み込み中…（完了するまで変更できません）</div>
+          ) : (
+            <React.Fragment>
+              {form.bodyBlocks.map((block, i) => (
+                <div key={block.id} style={{ marginBottom: 10, border: `1px solid ${C.border}`, borderRadius: 10, padding: 10 }}>
+                  {block.type === "image" ? (
+                    <img src={block.image} alt="" style={{ width: "100%", maxHeight: 240, objectFit: "cover", borderRadius: 8 }} />
+                  ) : (
+                    <textarea value={block.text} onChange={e => updateTextBlock(block.id, e.target.value)} rows={4} placeholder="文章を入力"
+                      style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 10px", fontSize: 13, lineHeight: 1.6, resize: "vertical", outline: "none", fontFamily: "inherit" }} />
+                  )}
+                  <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                    <button onClick={() => moveBlock(block.id, -1)} disabled={i === 0}
+                      style={{ padding: "4px 10px", borderRadius: 6, border: `1px solid ${C.border}`, background: "#fff", color: i === 0 ? "#ccc" : C.sub, fontSize: 12, cursor: i === 0 ? "default" : "pointer" }}>↑</button>
+                    <button onClick={() => moveBlock(block.id, 1)} disabled={i === form.bodyBlocks.length - 1}
+                      style={{ padding: "4px 10px", borderRadius: 6, border: `1px solid ${C.border}`, background: "#fff", color: i === form.bodyBlocks.length - 1 ? "#ccc" : C.sub, fontSize: 12, cursor: i === form.bodyBlocks.length - 1 ? "default" : "pointer" }}>↓</button>
+                    <button onClick={() => removeBlock(block.id)}
+                      style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #ff6b6b", background: "#fff", color: "#ff6b6b", fontSize: 12, cursor: "pointer", marginLeft: "auto" }}>削除</button>
+                  </div>
+                </div>
+              ))}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={addTextBlock} style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: `1px solid ${C.border}`, background: "#fff", color: C.sub, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>＋文章を追加</button>
+                <button onClick={() => imageBlockCount < 4 ? imageBlockFileRef.current.click() : notify("写真は4枚までです", "error")}
+                  style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: `1px solid ${C.border}`, background: imageBlockCount >= 4 ? "#f5f5f5" : "#fff", color: imageBlockCount >= 4 ? "#ccc" : C.sub, fontWeight: 700, fontSize: 12, cursor: imageBlockCount >= 4 ? "default" : "pointer" }}>＋写真を追加</button>
+                <input ref={imageBlockFileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleAddImageBlock} />
+              </div>
+            </React.Fragment>
+          )}
         </div>
 
         {/* クーポン */}
@@ -5111,7 +5142,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.04-m"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.04-n"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
