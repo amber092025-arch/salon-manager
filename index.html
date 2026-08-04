@@ -499,7 +499,7 @@ function App() {
         sbRetry(() => sb.from("appointments").select().order("date")),
         sbRetry(() => sb.from("tag_categories").select().order("sort_order")),
         sbRetry(() => sb.from("tag_items").select().order("sort_order")),
-        sbRetry(() => sb.from("styles").select("id,style_name,category,length,coupon_menu_id,hashtags,sort_order,created_at,cover_image").order("created_at", {ascending:false})),
+        sbRetry(() => sb.from("styles").select("id,style_name,category,length,coupon_menu_id,hashtags,sort_order,created_at,cover_image,stylist_name").order("created_at", {ascending:false})),
         sbRetry(() => sb.from("private_events").select().order("date")),
       ]);
       // 重要データ（顧客・来店・予約・メニュー）が1つでも読めなかったらバナー表示
@@ -2062,16 +2062,6 @@ function KarteDetail({ visit: v, customer: c, menus: allMenus, products: allProd
     setShowBlogPage(true);
   };
 
-  const generateStyleup = function() {
-    const menuNames = karteMenus.map(function(m){ return m.name; }).join("、");
-    let savedPrompt = "";
-    try { savedPrompt = localStorage.getItem("stylupPrompt") || ""; } catch(e) {}
-    const defaultPrompt = "あなたはプロのライター兼美容師向けSEOライターです。\n\nホットペッパービューティーの「ヘアスタイル掲載ページ」用に、写真からスタイル名とコメントを作成してください。\n\n【目的】\n・人が書いたような自然な文章\n・見た人が「この髪型にしたい」と思う内容\n・美容室集客につながる内容\n・SEO対策、AIO対策を意識\n・ホットペッパービューティーのスタイル掲載で検索されやすい内容\n\n【出力ルール】\n写真を分析し、以下の順番で出力\n\n【スタイル名候補】\n①\n②\n③\n④\n⑤\n⑥\n⑦\n⑧\n⑨\n⑩\n\n【スタイル名条件】\n・30文字以内\n・検索されやすいキーワードを含める\n・髪型、カラー、質感が伝わる\n・ホットペッパー検索を意識\n・実際の美容師が付けそうな自然な名前\n・盛りすぎない\n・同じ表現を繰り返さない\n\nスタイル名候補を10個出した後、「気に入った番号を選んでください」と表示して終了する。コメントはまだ作成しない。\n\nーーーーーーーーーー\n\nユーザーが番号を選んだら、そのスタイル名で完成版を作成する。\n\n出力順\n選ばれたスタイル名\nコメント\n\n【コメント条件】\n・120文字以内\n・写真の質感、艶感、シルエットを自然に表現\n・検索されやすいキーワードを含める\n・読んだ人がやってみたいと思う内容\n・ホットペッパービューティー掲載向け\n・人が書いたような自然な文章\n・絵文字禁止\n・半角記号禁止\n・過剰表現禁止\n・写真から髪の長さ、カラー、質感、デザインを分析して反映\n・ユーザーから補足情報がある場合は反映\n\n重要\n・スタイル名選択前にコメントを作らない\n・選択後は完成版のみ出力\n・余計な説明をしない\n・コピペしやすい形で出力\n・ホットペッパービューティー掲載を前提にする\n・美容室集客を最優先にする\n・写真を必ず分析してスタイル名とコメントに反映する";
-    const prompt = (savedPrompt || defaultPrompt) + "\n\n【補足情報】\n施術内容：" + (menuNames || "記載なし") + "\nメモ：" + (memo || "記載なし");
-    try { var el=document.createElement("textarea"); el.value=prompt; document.body.appendChild(el); el.select(); document.execCommand("copy"); document.body.removeChild(el); } catch(e) {}
-    window.location.href = "chatgpt://";
-  };
-
   if (showCheckout) return <CheckoutPage visit={{...v, menus: karteMenus, products: karteProds}} customer={c} menus={allMenus} products={allProducts} shopCategoryList={shopCategoryList||[]} onBack={() => setShowCheckout(false)} notify={notify} onPaid={async (result) => {
     setPaid(true);
     if (updateVisit) await updateVisit(v.id, { paid: true, menus: result.menus, products: result.products, total: result.total, paymentMethod: result.paymentMethod, paidAt: nowTimeStr(), hpbPoint: result.hpbPoint||0 });
@@ -2309,13 +2299,8 @@ function KarteDetail({ visit: v, customer: c, menus: allMenus, products: allProd
         </div>
 
         {/* Blog button */}
-        <button onClick={generateBlog} style={{ width:"100%", padding:"14px", borderRadius:12, border:"none", background:"linear-gradient(135deg,#ff4d88,#ff9500)", color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer", marginBottom:10 }}>
+        <button onClick={generateBlog} style={{ width:"100%", padding:"14px", borderRadius:12, border:"none", background:"linear-gradient(135deg,#ff4d88,#ff9500)", color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer", marginBottom:16 }}>
           ブログを書く
-        </button>
-
-        {/* スタイルアップボタン */}
-        <button onClick={generateStyleup} style={{ width:"100%", padding:"14px", borderRadius:12, border:"none", background:"linear-gradient(135deg,#5856d6,#7a6848)", color:"#fff", fontWeight:800, fontSize:15, cursor:"pointer", marginBottom:16 }}>
-          スタイルアップ
         </button>
 
         {/* Purchase history */}
@@ -3812,7 +3797,6 @@ function buildStyleSalonBoardScript(s) {
 }
 
 function StyleListTab({ setTab, notify, styles, menus, deleteStyle, setEditingStyleId }) {
-  const couponName = (id) => { const m = menus.find(x => x.id === id); return m ? m.name : ""; };
   const [sbModal, setSbModal] = useState(null); // { style, script } | { loading: true }
   const openSalonBoardExport = async (s) => {
     setSbModal({ loading: true });
@@ -3850,7 +3834,6 @@ function StyleListTab({ setTab, notify, styles, menus, deleteStyle, setEditingSt
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 11, color: C.sub, fontWeight: 700 }}>No.{styles.length - i}　{s.category === "mens" ? "メンズ" : "レディース"}{s.length ? "・" + s.length : ""}</div>
               <div style={{ fontSize: 14, fontWeight: 800, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.styleName || "(スタイル名未設定)"}</div>
-              {s.couponMenuId && <div style={{ fontSize: 11, color: "#b5548a", marginTop: 2 }}>クーポン: {couponName(s.couponMenuId)}</div>}
               {s.hashtags && s.hashtags.length > 0 && (
                 <div style={{ fontSize: 11, color: C.sub, marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {s.hashtags.map(h => "#" + h).join(" ")}
@@ -3937,7 +3920,6 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
     styleName: editing.styleName || "",
     menuFlags: editing.menuFlags || [],
     menuText: editing.menuText || "",
-    couponMenuId: editing.couponMenuId || "",
     hashtags: editing.hashtags || [],
     modelVolume: editing.modelVolume || "設定しない",
     modelTexture: editing.modelTexture || "設定しない",
@@ -3947,7 +3929,7 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
     modelAge: editing.modelAge || "設定しない",
   } : {
     images: [], category: "ladies", length: "", stylistName: "", stylistComment: "", styleName: "",
-    menuFlags: [], menuText: "", couponMenuId: "", hashtags: [],
+    menuFlags: [], menuText: "", hashtags: [],
     modelVolume: "設定しない", modelTexture: "設定しない", modelThickness: "設定しない", modelCurl: "設定しない", modelFace: "設定しない", modelAge: "設定しない",
   });
   const [hashtagInput, setHashtagInput] = useState("");
@@ -3974,7 +3956,6 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
           styleName: full.styleName || "",
           menuFlags: full.menuFlags || [],
           menuText: full.menuText || "",
-          couponMenuId: full.couponMenuId || "",
           hashtags: full.hashtags || [],
           modelVolume: full.modelVolume || "設定しない",
           modelTexture: full.modelTexture || "設定しない",
@@ -3987,8 +3968,6 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
       }
     })();
   }, [editing && editing.id]);
-
-  const couponMenus = menus.filter(m => m.menuKind === "coupon");
 
   // 画像を3:4に中央クロップし、フル画質(カルテより鮮明)＋一覧用サムネイルの2種を生成
   const processStyleImage = (dataUrl, cb) => {
@@ -4035,11 +4014,44 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
     const t = hashtagInput.trim().replace(/^#/, "");
     if (!t) return;
     if (form.hashtags.includes(t)) { setHashtagInput(""); return; }
+    if (form.hashtags.length >= 20) { notify("ハッシュタグは最大20個までです", "error"); return; }
     setForm(p => ({ ...p, hashtags: [...p.hashtags, t] }));
     setHashtagInput("");
   };
   const removeHashtag = (t) => setForm(p => ({ ...p, hashtags: p.hashtags.filter(x => x !== t) }));
   const toggleMenuFlag = (key) => setForm(p => ({ ...p, menuFlags: p.menuFlags.includes(key) ? p.menuFlags.filter(x => x !== key) : [...p.menuFlags, key] }));
+
+  // 過去のスタイルで使われたスタイリスト名/ハッシュタグを集計し、選ぶだけで再利用できるようにする
+  const stylistNames = useMemo(() => [...new Set(styles.map(s => s.stylistName).filter(Boolean))], [styles]);
+  const tagPool = useMemo(() => {
+    const counts = {};
+    styles.forEach(s => (s.hashtags || []).forEach(t => { counts[t] = (counts[t] || 0) + 1; }));
+    return Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+  }, [styles]);
+  const toggleHashtag = (t) => setForm(p => {
+    if (p.hashtags.includes(t)) return { ...p, hashtags: p.hashtags.filter(x => x !== t) };
+    if (p.hashtags.length >= 20) { notify("ハッシュタグは最大20個までです", "error"); return p; }
+    return { ...p, hashtags: [...p.hashtags, t] };
+  });
+
+  // メニュー内容は「＋」区切りの文字列がそのままSalonBoardへ転記される単一の情報源。
+  // ピッカーは選択中メニュー名をこの文字列から読み取り、タップで追加/削除する
+  const selectedMenuNames = form.menuText ? form.menuText.split("＋").map(s => s.trim()).filter(Boolean) : [];
+  const toggleMenuItem = (name) => {
+    const next = selectedMenuNames.includes(name) ? selectedMenuNames.filter(n => n !== name) : [...selectedMenuNames, name];
+    setForm(p => ({ ...p, menuText: next.join("＋") }));
+  };
+
+  // カルテ詳細にあった「スタイルアップ」(ChatGPTへスタイル名・コメント生成プロンプトを渡す機能)をこちらへ移設。
+  // カルテ側は来店1件のmenus/memoを補足情報にしていたが、こちらはスタイル自体のメニュー内容を使う
+  const generateStyleup = () => {
+    let savedPrompt = "";
+    try { savedPrompt = localStorage.getItem("stylupPrompt") || ""; } catch (e) {}
+    const defaultPrompt = "あなたはプロのライター兼美容師向けSEOライターです。\n\nホットペッパービューティーの「ヘアスタイル掲載ページ」用に、写真からスタイル名とコメントを作成してください。\n\n【目的】\n・人が書いたような自然な文章\n・見た人が「この髪型にしたい」と思う内容\n・美容室集客につながる内容\n・SEO対策、AIO対策を意識\n・ホットペッパービューティーのスタイル掲載で検索されやすい内容\n\n【出力ルール】\n写真を分析し、以下の順番で出力\n\n【スタイル名候補】\n①\n②\n③\n④\n⑤\n⑥\n⑦\n⑧\n⑨\n⑩\n\n【スタイル名条件】\n・30文字以内\n・検索されやすいキーワードを含める\n・髪型、カラー、質感が伝わる\n・ホットペッパー検索を意識\n・実際の美容師が付けそうな自然な名前\n・盛りすぎない\n・同じ表現を繰り返さない\n\nスタイル名候補を10個出した後、「気に入った番号を選んでください」と表示して終了する。コメントはまだ作成しない。\n\nーーーーーーーーーー\n\nユーザーが番号を選んだら、そのスタイル名で完成版を作成する。\n\n出力順\n選ばれたスタイル名\nコメント\n\n【コメント条件】\n・120文字以内\n・写真の質感、艶感、シルエットを自然に表現\n・検索されやすいキーワードを含める\n・読んだ人がやってみたいと思う内容\n・ホットペッパービューティー掲載向け\n・人が書いたような自然な文章\n・絵文字禁止\n・半角記号禁止\n・過剰表現禁止\n・写真から髪の長さ、カラー、質感、デザインを分析して反映\n・ユーザーから補足情報がある場合は反映\n\n重要\n・スタイル名選択前にコメントを作らない\n・選択後は完成版のみ出力\n・余計な説明をしない\n・コピペしやすい形で出力\n・ホットペッパービューティー掲載を前提にする\n・美容室集客を最優先にする\n・写真を必ず分析してスタイル名とコメントに反映する";
+    const prompt = (savedPrompt || defaultPrompt) + "\n\n【補足情報】\n施術内容：" + (form.menuText || "記載なし");
+    try { var el = document.createElement("textarea"); el.value = prompt; document.body.appendChild(el); el.select(); document.execCommand("copy"); document.body.removeChild(el); } catch (e) {}
+    window.location.href = "chatgpt://";
+  };
 
   const save = async () => {
     if (!dataLoaded) return notify("データの読み込みが完了していません。少し待ってから保存してください", "error");
@@ -4047,7 +4059,7 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
     setSaving(true);
     const images = form.images.filter(Boolean);
     const coverImage = form.__coverImage || (editing ? editing.coverImage : null) || null;
-    const payload = { ...form, images, coverImage, couponMenuId: form.couponMenuId ? Number(form.couponMenuId) : null };
+    const payload = { ...form, images, coverImage };
     delete payload.__coverImage;
     if (editing) await updateStyle(editing.id, payload);
     else await addStyle(payload);
@@ -4097,12 +4109,22 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
         {/* スタイリストコメント */}
         <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
           <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 6 }}>スタイリスト名</div>
+          {stylistNames.length > 0 && (
+            <select value="" onChange={e => { if (e.target.value) setForm(p => ({ ...p, stylistName: e.target.value })); }}
+              style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 12px", fontSize: 13, marginBottom: 8, background: "#fff", color: C.sub, outline: "none" }}>
+              <option value="">既存の名前から選択…</option>
+              {stylistNames.map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+          )}
           <input type="text" value={form.stylistName} onChange={e => setForm(p => ({ ...p, stylistName: e.target.value }))}
             style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, marginBottom: 14, outline: "none" }} />
           <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 6 }}>スタイリストコメント</div>
           <textarea value={form.stylistComment} onChange={e => setForm(p => ({ ...p, stylistComment: e.target.value }))} rows={3}
             placeholder="【気に入って頂いたスタイルは、ブックマークをしてご提示ください】〔レイヤーカット/ボブ/ショートボブ...〕"
             style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 13, lineHeight: 1.6, resize: "vertical", outline: "none", fontFamily: "inherit" }} />
+          <button onClick={generateStyleup} style={{ width: "100%", padding: "12px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#5856d6,#7a6848)", color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer", marginTop: 10 }}>
+            スタイルアップ
+          </button>
         </div>
 
         {/* スタイル */}
@@ -4136,26 +4158,40 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
               </button>
             ))}
           </div>
-          <input type="text" value={form.menuText} onChange={e => setForm(p => ({ ...p, menuText: e.target.value }))}
-            placeholder="例：カラー+カラー専用髪質改善トリートメント"
-            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, marginBottom: 14, outline: "none" }} />
-
-          <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 6 }}>クーポン</div>
-          <select value={form.couponMenuId} onChange={e => setForm(p => ({ ...p, couponMenuId: e.target.value }))}
-            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, background: "#fff", outline: "none" }}>
-            <option value="">未設定</option>
-            {couponMenus.map(m => <option key={m.id} value={m.id}>{m.name}（¥{m.price.toLocaleString()}）</option>)}
-          </select>
-          {couponMenus.length === 0 && <div style={{ fontSize: 11, color: C.sub, marginTop: 6 }}>メニュー管理で区分「クーポン」のメニューを作ると、ここで選べるようになります</div>}
+          {menus.length > 0 ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+              {menus.map(m => (
+                <button key={m.id} onClick={() => toggleMenuItem(m.name)}
+                  style={{ padding: "7px 12px", borderRadius: 20, border: selectedMenuNames.includes(m.name) ? "1.5px solid #b5548a" : `1px solid ${C.border}`, background: selectedMenuNames.includes(m.name) ? "#faf0f5" : "#fff", color: selectedMenuNames.includes(m.name) ? "#b5548a" : C.sub, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                  {m.name}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, color: C.sub, marginBottom: 14 }}>登録済みのメニューがありません。メニュー管理から追加してください</div>
+          )}
         </div>
 
         {/* ハッシュタグ */}
         <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
-          <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 8 }}>ハッシュタグ</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <div style={{ fontSize: 12, color: C.sub, fontWeight: 700 }}>ハッシュタグ</div>
+            <div style={{ fontSize: 11, color: C.sub }}>{form.hashtags.length}/20</div>
+          </div>
+          {tagPool.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+              {tagPool.map(t => (
+                <button key={t} onClick={() => toggleHashtag(t)}
+                  style={{ padding: "6px 12px", borderRadius: 20, border: form.hashtags.includes(t) ? "1.5px solid #b5548a" : `1px solid ${C.border}`, background: form.hashtags.includes(t) ? "#faf0f5" : "#fff", color: form.hashtags.includes(t) ? "#b5548a" : C.sub, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                  #{t}
+                </button>
+              ))}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8, marginBottom: form.hashtags.length > 0 ? 10 : 0 }}>
             <input type="text" value={hashtagInput} onChange={e => setHashtagInput(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addHashtag(); } }}
-              placeholder="#なしで入力" style={{ flex: 1, boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 12px", fontSize: 14, outline: "none" }} />
+              placeholder="他のタグを追加(#なしで入力)" style={{ flex: 1, boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 12px", fontSize: 14, outline: "none" }} />
             <button onClick={addHashtag} style={{ padding: "0 18px", borderRadius: 10, border: "none", background: "#b5548a", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>追加</button>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -4682,7 +4718,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.04-d"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.04-e"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
