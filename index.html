@@ -4497,6 +4497,23 @@ function BlogFormTab({ setTab, notify, menus, blogs, editingBlogId, addBlog, upd
     return { ...p, bodyBlocks: arr };
   });
 
+  // ChatGPT/Geminiの回答をそのまま貼り付け→空行区切りで段落ごとに文章ブロックへ自動分割する。
+  // これまでは画像を挟んだ後に1段落ずつコピペし直す必要があったための改善
+  const [showPaste, setShowPaste] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const splitPasteIntoBlocks = () => {
+    const paragraphs = pasteText.split(/\n\s*\n/).map(s => s.trim()).filter(Boolean);
+    if (!paragraphs.length) return;
+    setForm(p => {
+      let blocks = p.bodyBlocks;
+      if (blocks.length === 1 && blocks[0].type === "text" && !blocks[0].text.trim()) blocks = []; // 未入力の初期ブロックは貼り付け後に不要なので除く
+      return { ...p, bodyBlocks: [...blocks, ...paragraphs.map(text => ({ id: newBlockId(), type: "text", text }))] };
+    });
+    notify(`${paragraphs.length}個の文章ブロックに分けました ✓`);
+    setPasteText("");
+    setShowPaste(false);
+  };
+
   // 過去のブログで使われた投稿者名/カテゴリを集計し、選ぶだけで再利用できるようにする(スタイルと同じ発想)
   const authorNames = useMemo(() => [...new Set(blogs.map(b => b.authorName).filter(Boolean))], [blogs]);
   const categoryPool = useMemo(() => [...new Set(blogs.map(b => b.category).filter(Boolean))], [blogs]);
@@ -4602,6 +4619,21 @@ function BlogFormTab({ setTab, notify, menus, blogs, editingBlogId, addBlog, upd
           <div style={{ fontSize: 11, color: C.sub, marginBottom: 10, lineHeight: 1.6 }}>
             SalonBoardと同じく、文章と写真を好きな順番に並べられます。↑↓で並び替え、写真は本文の途中にも挟めます。
           </div>
+          {dataLoaded && (showPaste ? (
+            <div style={{ marginBottom: 12, border: `1.5px solid #e8924a`, borderRadius: 10, padding: 10, background: "#fff8f0" }}>
+              <textarea value={pasteText} onChange={e => setPasteText(e.target.value)} rows={6}
+                placeholder="ChatGPT/Geminiの回答をそのまま貼り付け(空行で区切られた段落ごとに文章ブロックへ分割されます)"
+                style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 10px", fontSize: 13, marginBottom: 8, outline: "none", fontFamily: "inherit" }} />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={splitPasteIntoBlocks} style={{ flex: 1, padding: "9px 0", borderRadius: 8, border: "none", background: "#e8924a", color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>段落ごとに追加</button>
+                <button onClick={() => { setShowPaste(false); setPasteText(""); }} style={{ padding: "9px 16px", borderRadius: 8, border: `1px solid ${C.border}`, background: "#fff", color: C.sub, fontSize: 12, cursor: "pointer" }}>閉じる</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setShowPaste(true)} style={{ width: "100%", padding: "10px 0", borderRadius: 8, border: "1.5px solid #e8924a", background: "#fff3e8", color: "#e8924a", fontWeight: 700, fontSize: 12, cursor: "pointer", marginBottom: 12 }}>
+              📋 AIの回答をまとめて貼り付け→段落ごとに分割
+            </button>
+          ))}
           {!dataLoaded ? (
             <div style={{ fontSize: 12, color: C.sub, padding: "8px 0" }}>データを読み込み中…（完了するまで変更できません）</div>
           ) : (
@@ -5142,7 +5174,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.04-n"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.04-o"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
