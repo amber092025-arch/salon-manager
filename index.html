@@ -3749,8 +3749,21 @@ function buildBlogSalonBoardScript(b) {
     '    R["写真"+(ii+1)+"確定"]=!!confirmBtn;',
     '    if(confirmBtn){confirmBtn.click();await sleep(1000);}',
     '  }',
-    '  var lines=Object.keys(R).map(function(k){return k+": "+(R[k]===null?"(対象外)":R[k]?"○":"×");});',
-    '  alert("入力結果\\n"+lines.join("\\n")+"\\n\\n※画像が意図した位置に入っているか必ず確認してください。内容を確認して「確認する」ボタンを押してください。");',
+    '  var t1=q("textarea#blogContents1");',
+    '  R["文章1の実際の値"]=t1?("["+t1.value.slice(0,20)+"]"):"(要素なし)";',
+    '  var ceList=[];',
+    '  document.querySelectorAll("[contenteditable], [contenteditable=true]").forEach(function(el){',
+    '    if(ceList.length>=20)return;',
+    '    ceList.push(el.tagName.toLowerCase()+(el.id?("#"+el.id):"")+(el.className?("."+String(el.className).replace(/\\s+/g,".")):""));',
+    '  });',
+    '  var lines=Object.keys(R).map(function(k){return k+": "+(R[k]===null?"(対象外)":R[k]===true?"○":R[k]===false?"×":R[k]);});',
+    '  var report="■入力結果\\n"+lines.join("\\n")+"\\n\\n■contenteditable要素(見た目のプレビューが別仕組みの場合の手がかり)\\n"+(ceList.length?ceList.join("\\n"):"(見つかりませんでした)");',
+    '  var ta=document.createElement("textarea");',
+    '  ta.value=report;',
+    '  ta.style.cssText="position:fixed;top:8px;left:8px;right:8px;height:75vh;z-index:999999;font-size:11px;background:#fff;border:3px solid #ff3b30;padding:8px;box-sizing:border-box;";',
+    '  document.body.appendChild(ta);',
+    '  ta.focus();ta.select();',
+    '  alert("画像が意図した位置に入っているか確認してください。文章欄の診断結果もページ上部に表示したので、全部選択してコピーし、Claudeに貼り付けてください。");',
     '}catch(err){alert("エラー: "+err.message);done(false);}',
     '})();',
   ].join("\n");
@@ -5207,7 +5220,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.04-q"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.04-r"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
