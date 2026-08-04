@@ -3785,7 +3785,7 @@ function buildStyleSalonBoardScript(s) {
     '    R[label+"確定"]=!!sub;',
     '    if(sub)sub.click();',
     '    await sleep(1200);',
-    '    R[label+"種別"]=await waitSetSelectByLabel("select#"+classSel,typeLabel);',
+    '    R[label+"種別"]=await waitSetSelectByLabel(\'select[name="frmStyleEditStyleInfoDto.\'+classSel+\'"]\',typeLabel);',
     '    await sleep(800);',
     '  }',
     '  var lines=Object.keys(R).map(function(k){return k+": "+(R[k]?"○":"×");});',
@@ -4035,8 +4035,10 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
   });
 
   // メニュー内容は「＋」区切りの文字列がそのままSalonBoardへ転記される単一の情報源。
-  // ピッカーは選択中メニュー名をこの文字列から読み取り、タップで追加/削除する
-  const selectedMenuNames = form.menuText ? form.menuText.split("＋").map(s => s.trim()).filter(Boolean) : [];
+  // ピッカー導入前に自由入力されていたテキストが残っているケースがあるため、実在するメニュー名と
+  // 完全一致する部分だけを「選択中」として扱う(一致しない古い文言はタップ操作をした時点で残らない)
+  const menuNameSet = useMemo(() => new Set(menus.map(m => m.name)), [menus]);
+  const selectedMenuNames = form.menuText ? form.menuText.split("＋").map(s => s.trim()).filter(Boolean).filter(n => menuNameSet.has(n)) : [];
   const toggleMenuItem = (name) => {
     const next = selectedMenuNames.includes(name) ? selectedMenuNames.filter(n => n !== name) : [...selectedMenuNames, name];
     setForm(p => ({ ...p, menuText: next.join("＋") }));
@@ -4718,7 +4720,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.04-e"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.04-f"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
