@@ -3724,6 +3724,7 @@ function buildBlogSalonBoardScript(b) {
     'function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}',
     'async function waitFor(sel,to){to=to||8000;var end=Date.now()+to;while(Date.now()<end){var el=q(sel);if(el)return el;await sleep(150);}return null;}',
     'function setValue(sel,v){var el=q(sel);if(!el)return false;el.value=v||"";el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));return true;}',
+    'async function setValueWait(sel,v,to){var el=await waitFor(sel,to||5000);if(!el)return false;el.value=v||"";el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));return true;}',
     'function setSelectByLabel(sel,label){var el=q(sel);if(!el||!label)return false;for(var i=0;i<el.options.length;i++){var o=el.options[i];if(o.textContent.trim()===label||o.textContent.includes(label)){el.value=o.value;el.dispatchEvent(new Event("change",{bubbles:true}));return true;}}return false;}',
     'function selectFirstNonBlank(sel){var el=q(sel);if(!el)return false;for(var i=0;i<el.options.length;i++){if(el.options[i].value){el.value=el.options[i].value;el.dispatchEvent(new Event("change",{bubbles:true}));return true;}}return false;}',
     'function b64toFile(b64,name,mime){var bin=atob(b64);var arr=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);return new File([arr],name||"blog.jpg",{type:mime||"image/jpeg"});}',
@@ -3735,17 +3736,18 @@ function buildBlogSalonBoardScript(b) {
     '  R["タイトル"]=setValue("input#blogTitle",D.title);',
     '  R["投稿者"]=selectFirstNonBlank("select#stylistId");',
     '  R["カテゴリ"]=D.category?setSelectByLabel("select#blogCategoryCd",D.category):null;',
-    '  for(var ti=0;ti<5;ti++){R["文章"+(ti+1)]=setValue("textarea#blogContents"+(ti+1),D.texts[ti]||"");}',
-    '  if(D.images.length){',
-    '    var uploadBtn=findButtonByText("画像アップロード");',
-    '    R["画像アップロードボタン"]=!!uploadBtn;',
-    '    if(uploadBtn){uploadBtn.click();await sleep(600);}',
-    '  }',
+    '  for(var ti=0;ti<5;ti++){R["文章"+(ti+1)]=await setValueWait("textarea#blogContents"+(ti+1),D.texts[ti]||"");}',
     '  for(var ii=0;ii<D.images.length;ii++){',
     '    var pic=D.images[ii];',
     '    if(!pic)continue;',
+    '    var uploadBtn=findButtonByText("画像アップロード");',
+    '    R["写真"+(ii+1)+"アップロードボタン"]=!!uploadBtn;',
+    '    if(uploadBtn){uploadBtn.click();await sleep(600);}',
     '    R["写真"+(ii+1)+"挿入"]=await injectFile("input#sendFile",b64toFile(pic.b64,"blog"+(ii+1)+".jpg",pic.mime));',
-    '    await sleep(1500);',
+    '    await sleep(1000);',
+    '    var confirmBtn=findButtonByText("登録する");',
+    '    R["写真"+(ii+1)+"確定"]=!!confirmBtn;',
+    '    if(confirmBtn){confirmBtn.click();await sleep(1000);}',
     '  }',
     '  var lines=Object.keys(R).map(function(k){return k+": "+(R[k]===null?"(対象外)":R[k]?"○":"×");});',
     '  alert("入力結果\\n"+lines.join("\\n")+"\\n\\n※画像が意図した位置に入っているか必ず確認してください。内容を確認して「確認する」ボタンを押してください。");',
@@ -5205,7 +5207,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.04-p"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.04-q"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
