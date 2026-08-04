@@ -3765,7 +3765,28 @@ function buildBlogSalonBoardScript(b) {
     '      }',
     '    }',
     '    var edFinal=q(".nicEdit-main");',
-    '    setValue("textarea#blogContents",edFinal.innerText||edFinal.textContent||"");',
+    '    var imgs=Array.prototype.slice.call(edFinal.querySelectorAll("img"));',
+    '    var frag=document.createDocumentFragment();',
+    '    var imgIdx=0;',
+    '    for(var ri=0;ri<D.blocks.length;ri++){',
+    '      var rb=D.blocks[ri];',
+    '      if(ri>0)frag.appendChild(document.createElement("br"));',
+    '      if(rb.type==="text"){',
+    '        var rlines=(rb.text||"").split("\\n");',
+    '        for(var li=0;li<rlines.length;li++){',
+    '          if(li>0)frag.appendChild(document.createElement("br"));',
+    '          if(rlines[li])frag.appendChild(document.createTextNode(rlines[li]));',
+    '        }',
+    '      } else if(imgs[imgIdx]){',
+    '        frag.appendChild(imgs[imgIdx]);',
+    '        imgIdx++;',
+    '      }',
+    '    }',
+    '    edFinal.innerHTML="";',
+    '    edFinal.appendChild(frag);',
+    '    edFinal.dispatchEvent(new Event("input",{bubbles:true}));',
+    '    R["並び順を最後に組み直し"]=(imgIdx===imgs.length);',
+    '    setValue("textarea#blogContents",edFinal.innerHTML||"");',
     '  }',
     '  var lines=Object.keys(R).map(function(k){var v=R[k];return k+": "+(v===null?"(対象外)":typeof v==="number"?v:v?"○":"×");});',
     '  alert("入力結果\\n"+lines.join("\\n")+"\\n\\n※文章と写真の位置関係を必ず確認してください。内容を確認して「確認する」ボタンを押してください。");',
@@ -5225,7 +5246,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.04-z"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.05-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
