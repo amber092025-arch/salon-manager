@@ -3691,26 +3691,26 @@ const SB_CURL_CODE = {"なし":"1","少し":"2","強い":"3"};
 // 画像の挿入操作(#sendFileへの投入で正しい枠に入るか)は実機未確認のため推測込み、結果はチェックリストで報告する。
 function buildBlogSalonBoardScript(b) {
   const blocks = b.bodyBlocks || [];
-  const segments = [];
-  let cur = [];
-  const flush = () => { segments.push({ type: "text", text: cur.join("\n") }); cur = []; };
+  // nicEdit要素は実機診断で1つのみと判明。画像アップロードボタンも1つだけで、
+  // SalonBoard側はおそらく「現在のカーソル位置」に画像を挿入する仕組みのため、
+  // ブロックの並び順どおりに、文章を追記→カーソルを末尾へ→画像アップロード、を繰り返す
+  const preparedBlocks = [];
+  let imgCount = 0;
   blocks.forEach(blk => {
-    if (blk.type === "text") { if ((blk.text || "").trim()) cur.push(blk.text); }
-    else { flush(); segments.push({ type: "image", image: blk.image }); }
-  });
-  flush();
-  const textSegs = segments.filter(s => s.type === "text").map(s => s.text);
-  while (textSegs.length < 5) textSegs.push("");
-  const images = segments.filter(s => s.type === "image").slice(0, 4).map(s => {
-    const m = (s.image || "").match(/^data:([^;]+);base64,(.+)$/);
-    return m ? { b64: m[2], mime: m[1] } : null;
+    if (blk.type === "image") {
+      imgCount++;
+      if (imgCount > 4) return; // SalonBoardは画像4枚まで
+      const m = (blk.image || "").match(/^data:([^;]+);base64,(.+)$/);
+      if (m) preparedBlocks.push({ type: "image", b64: m[2], mime: m[1] });
+    } else if ((blk.text || "").trim()) {
+      preparedBlocks.push({ type: "text", text: blk.text });
+    }
   });
 
   const D = {
     title: b.title || "",
     category: b.category || "",
-    texts: textSegs.slice(0, 5),
-    images,
+    blocks: preparedBlocks,
   };
 
   return [
@@ -3724,70 +3724,45 @@ function buildBlogSalonBoardScript(b) {
     'function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}',
     'async function waitFor(sel,to){to=to||8000;var end=Date.now()+to;while(Date.now()<end){var el=q(sel);if(el)return el;await sleep(150);}return null;}',
     'function setValue(sel,v){var el=q(sel);if(!el)return false;el.value=v||"";el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));return true;}',
-    'async function setValueWait(sel,v,to){var el=await waitFor(sel,to||5000);if(!el)return false;el.value=v||"";el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));return true;}',
-    'function escapeHtml(s){return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}',
     'function setSelectByLabel(sel,label){var el=q(sel);if(!el||!label)return false;for(var i=0;i<el.options.length;i++){var o=el.options[i];if(o.textContent.trim()===label||o.textContent.includes(label)){el.value=o.value;el.dispatchEvent(new Event("change",{bubbles:true}));return true;}}return false;}',
     'function selectFirstNonBlank(sel){var el=q(sel);if(!el)return false;for(var i=0;i<el.options.length;i++){if(el.options[i].value){el.value=el.options[i].value;el.dispatchEvent(new Event("change",{bubbles:true}));return true;}}return false;}',
     'function b64toFile(b64,name,mime){var bin=atob(b64);var arr=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);return new File([arr],name||"blog.jpg",{type:mime||"image/jpeg"});}',
     'async function injectFile(inputSel,file){for(var attempt=0;attempt<2;attempt++){var input=await waitFor(inputSel);if(!input)return false;var dt=new DataTransfer();dt.items.add(file);input.files=dt.files;input.dispatchEvent(new Event("change",{bubbles:true}));await sleep(400);if(input.files&&input.files.length>0)return true;await sleep(500);}return false;}',
     'function findButtonByText(t){var els=document.querySelectorAll("button,input[type=button],a");for(var i=0;i<els.length;i++){var lbl=(els[i].textContent||els[i].value||"").trim();if(lbl.includes(t))return els[i];}return null;}',
+    'function appendTextToEditor(el,text){var lines=(text||"").split("\\n");lines.forEach(function(line,i){if(i>0)el.appendChild(document.createElement("br"));if(line)el.appendChild(document.createTextNode(line));});}',
+    'function placeCursorAtEnd(el){try{el.focus();var range=document.createRange();range.selectNodeContents(el);range.collapse(false);var sel=window.getSelection();sel.removeAllRanges();sel.addRange(range);}catch(e){}}',
     'try{',
     '  if(!location.hostname.includes("salonboard.com")){alert("SALON BOARDのブログ編集 入力画面で実行してください");done(false);return;}',
     '  done(true);',
     '  R["タイトル"]=setValue("input#blogTitle",D.title);',
     '  R["投稿者"]=selectFirstNonBlank("select#stylistId");',
     '  R["カテゴリ"]=D.category?setSelectByLabel("select#blogCategoryCd",D.category):null;',
-    '  var editors=document.querySelectorAll(".nicEdit-main");',
-    '  R["nicEdit要素数"]=editors.length;',
-    '  if(editors.length>=5){',
-    '    for(var ti=0;ti<5;ti++){',
-    '      var html=escapeHtml(D.texts[ti]||"").replace(/\\n/g,"<br>");',
-    '      editors[ti].innerHTML=html;',
-    '      editors[ti].dispatchEvent(new Event("input",{bubbles:true}));',
-    '      setValue("textarea#blogContents"+(ti+1),D.texts[ti]||"");',
-    '      R["文章"+(ti+1)]=true;',
+    '  var editor=q(".nicEdit-main");',
+    '  R["nicEdit要素"]=!!editor;',
+    '  if(editor){',
+    '    for(var bi=0;bi<D.blocks.length;bi++){',
+    '      var blk=D.blocks[bi];',
+    '      if(blk.type==="text"){',
+    '        appendTextToEditor(editor,blk.text);',
+    '        editor.dispatchEvent(new Event("input",{bubbles:true}));',
+    '        R["ブロック"+(bi+1)+"文章"]=true;',
+    '      } else {',
+    '        placeCursorAtEnd(editor);',
+    '        var uploadBtn=findButtonByText("画像アップロード");',
+    '        R["ブロック"+(bi+1)+"画像アップロードボタン"]=!!uploadBtn;',
+    '        if(uploadBtn){uploadBtn.click();await sleep(600);}',
+    '        R["ブロック"+(bi+1)+"画像挿入"]=await injectFile("input#sendFile",b64toFile(blk.b64,"blog"+(bi+1)+".jpg",blk.mime));',
+    '        await sleep(1000);',
+    '        var confirmBtn=findButtonByText("登録する");',
+    '        R["ブロック"+(bi+1)+"画像確定"]=!!confirmBtn;',
+    '        if(confirmBtn){confirmBtn.click();await sleep(1200);}',
+    '        placeCursorAtEnd(editor);',
+    '      }',
     '    }',
-    '  } else if(editors.length>=1){',
-    '    var combined=D.texts.filter(function(t){return t;}).join("\\n\\n");',
-    '    var html2=escapeHtml(combined).replace(/\\n/g,"<br>");',
-    '    editors[0].innerHTML=html2;',
-    '    editors[0].dispatchEvent(new Event("input",{bubbles:true}));',
-    '    setValue("textarea#blogContents",combined);',
-    '    R["文章(1つにまとめて投入)"]=true;',
-    '  } else {',
-    '    R["nicEdit要素"]=false;',
+    '    setValue("textarea#blogContents",editor.innerText||editor.textContent||"");',
     '  }',
-    '  for(var ii=0;ii<D.images.length;ii++){',
-    '    var pic=D.images[ii];',
-    '    if(!pic)continue;',
-    '    var uploadBtn=findButtonByText("画像アップロード");',
-    '    R["写真"+(ii+1)+"アップロードボタン"]=!!uploadBtn;',
-    '    if(uploadBtn){uploadBtn.click();await sleep(600);}',
-    '    R["写真"+(ii+1)+"挿入"]=await injectFile("input#sendFile",b64toFile(pic.b64,"blog"+(ii+1)+".jpg",pic.mime));',
-    '    await sleep(1000);',
-    '    var confirmBtn=findButtonByText("登録する");',
-    '    R["写真"+(ii+1)+"確定"]=!!confirmBtn;',
-    '    if(confirmBtn){confirmBtn.click();await sleep(1000);}',
-    '  }',
-    '  var upBtns=[];',
-    '  document.querySelectorAll("button,input[type=button],a").forEach(function(el){',
-    '    var t=(el.textContent||el.value||"").trim();',
-    '    if(t.includes("画像アップロード"))upBtns.push(el);',
-    '  });',
-    '  R["画像アップロードボタン総数"]=upBtns.length;',
-    '  var upInfo=upBtns.map(function(el,i){',
-    '    var parent=el.closest("div,td,li,section")||el.parentElement;',
-    '    var ctx=parent?parent.outerHTML.replace(/\\s+/g," ").slice(0,300):"(親要素なし)";',
-    '    return "["+i+"] "+ctx;',
-    '  });',
     '  var lines=Object.keys(R).map(function(k){var v=R[k];return k+": "+(v===null?"(対象外)":typeof v==="number"?v:v?"○":"×");});',
-    '  var report="■入力結果\\n"+lines.join("\\n")+"\\n\\n■画像アップロードボタン周辺の構造(写真が正しい位置に入らない原因調査用)\\n"+(upInfo.length?upInfo.join("\\n\\n"):"(見つかりませんでした)");',
-    '  var ta=document.createElement("textarea");',
-    '  ta.value=report;',
-    '  ta.style.cssText="position:fixed;top:8px;left:8px;right:8px;height:75vh;z-index:999999;font-size:10px;background:#fff;border:3px solid #ff3b30;padding:8px;box-sizing:border-box;";',
-    '  document.body.appendChild(ta);',
-    '  ta.focus();ta.select();',
-    '  alert("文章と写真の位置関係を必ず確認してください。診断結果もページ上部に表示したので、全部選択してコピーし、Claudeに貼り付けてください。");',
+    '  alert("入力結果\\n"+lines.join("\\n")+"\\n\\n※文章と写真の位置関係を必ず確認してください。内容を確認して「確認する」ボタンを押してください。");',
     '}catch(err){alert("エラー: "+err.message);done(false);}',
     '})();',
   ].join("\n");
@@ -5244,7 +5219,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.04-u"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.04-v"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
