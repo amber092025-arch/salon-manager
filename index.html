@@ -1009,7 +1009,7 @@ function App() {
       )}
       {/* Content（このアプリの唯一のスクロール領域。下部ナビをposition:fixedにせず、フレックスの通常フローで常に最下部に来るようにする） */}
       <div style={{ padding: "0 0 8px", flex: 1, minHeight: 0, overflowY: "auto" }}>
-        {tab === "home" && <HomeTab visits={visits} customers={customers} appointments={appointments} menus={menus} setTab={setTab} products={products} purchaseCosts={purchaseCosts} purchaseCategories={purchaseCategories} monthlyGoals={monthlyGoals} bizHours={bizHours} closedDaysOfWeek={closedDaysOfWeek} personalHolidays={personalHolidays} />}
+        {tab === "home" && <HomeTab visits={visits} customers={customers} appointments={appointments} menus={menus} setTab={setTab} products={products} purchaseCosts={purchaseCosts} purchaseCategories={purchaseCategories} monthlyGoals={monthlyGoals} bizHours={bizHours} closedDaysOfWeek={closedDaysOfWeek} personalHolidays={personalHolidays} openKarteDetail={openKarteDetail} />}
         {tab === "customers" && <CustomersTab customers={customers} setCustomers={setCustomers} visits={visits} setVisits={setVisitsW} menus={menus} products={products} notify={notify} addCustomer={addCustomer} openKarteDetail={openKarteDetail} setTab={setTab} setPendingCustomerId={setPendingCustomerId} />}
         {tab === "visit" && <VisitTab customers={customers} menus={menus} products={products} visits={visits} setVisits={setVisitsW} setProducts={setProductsW} notify={notify} setTab={setTab} setCustomers={setCustomers} />}
         {tab === "analytics" && <AnalyticsTab visits={visits} customers={customers} menus={menus} products={products} appointments={appointments} purchaseCosts={purchaseCosts} purchaseCategories={purchaseCategories} />}
@@ -1073,7 +1073,7 @@ function App() {
   );
 }
 
-function HomeTab({ visits, customers, appointments, menus, setTab, products, purchaseCosts, purchaseCategories, monthlyGoals, bizHours, closedDaysOfWeek, personalHolidays }) {
+function HomeTab({ visits, customers, appointments, menus, setTab, products, purchaseCosts, purchaseCategories, monthlyGoals, bizHours, closedDaysOfWeek, personalHolidays, openKarteDetail }) {
   const now = new Date();
   const mStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
 
@@ -1149,7 +1149,8 @@ function HomeTab({ visits, customers, appointments, menus, setTab, products, pur
           {unpaidVisits.sort((a,b) => a.date.localeCompare(b.date)).map(v => {
             const c = customers.find(x => x.id === v.customerId);
             return (
-              <div key={v.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: "1px solid #ffd0d0" }}>
+              <div key={v.id} onClick={() => openKarteDetail && openKarteDetail(v, c, "home")}
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: "1px solid #ffd0d0", cursor: openKarteDetail ? "pointer" : "default" }}>
                 <div>
                   <span style={{ fontSize: 13, fontWeight: 700, color: "#2a2218" }}>{c ? c.name : "不明"} 様</span>
                   <span style={{ fontSize: 12, color: "#9a9088", marginLeft: 8 }}>{v.date} {v.time}</span>
@@ -4139,8 +4140,11 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
           )}
           <input type="text" value={form.stylistName} onChange={e => setForm(p => ({ ...p, stylistName: e.target.value }))}
             style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, marginBottom: 14, outline: "none" }} />
-          <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 6 }}>スタイリストコメント</div>
-          <textarea value={form.stylistComment} onChange={e => setForm(p => ({ ...p, stylistComment: e.target.value }))} rows={3}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ fontSize: 12, color: C.sub, fontWeight: 700 }}>スタイリストコメント</div>
+            <div style={{ fontSize: 11, color: form.stylistComment.length >= 120 ? "#d9534f" : C.sub }}>{form.stylistComment.length}/120</div>
+          </div>
+          <textarea value={form.stylistComment} onChange={e => setForm(p => ({ ...p, stylistComment: e.target.value.slice(0, 120) }))} rows={3}
             placeholder="【気に入って頂いたスタイルは、ブックマークをしてご提示ください】〔レイヤーカット/ボブ/ショートボブ...〕"
             style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 13, lineHeight: 1.6, resize: "vertical", outline: "none", fontFamily: "inherit" }} />
           <div style={{ fontSize: 11, color: C.sub, marginTop: 10, marginBottom: 6 }}>スタイルアップ(生成プロンプトをコピーして起動)</div>
@@ -4156,7 +4160,10 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
 
         {/* スタイル */}
         <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
-          <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 6 }}>スタイル名 *</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ fontSize: 12, color: C.sub, fontWeight: 700 }}>スタイル名 *</div>
+            <div style={{ fontSize: 11, color: form.styleName.length >= 30 ? "#d9534f" : C.sub }}>{form.styleName.length}/30</div>
+          </div>
           <input type="text" value={form.styleName} onChange={e => setForm(p => ({ ...p, styleName: e.target.value }))} maxLength={30}
             placeholder="例：オリーブカラー×カラー専用髪質改善トリートメント"
             style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, marginBottom: 14, outline: "none" }} />
@@ -4765,7 +4772,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.04-i"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.04-k"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
