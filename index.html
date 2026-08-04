@@ -3736,7 +3736,7 @@ function buildStyleSalonBoardScript(s) {
     'function setRadio(name,val){if(!val)return false;var r=document.querySelector(\'input[name="\'+name+\'"][value="\'+val+\'"]\');if(r){r.checked=true;r.dispatchEvent(new Event("change",{bubbles:true}));return true;}return false;}',
     'async function setRadioWait(name,val,to){if(!val)return false;var r=await waitFor(\'input[name="\'+name+\'"][value="\'+val+\'"]\',to||5000);if(!r)return false;r.checked=true;r.dispatchEvent(new Event("change",{bubbles:true}));return true;}',
     'function b64toFile(b64,name,mime){var bin=atob(b64);var arr=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);return new File([arr],name||"photo.jpg",{type:mime||"image/jpeg"});}',
-    'async function injectFile(inputSel,file){var input=await waitFor(inputSel);if(!input)return false;var dt=new DataTransfer();dt.items.add(file);input.files=dt.files;input.dispatchEvent(new Event("change",{bubbles:true}));return true;}',
+    'async function injectFile(inputSel,file){for(var attempt=0;attempt<2;attempt++){var input=await waitFor(inputSel);if(!input)return false;var dt=new DataTransfer();dt.items.add(file);input.files=dt.files;input.dispatchEvent(new Event("change",{bubbles:true}));await sleep(300);if(input.files&&input.files.length>0)return true;await sleep(500);}return false;}',
     'try{',
     '  if(!location.hostname.includes("salonboard.com")){alert("SALON BOARDのスタイル登録画面で実行してください");done(false);return;}',
     '  done(true);',
@@ -3775,10 +3775,10 @@ function buildStyleSalonBoardScript(s) {
     '  for(var pi=0;pi<slots.length;pi++){',
     '    var slotName=slots[pi][0],label=slots[pi][1],classSel=slots[pi][2],typeLabel=slots[pi][3],picD=D.imgs[pi];',
     '    if(!picD)continue;',
-    '    var trg=q("#"+slotName+"_PC_NEW_NO_PHOTO, img#"+slotName+"_IMG");',
+    '    var trg=await waitFor("#"+slotName+"_PC_NEW_NO_PHOTO, img#"+slotName+"_IMG",4000);',
     '    R[label+"枠"]=!!trg;',
     '    if(trg)trg.click();',
-    '    await sleep(600);',
+    '    await sleep(1000);',
     '    R[label+"挿入"]=await injectFile(\'input#formFile, input[name="formFile"], input.jscImageUploaderModalInput\',b64toFile(picD.b64,"photo"+(pi+1)+".jpg",picD.mime));',
     '    await sleep(1200);',
     '    var sub=q(".jscImageUploaderModalSubmitButton, .imageUploaderModalSubmitButton");',
@@ -4043,6 +4043,20 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
     const next = selectedMenuNames.includes(name) ? selectedMenuNames.filter(n => n !== name) : [...selectedMenuNames, name];
     setForm(p => ({ ...p, menuText: next.join("＋") }));
   };
+  // メニューをカテゴリごとにまとめ、選択済みがあるカテゴリだけ初期状態で開いておく(見やすさ重視のプルダウン化)
+  const menusByCategory = useMemo(() => {
+    const groups = {};
+    menus.forEach(m => { const cat = m.category || "その他"; (groups[cat] = groups[cat] || []).push(m); });
+    return groups;
+  }, [menus]);
+  const [expandedCats, setExpandedCats] = useState(() => {
+    const init = {};
+    Object.keys(menusByCategory).forEach(cat => {
+      init[cat] = menusByCategory[cat].some(m => selectedMenuNames.includes(m.name));
+    });
+    return init;
+  });
+  const toggleCategoryOpen = (cat) => setExpandedCats(p => ({ ...p, [cat]: !p[cat] }));
 
   // カルテ詳細にあった「スタイルアップ」(ChatGPTへスタイル名・コメント生成プロンプトを渡す機能)をこちらへ移設。
   // カルテ側は来店1件のmenus/memoを補足情報にしていたが、こちらはスタイル自体のメニュー内容を使う
@@ -4161,13 +4175,33 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
             ))}
           </div>
           {menus.length > 0 ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
-              {menus.map(m => (
-                <button key={m.id} onClick={() => toggleMenuItem(m.name)}
-                  style={{ padding: "7px 12px", borderRadius: 20, border: selectedMenuNames.includes(m.name) ? "1.5px solid #b5548a" : `1px solid ${C.border}`, background: selectedMenuNames.includes(m.name) ? "#faf0f5" : "#fff", color: selectedMenuNames.includes(m.name) ? "#b5548a" : C.sub, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
-                  {m.name}
-                </button>
-              ))}
+            <div style={{ marginBottom: 14 }}>
+              {Object.keys(menusByCategory).map(cat => {
+                const items = menusByCategory[cat];
+                const selCount = items.filter(m => selectedMenuNames.includes(m.name)).length;
+                const isOpen = !!expandedCats[cat];
+                return (
+                  <div key={cat} style={{ border: `1px solid ${C.border}`, borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
+                    <button onClick={() => toggleCategoryOpen(cat)}
+                      style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: "#faf7f2", border: "none", cursor: "pointer" }}>
+                      <span style={{ fontSize: 13, fontWeight: 800, color: C.text }}>
+                        {cat}{selCount > 0 && <span style={{ color: "#b5548a", marginLeft: 6 }}>({selCount})</span>}
+                      </span>
+                      <span style={{ fontSize: 11, color: C.sub, transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>▼</span>
+                    </button>
+                    {isOpen && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: 12 }}>
+                        {items.map(m => (
+                          <button key={m.id} onClick={() => toggleMenuItem(m.name)}
+                            style={{ padding: "7px 12px", borderRadius: 20, border: selectedMenuNames.includes(m.name) ? "1.5px solid #b5548a" : `1px solid ${C.border}`, background: selectedMenuNames.includes(m.name) ? "#faf0f5" : "#fff", color: selectedMenuNames.includes(m.name) ? "#b5548a" : C.sub, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                            {m.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <div style={{ fontSize: 11, color: C.sub, marginBottom: 14 }}>登録済みのメニューがありません。メニュー管理から追加してください</div>
@@ -4720,7 +4754,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.04-f"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.04-g"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
