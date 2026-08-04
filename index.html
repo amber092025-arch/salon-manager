@@ -3727,7 +3727,7 @@ function buildBlogSalonBoardScript(b) {
     'function setSelectByLabel(sel,label){var el=q(sel);if(!el||!label)return false;for(var i=0;i<el.options.length;i++){var o=el.options[i];if(o.textContent.trim()===label||o.textContent.includes(label)){el.value=o.value;el.dispatchEvent(new Event("change",{bubbles:true}));return true;}}return false;}',
     'function selectFirstNonBlank(sel){var el=q(sel);if(!el)return false;for(var i=0;i<el.options.length;i++){if(el.options[i].value){el.value=el.options[i].value;el.dispatchEvent(new Event("change",{bubbles:true}));return true;}}return false;}',
     'function b64toFile(b64,name,mime){var bin=atob(b64);var arr=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);return new File([arr],name||"blog.jpg",{type:mime||"image/jpeg"});}',
-    'async function injectFile(inputSel,file){for(var attempt=0;attempt<2;attempt++){var input=await waitFor(inputSel);if(!input)return false;var dt=new DataTransfer();dt.items.add(file);input.files=dt.files;input.dispatchEvent(new Event("change",{bubbles:true}));await sleep(400);if(input.files&&input.files.length>0)return true;await sleep(500);}return false;}',
+    'async function injectFile(inputSel,file){for(var attempt=0;attempt<2;attempt++){var input=await waitFor(inputSel);if(!input)return false;input.value="";var dt=new DataTransfer();dt.items.add(file);input.files=dt.files;input.dispatchEvent(new Event("change",{bubbles:true}));await sleep(400);if(input.files&&input.files.length>0)return true;await sleep(500);}return false;}',
     'function findButtonByText(t){var els=document.querySelectorAll("button,input[type=button],a");for(var i=0;i<els.length;i++){var lbl=(els[i].textContent||els[i].value||"").trim();if(lbl.includes(t))return els[i];}return null;}',
     'function appendTextToEditor(el,text){var lines=(text||"").split("\\n");lines.forEach(function(line,i){if(i>0)el.appendChild(document.createElement("br"));if(line)el.appendChild(document.createTextNode(line));});}',
     'function placeCursorAtEnd(el){try{el.focus();var range=document.createRange();range.selectNodeContents(el);range.collapse(false);var sel=window.getSelection();sel.removeAllRanges();sel.addRange(range);}catch(e){}}',
@@ -3750,12 +3750,12 @@ function buildBlogSalonBoardScript(b) {
     '        placeCursorAtEnd(editor);',
     '        var uploadBtn=findButtonByText("画像アップロード");',
     '        R["ブロック"+(bi+1)+"画像アップロードボタン"]=!!uploadBtn;',
-    '        if(uploadBtn){uploadBtn.click();await sleep(600);}',
+    '        if(uploadBtn){uploadBtn.click();await sleep(900);}',
     '        R["ブロック"+(bi+1)+"画像挿入"]=await injectFile("input#sendFile",b64toFile(blk.b64,"blog"+(bi+1)+".jpg",blk.mime));',
-    '        await sleep(1000);',
+    '        await sleep(1200);',
     '        var confirmBtn=findButtonByText("登録する");',
     '        R["ブロック"+(bi+1)+"画像確定"]=!!confirmBtn;',
-    '        if(confirmBtn){confirmBtn.click();await sleep(1200);}',
+    '        if(confirmBtn){confirmBtn.click();await sleep(2200);}',
     '        placeCursorAtEnd(editor);',
     '      }',
     '    }',
@@ -5219,7 +5219,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.04-v"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.04-w"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
