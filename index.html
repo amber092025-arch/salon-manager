@@ -3951,18 +3951,39 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
     modelVolume: "設定しない", modelTexture: "設定しない", modelThickness: "設定しない", modelCurl: "設定しない", modelFace: "設定しない", modelAge: "設定しない",
   });
   const [hashtagInput, setHashtagInput] = useState("");
-  const [imgLoaded, setImgLoaded] = useState(!editing); // 新規は既存画像がないので最初から編集可
+  const [dataLoaded, setDataLoaded] = useState(!editing); // 新規は既存データがないので最初から編集可。編集時はstyles一覧が軽量列のみ(id,style_name,category,length,coupon_menu_id,hashtags,sort_order,created_at,cover_image)しか持たないため、写真だけでなくコメント/メニュー/モデル情報等もこのフラグで全件読み込みするまで待つ
   const [saving, setSaving] = useState(false);
   const fileRefs = [useRef(), useRef(), useRef()];
 
-  // 編集時のみ、この1件分の写真を単発取得(起動時の一括読込はしない・カルテ/メニュー写真と同じ方針)
+  // 編集時のみ、この1件分をフル取得(起動時の一括読込はしない・カルテ/メニュー写真と同じ方針)。
+  // 一覧のstyles配列は軽量列のみのため、ここで select("*") しないとコメント/メニュー内容/モデル情報等が
+  // 空のまま保存され、既存データを消してしまう(実際に発生した不具合の原因)
   useEffect(() => {
     if (!editing) return;
     (async () => {
-      const r = await sbRetry(() => sb.from("styles").select("id,images").eq("id", editing.id));
+      const r = await sbRetry(() => sb.from("styles").select("*").eq("id", editing.id));
       if (!r.error && r.data && r.data[0]) {
-        setForm(p => ({ ...p, images: r.data[0].images || [] }));
-        setImgLoaded(true);
+        const full = fromDb.style(r.data[0]);
+        setForm(p => ({
+          ...p,
+          images: full.images || [],
+          category: full.category || "ladies",
+          length: full.length || "",
+          stylistName: full.stylistName || "",
+          stylistComment: full.stylistComment || "",
+          styleName: full.styleName || "",
+          menuFlags: full.menuFlags || [],
+          menuText: full.menuText || "",
+          couponMenuId: full.couponMenuId || "",
+          hashtags: full.hashtags || [],
+          modelVolume: full.modelVolume || "設定しない",
+          modelTexture: full.modelTexture || "設定しない",
+          modelThickness: full.modelThickness || "設定しない",
+          modelCurl: full.modelCurl || "設定しない",
+          modelFace: full.modelFace || "設定しない",
+          modelAge: full.modelAge || "設定しない",
+        }));
+        setDataLoaded(true);
       }
     })();
   }, [editing && editing.id]);
@@ -4021,7 +4042,7 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
   const toggleMenuFlag = (key) => setForm(p => ({ ...p, menuFlags: p.menuFlags.includes(key) ? p.menuFlags.filter(x => x !== key) : [...p.menuFlags, key] }));
 
   const save = async () => {
-    if (!imgLoaded) return notify("写真の読み込みが完了していません。少し待ってから保存してください", "error");
+    if (!dataLoaded) return notify("データの読み込みが完了していません。少し待ってから保存してください", "error");
     if (!form.styleName.trim()) return notify("スタイル名を入力してください", "error");
     setSaving(true);
     const images = form.images.filter(Boolean);
@@ -4049,8 +4070,8 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
         {/* 写真 */}
         <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
           <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 4 }}>スタイル写真（最大3枚・3:4）</div>
-          {!imgLoaded ? (
-            <div style={{ fontSize: 12, color: C.sub, padding: "8px 0" }}>写真を読み込み中…（完了するまで変更できません）</div>
+          {!dataLoaded ? (
+            <div style={{ fontSize: 12, color: C.sub, padding: "8px 0" }}>データを読み込み中…（完了するまで変更できません）</div>
           ) : (
             <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
               {[0, 1, 2].map(idx => (
@@ -4661,7 +4682,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.04-c"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.04-d"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
