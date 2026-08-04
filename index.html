@@ -3731,6 +3731,7 @@ function buildBlogSalonBoardScript(b) {
     'function findButtonByText(t){var els=document.querySelectorAll("button,input[type=button],a");for(var i=0;i<els.length;i++){var lbl=(els[i].textContent||els[i].value||"").trim();if(lbl.includes(t))return els[i];}return null;}',
     'function appendTextToEditor(el,text){var lines=(text||"").split("\\n");lines.forEach(function(line,i){if(i>0)el.appendChild(document.createElement("br"));if(line)el.appendChild(document.createTextNode(line));});}',
     'function placeCursorAtEnd(el){try{el.focus();var range=document.createRange();range.selectNodeContents(el);range.collapse(false);var sel=window.getSelection();sel.removeAllRanges();sel.addRange(range);}catch(e){}}',
+    'async function waitForImageCount(el,expected,to){to=to||6000;var end=Date.now()+to;while(Date.now()<end){if(el.querySelectorAll("img").length>=expected)return true;await sleep(200);}return false;}',
     'try{',
     '  if(!location.hostname.includes("salonboard.com")){alert("SALON BOARDのブログ編集 入力画面で実行してください");done(false);return;}',
     '  done(true);',
@@ -3750,12 +3751,15 @@ function buildBlogSalonBoardScript(b) {
     '        placeCursorAtEnd(editor);',
     '        var uploadBtn=findButtonByText("画像アップロード");',
     '        R["ブロック"+(bi+1)+"画像アップロードボタン"]=!!uploadBtn;',
+    '        var imgCountBefore=editor.querySelectorAll("img").length;',
     '        if(uploadBtn){uploadBtn.click();await sleep(900);}',
     '        R["ブロック"+(bi+1)+"画像挿入"]=await injectFile("input#sendFile",b64toFile(blk.b64,"blog"+(bi+1)+".jpg",blk.mime));',
     '        await sleep(1200);',
     '        var confirmBtn=findButtonByText("登録する");',
     '        R["ブロック"+(bi+1)+"画像確定"]=!!confirmBtn;',
-    '        if(confirmBtn){confirmBtn.click();await sleep(2200);}',
+    '        if(confirmBtn){confirmBtn.click();}',
+    '        R["ブロック"+(bi+1)+"画像が本文に反映"]=await waitForImageCount(editor,imgCountBefore+1,6000);',
+    '        await sleep(300);',
     '        placeCursorAtEnd(editor);',
     '      }',
     '    }',
@@ -5219,7 +5223,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.04-w"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.04-x"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
