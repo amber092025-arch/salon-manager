@@ -3731,25 +3731,32 @@ function buildStyleSalonBoardScript(s) {
   // 各項目の成功/失敗は簡易チェックリストとして毎回alertで表示する(今後SalonBoard側の仕様変更があった際の早期発見用)。
   // done()はShortcuts「Webページ上でJavaScriptを実行」から呼ばれた場合のみcompletion()を呼ぶ安全なラッパー。
   // 通常のブックマークレットとして実行した場合はcompletionが存在しないため何もしない(同じコードが両方で動く)。
+  // Shortcutsの「Webページ上でJavaScriptを実行」はcompletion()呼び出しまでの時間制限が厳しく(数秒程度)、
+  // 写真3枚化等で処理時間が伸びた結果タイムアウトすることが実機で判明。そのため合図は早い段階(ホスト確認直後)で
+  // 一度だけ送り、実際の入力・写真アップロード処理はそのままページ上で継続させる(completedフラグで二重送信を防止)。
   return [
     '(async function(){',
     '"use strict";',
     'var D=' + JSON.stringify(D) + ';',
     'var R={};',
-    'function done(v){if(typeof completion==="function")completion(v);}',
+    'var completed=false;',
+    'function done(v){if(completed)return;completed=true;if(typeof completion==="function")completion(v);}',
     'function q(s){return document.querySelector(s);}',
     'function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}',
     'async function waitFor(sel,to){to=to||8000;var end=Date.now()+to;while(Date.now()<end){var el=q(sel);if(el)return el;await sleep(150);}return null;}',
     'function setValue(sel,v){var el=q(sel);if(!el)return false;el.value=v||"";el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));return true;}',
     'function setSelectByLabel(sel,label){var el=q(sel);if(!el||!label)return false;for(var i=0;i<el.options.length;i++){var o=el.options[i];if(o.textContent.trim()===label||o.textContent.includes(label)){el.value=o.value;el.dispatchEvent(new Event("change",{bubbles:true}));return true;}}return false;}',
+    'function selectFirstNonBlank(sel){var el=q(sel);if(!el)return false;for(var i=0;i<el.options.length;i++){if(el.options[i].value){el.value=el.options[i].value;el.dispatchEvent(new Event("change",{bubbles:true}));return true;}}return false;}',
     'function setRadio(name,val){if(!val)return false;var r=document.querySelector(\'input[name="\'+name+\'"][value="\'+val+\'"]\');if(r){r.checked=true;r.dispatchEvent(new Event("change",{bubbles:true}));return true;}return false;}',
     'async function setRadioWait(name,val,to){if(!val)return false;var r=await waitFor(\'input[name="\'+name+\'"][value="\'+val+\'"]\',to||5000);if(!r)return false;r.checked=true;r.dispatchEvent(new Event("change",{bubbles:true}));return true;}',
     'function b64toFile(b64,name,mime){var bin=atob(b64);var arr=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);return new File([arr],name||"photo.jpg",{type:mime||"image/jpeg"});}',
     'async function injectFile(inputSel,file){var input=await waitFor(inputSel);if(!input)return false;var dt=new DataTransfer();dt.items.add(file);input.files=dt.files;input.dispatchEvent(new Event("change",{bubbles:true}));return true;}',
     'try{',
     '  if(!location.hostname.includes("salonboard.com")){alert("SALON BOARDのスタイル登録画面で実行してください");done(false);return;}',
+    '  done(true);',
     '  R["スタイル名"]=setValue("input#styleNameTxt",D.styleName);',
     '  R["コメント"]=setValue("textarea#stylistCommentTxt",D.comment);',
+    '  R["スタイリスト"]=selectFirstNonBlank("select#stylistCheckCd");',
     '  R["メニュー"]=setValue("textarea#menuDetailTxt",D.menu);',
     '  R["カテゴリ"]=setRadio("frmStyleEditStyleDto.styleCategoryCd",D.catCode);',
     '  if(D.length){R["レングス"]=setSelectByLabel(D.catCode==="SG01"?"select#ladiesHairLengthCd":"select#mensHairLengthCd",D.length);}',
@@ -3776,10 +3783,11 @@ function buildStyleSalonBoardScript(s) {
     '  }',
     // 写真枠3つ(前/横/後ろ)を順番に処理。前(FRONT)のトリガーセレクタは実機で動作確認済み、
     // 横(SIDE)・後ろ(BACK)は隠しinputのname(SIDE_IMG_ID/BACK_IMG_ID、実機診断で確認済み)から
-    // 同じ命名規則と推測して組み立てている(未検証、要実機確認)。
-    '  var slots=[["FRONT_IMG_ID","写真1(前)"],["SIDE_IMG_ID","写真2(横)"],["BACK_IMG_ID","写真3(後ろ)"]];',
+    // 同じ命名規則と推測して組み立てている。各枠には別途FRONT/SIDE/BACK等を選ぶ種別ドロップダウン
+    // (styleClassCd01〜03、実機スクリーンショットで確認済み)があるため、写真確定後にそれも設定する。
+    '  var slots=[["FRONT_IMG_ID","写真1(前)","styleClassCd01","FRONT"],["SIDE_IMG_ID","写真2(横)","styleClassCd02","SIDE"],["BACK_IMG_ID","写真3(後ろ)","styleClassCd03","BACK"]];',
     '  for(var pi=0;pi<slots.length;pi++){',
-    '    var slotName=slots[pi][0],label=slots[pi][1],picD=D.imgs[pi];',
+    '    var slotName=slots[pi][0],label=slots[pi][1],classSel=slots[pi][2],typeLabel=slots[pi][3],picD=D.imgs[pi];',
     '    if(!picD)continue;',
     '    var trg=q("#"+slotName+"_PC_NEW_NO_PHOTO, img#"+slotName+"_IMG");',
     '    R[label+"枠"]=!!trg;',
@@ -3791,6 +3799,8 @@ function buildStyleSalonBoardScript(s) {
     '    R[label+"確定"]=!!sub;',
     '    if(sub)sub.click();',
     '    await sleep(500);',
+    '    R[label+"種別"]=setSelectByLabel("select#"+classSel,typeLabel);',
+    '    await sleep(200);',
     '  }',
     '  var lines=Object.keys(R).map(function(k){return k+": "+(R[k]?"○":"×");});',
     '  alert("入力結果\\n"+lines.join("\\n")+"\\n\\n内容を確認して「登録」ボタンを押してください。");',
@@ -4650,7 +4660,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.03-f"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.04-b"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
