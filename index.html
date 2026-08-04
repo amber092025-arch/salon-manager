@@ -3686,38 +3686,69 @@ const SB_TEX_CODE = {"柔らかい":"1","普通":"2","硬い":"3"};
 const SB_THICK_CODE = {"細い":"1","普通":"2","太い":"3"};
 const SB_CURL_CODE = {"なし":"1","少し":"2","強い":"3"};
 
-// ブログ編集画面はまだ実機診断ができていないため、まずは「ブログ編集 入力」画面のフォーム項目一覧を
-// ダンプする診断版にしている(スタイルの時と同じ最初のステップ)。実際のセレクタが分かり次第、本入力に対応する。
+// 実機診断で判明した構成: 本文はblogContents1〜5(文章5枠)の間にimagePath1〜4(画像4枚)が交互に並ぶ固定構成。
+// bodyBlocksの並びを、連続する文章ブロックをまとめて1つの文章枠にしつつこの構成へ変換する。
+// 画像の挿入操作(#sendFileへの投入で正しい枠に入るか)は実機未確認のため推測込み、結果はチェックリストで報告する。
 function buildBlogSalonBoardScript(b) {
+  const blocks = b.bodyBlocks || [];
+  const segments = [];
+  let cur = [];
+  const flush = () => { segments.push({ type: "text", text: cur.join("\n") }); cur = []; };
+  blocks.forEach(blk => {
+    if (blk.type === "text") { if ((blk.text || "").trim()) cur.push(blk.text); }
+    else { flush(); segments.push({ type: "image", image: blk.image }); }
+  });
+  flush();
+  const textSegs = segments.filter(s => s.type === "text").map(s => s.text);
+  while (textSegs.length < 5) textSegs.push("");
+  const images = segments.filter(s => s.type === "image").slice(0, 4).map(s => {
+    const m = (s.image || "").match(/^data:([^;]+);base64,(.+)$/);
+    return m ? { b64: m[2], mime: m[1] } : null;
+  });
+
   const D = {
     title: b.title || "",
-    body: b.body || "",
     category: b.category || "",
-    authorName: b.authorName || "",
+    texts: textSegs.slice(0, 5),
+    images,
   };
+
   return [
     '(async function(){',
     '"use strict";',
     'var D=' + JSON.stringify(D) + ';',
+    'var R={};',
     'var completed=false;',
     'function done(v){if(completed)return;completed=true;if(typeof completion==="function")completion(v);}',
+    'function q(s){return document.querySelector(s);}',
+    'function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}',
+    'async function waitFor(sel,to){to=to||8000;var end=Date.now()+to;while(Date.now()<end){var el=q(sel);if(el)return el;await sleep(150);}return null;}',
+    'function setValue(sel,v){var el=q(sel);if(!el)return false;el.value=v||"";el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));return true;}',
+    'function setSelectByLabel(sel,label){var el=q(sel);if(!el||!label)return false;for(var i=0;i<el.options.length;i++){var o=el.options[i];if(o.textContent.trim()===label||o.textContent.includes(label)){el.value=o.value;el.dispatchEvent(new Event("change",{bubbles:true}));return true;}}return false;}',
+    'function selectFirstNonBlank(sel){var el=q(sel);if(!el)return false;for(var i=0;i<el.options.length;i++){if(el.options[i].value){el.value=el.options[i].value;el.dispatchEvent(new Event("change",{bubbles:true}));return true;}}return false;}',
+    'function b64toFile(b64,name,mime){var bin=atob(b64);var arr=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);return new File([arr],name||"blog.jpg",{type:mime||"image/jpeg"});}',
+    'async function injectFile(inputSel,file){for(var attempt=0;attempt<2;attempt++){var input=await waitFor(inputSel);if(!input)return false;var dt=new DataTransfer();dt.items.add(file);input.files=dt.files;input.dispatchEvent(new Event("change",{bubbles:true}));await sleep(400);if(input.files&&input.files.length>0)return true;await sleep(500);}return false;}',
+    'function findButtonByText(t){var els=document.querySelectorAll("button,input[type=button],a");for(var i=0;i<els.length;i++){var lbl=(els[i].textContent||els[i].value||"").trim();if(lbl.includes(t))return els[i];}return null;}',
     'try{',
     '  if(!location.hostname.includes("salonboard.com")){alert("SALON BOARDのブログ編集 入力画面で実行してください");done(false);return;}',
     '  done(true);',
-    '  var dump=[];',
-    '  document.querySelectorAll("input,textarea,select").forEach(function(el){',
-    '    if(dump.length>=150)return;',
-    '    var lbl=(el.id?("#"+el.id):"")+(el.name?(" name="+el.name):"");',
-    '    if(!lbl)lbl="(id/name無し)";',
-    '    dump.push(el.tagName.toLowerCase()+"["+(el.type||"")+"] "+lbl);',
-    '  });',
-    '  var report="■このブログの内容(参考)\\nタイトル: "+D.title+"\\n投稿者: "+D.authorName+"\\nカテゴリ: "+D.category+"\\n\\n■ページ内のフォーム項目一覧\\n"+dump.join("\\n");',
-    '  var ta=document.createElement("textarea");',
-    '  ta.value=report;',
-    '  ta.style.cssText="position:fixed;top:8px;left:8px;right:8px;height:75vh;z-index:999999;font-size:11px;background:#fff;border:3px solid #ff3b30;padding:8px;box-sizing:border-box;";',
-    '  document.body.appendChild(ta);',
-    '  ta.focus();ta.select();',
-    '  alert("診断結果をページ上部に表示しました。全部選択してコピーし、Claudeに貼り付けてください。");',
+    '  R["タイトル"]=setValue("input#blogTitle",D.title);',
+    '  R["投稿者"]=selectFirstNonBlank("select#stylistId");',
+    '  R["カテゴリ"]=D.category?setSelectByLabel("select#blogCategoryCd",D.category):null;',
+    '  for(var ti=0;ti<5;ti++){R["文章"+(ti+1)]=setValue("textarea#blogContents"+(ti+1),D.texts[ti]||"");}',
+    '  if(D.images.length){',
+    '    var uploadBtn=findButtonByText("画像アップロード");',
+    '    R["画像アップロードボタン"]=!!uploadBtn;',
+    '    if(uploadBtn){uploadBtn.click();await sleep(600);}',
+    '  }',
+    '  for(var ii=0;ii<D.images.length;ii++){',
+    '    var pic=D.images[ii];',
+    '    if(!pic)continue;',
+    '    R["写真"+(ii+1)+"挿入"]=await injectFile("input#sendFile",b64toFile(pic.b64,"blog"+(ii+1)+".jpg",pic.mime));',
+    '    await sleep(1500);',
+    '  }',
+    '  var lines=Object.keys(R).map(function(k){return k+": "+(R[k]===null?"(対象外)":R[k]?"○":"×");});',
+    '  alert("入力結果\\n"+lines.join("\\n")+"\\n\\n※画像が意図した位置に入っているか必ず確認してください。内容を確認して「確認する」ボタンを押してください。");',
     '}catch(err){alert("エラー: "+err.message);done(false);}',
     '})();',
   ].join("\n");
@@ -4005,9 +4036,9 @@ function BlogListTab({ setTab, notify, blogs, menus, deleteBlog, setEditingBlogI
               <div style={{ textAlign: "center", color: C.sub, fontSize: 13, padding: "30px 0" }}>読み込み中...</div>
             ) : (
               <React.Fragment>
-                <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>SalonBoard診断コード(ブログ)</div>
+                <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>SalonBoard登録用コード(ブログ)</div>
                 <div style={{ fontSize: 12, color: C.sub, marginBottom: 14, lineHeight: 1.6 }}>
-                  ブログはまだ実機でのセレクタ確認ができていないため、まずは診断版です。SALON BOARDの「ブログ編集 入力」画面で実行すると、フォーム項目の一覧が画面上部に表示されるので、それを全選択してコピーし、Claudeに送ってください。本入力は次のステップで対応します。
+                  「{sbModal.blog.title || "このブログ"}」の内容を、SALON BOARDの「ブログ編集 入力」画面に自動で入力するコードです。実行後は必ず内容(特に写真の挿入位置)を確認してから「確認する」ボタンを押してください。画像の挿入操作はSALON BOARD側の仕様変更で動かなくなる場合があります。
                 </div>
 
                 <div style={{ fontSize: 12, fontWeight: 700, color: C.sub, marginBottom: 6 }}>① PC(Mac)で使う場合</div>
@@ -5174,7 +5205,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.04-o"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.04-p"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
