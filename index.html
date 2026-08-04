@@ -4058,15 +4058,18 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
   });
   const toggleCategoryOpen = (cat) => setExpandedCats(p => ({ ...p, [cat]: !p[cat] }));
 
-  // カルテ詳細にあった「スタイルアップ」(ChatGPTへスタイル名・コメント生成プロンプトを渡す機能)をこちらへ移設。
-  // カルテ側は来店1件のmenus/memoを補足情報にしていたが、こちらはスタイル自体のメニュー内容を使う
-  const generateStyleup = () => {
+  // カルテ詳細にあった「スタイルアップ」(AIへスタイル名・コメント生成プロンプトを渡す機能)をこちらへ移設。
+  // カルテ側は来店1件のmenus/memoを補足情報にしていたが、こちらはスタイル自体のメニュー内容を使う。
+  // ChatGPTはURLスキーム(chatgpt://)で直接起動。GeminiはiOS単体アプリの正確なURLスキームが確認できなかったため、
+  // gemini.google.comへのWebリンクにする(アプリがあればアプリで、無ければSafariで開く)
+  const generateStyleup = (dest) => {
     let savedPrompt = "";
     try { savedPrompt = localStorage.getItem("stylupPrompt") || ""; } catch (e) {}
     const defaultPrompt = "あなたはプロのライター兼美容師向けSEOライターです。\n\nホットペッパービューティーの「ヘアスタイル掲載ページ」用に、写真からスタイル名とコメントを作成してください。\n\n【目的】\n・人が書いたような自然な文章\n・見た人が「この髪型にしたい」と思う内容\n・美容室集客につながる内容\n・SEO対策、AIO対策を意識\n・ホットペッパービューティーのスタイル掲載で検索されやすい内容\n\n【出力ルール】\n写真を分析し、以下の順番で出力\n\n【スタイル名候補】\n①\n②\n③\n④\n⑤\n⑥\n⑦\n⑧\n⑨\n⑩\n\n【スタイル名条件】\n・30文字以内\n・検索されやすいキーワードを含める\n・髪型、カラー、質感が伝わる\n・ホットペッパー検索を意識\n・実際の美容師が付けそうな自然な名前\n・盛りすぎない\n・同じ表現を繰り返さない\n\nスタイル名候補を10個出した後、「気に入った番号を選んでください」と表示して終了する。コメントはまだ作成しない。\n\nーーーーーーーーーー\n\nユーザーが番号を選んだら、そのスタイル名で完成版を作成する。\n\n出力順\n選ばれたスタイル名\nコメント\n\n【コメント条件】\n・120文字以内\n・写真の質感、艶感、シルエットを自然に表現\n・検索されやすいキーワードを含める\n・読んだ人がやってみたいと思う内容\n・ホットペッパービューティー掲載向け\n・人が書いたような自然な文章\n・絵文字禁止\n・半角記号禁止\n・過剰表現禁止\n・写真から髪の長さ、カラー、質感、デザインを分析して反映\n・ユーザーから補足情報がある場合は反映\n\n重要\n・スタイル名選択前にコメントを作らない\n・選択後は完成版のみ出力\n・余計な説明をしない\n・コピペしやすい形で出力\n・ホットペッパービューティー掲載を前提にする\n・美容室集客を最優先にする\n・写真を必ず分析してスタイル名とコメントに反映する";
     const prompt = (savedPrompt || defaultPrompt) + "\n\n【補足情報】\n施術内容：" + (form.menuText || "記載なし");
     try { var el = document.createElement("textarea"); el.value = prompt; document.body.appendChild(el); el.select(); document.execCommand("copy"); document.body.removeChild(el); } catch (e) {}
-    window.location.href = "chatgpt://";
+    if (dest === "gemini") window.location.href = "https://gemini.google.com/app";
+    else window.location.href = "chatgpt://";
   };
 
   const save = async () => {
@@ -4138,9 +4141,15 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
           <textarea value={form.stylistComment} onChange={e => setForm(p => ({ ...p, stylistComment: e.target.value }))} rows={3}
             placeholder="【気に入って頂いたスタイルは、ブックマークをしてご提示ください】〔レイヤーカット/ボブ/ショートボブ...〕"
             style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 13, lineHeight: 1.6, resize: "vertical", outline: "none", fontFamily: "inherit" }} />
-          <button onClick={generateStyleup} style={{ width: "100%", padding: "12px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#5856d6,#7a6848)", color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer", marginTop: 10 }}>
-            スタイルアップ
-          </button>
+          <div style={{ fontSize: 11, color: C.sub, marginTop: 10, marginBottom: 6 }}>スタイルアップ(生成プロンプトをコピーして起動)</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => generateStyleup("chatgpt")} style={{ flex: 1, padding: "12px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#5856d6,#7a6848)", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+              ChatGPTで
+            </button>
+            <button onClick={() => generateStyleup("gemini")} style={{ flex: 1, padding: "12px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#4285f4,#9b72cb)", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+              Geminiで
+            </button>
+          </div>
         </div>
 
         {/* スタイル */}
@@ -4754,7 +4763,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.04-g"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.04-h"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
