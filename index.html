@@ -105,7 +105,7 @@ const toDb = {
   menu: (m) => ({ name:m.name, price:m.price||0, category:m.category||null, duration:m.duration||60, show_tilde:m.showTilde||false, tags:m.tags||[], sort_order:m.sortOrder||Date.now() }),
   product: (p) => ({ name:p.name, price:p.price||0, cost:p.cost||0, stock:p.stock||0, min_stock:p.minStock||3, category:p.category||null, sub_category:p.subCategory||null, placeholder:p.placeholder||false, photos:p.photos||[], description:p.description||null, is_public:p.isPublic||false, sort_order:p.sortOrder||Date.now() }),
   visit: (v) => ({ customer_id:v.customerId, date:v.date, time:v.time||null, menus:v.menus||[], products:v.products||[], drug_cost:v.drugCost||0, payment_method:v.paymentMethod||"cash", total:v.total||0, notes:v.notes||null, images:v.images||[], customer_type:v.customerType||"existing", hpb_point:v.hpbPoint||0, paid:v.paid||false, duration:v.duration||60, appointment_id:v.appointmentId||null, tags:v.tags||[], style_name:v.styleName||null, style_comment:v.styleComment||null, is_public:v.isPublic||false, paid_at:v.paidAt||null }),
-  style: (s) => ({ images:s.images||[], cover_image:s.coverImage||null, category:s.category||"ladies", length:s.length||"", stylist_name:s.stylistName||"", stylist_comment:s.stylistComment||"", style_name:s.styleName||"", menu_flags:s.menuFlags||[], menu_text:s.menuText||"", coupon_menu_id:s.couponMenuId||null, hashtags:s.hashtags||[], model_volume:s.modelVolume||"", model_texture:s.modelTexture||"", model_thickness:s.modelThickness||"", model_curl:s.modelCurl||"", model_face:s.modelFace||"", model_age:s.modelAge||"", sort_order:s.sortOrder||Date.now() }),
+  style: (s) => ({ images:s.images||[], cover_image:s.coverImage||null, category:s.category||"ladies", length:s.length||"", stylist_name:s.stylistName||"", stylist_comment:s.stylistComment||"", style_name:s.styleName||"", menu_flags:s.menuFlags||[], menu_text:s.menuText||"", coupon_menu_id:s.couponMenuId||null, hashtags:s.hashtags||[], tags:s.tags||[], model_volume:s.modelVolume||"", model_texture:s.modelTexture||"", model_thickness:s.modelThickness||"", model_curl:s.modelCurl||"", model_face:s.modelFace||"", model_age:s.modelAge||"", sort_order:s.sortOrder||Date.now() }),
   blog: (b) => ({ images:b.images||[], cover_image:b.coverImage||null, category:b.category||"", title:b.title||"", body:b.body||"", body_blocks:b.bodyBlocks||[], coupon_menu_id:b.couponMenuId||null, author_name:b.authorName||"", sort_order:b.sortOrder||Date.now() }),
   appointment: (a) => ({ customer_id:a.customerId, date:a.date, time:a.time||null, end_time:a.endTime||null, duration:a.duration||60, menu_ids:a.menuIds||[], notes:a.notes||null, color:a.color||"#00b4a6", paid:a.paid||false, shimeika:a.shimeika||"shimeika", customer_type:a.customerType||"existing" }),
   privateEvent: (e) => ({ title:e.title||"予定", date:e.date, time:e.time||null, end_time:e.endTime||null, memo:e.memo||null, color:e.color||"#9a9088", is_shared:e.isShared!==false, recurrence:e.recurrence||"none", recurrence_until:e.recurrenceUntil||null }),
@@ -115,7 +115,7 @@ const fromDb = {
   menu: (r) => ({ id:r.id, name:r.name, price:r.price||0, category:r.category||"", duration:r.duration||60, showTilde:r.show_tilde||false, tags:r.tags||[], sortOrder:r.sort_order||0, menuKind:r.menu_kind||"menu", targetCustomer:r.target_customer||"all", isBookable:r.is_bookable!==false }),
   product: (r) => ({ id:r.id, name:r.name, price:r.price||0, cost:r.cost||0, stock:r.stock||0, minStock:r.min_stock||3, category:r.category||"", subCategory:r.sub_category||"", placeholder:r.placeholder||false, photos:r.photos||[], description:r.description||"", isPublic:r.is_public||false, sortOrder:r.sort_order||0 }),
   visit: (r) => { var pd={}; try{pd=r.photo_data?JSON.parse(r.photo_data):{};}catch(e){} return { id:r.id, customerId:r.customer_id, date:r.date, time:r.time||"", menus:r.menus||[], products:r.products||[], drugCost:r.drug_cost||0, paymentMethod:r.payment_method||"cash", total:r.total||0, notes:r.notes||"", images:r.images||[], beforeImgs:pd.before||[], afterImgs:pd.after||[], otherImgs:pd.other||[], customerType:r.customer_type||"existing", hpbPoint:r.hpb_point||0, paid:r.paid||false, duration:r.duration||60, appointmentId:r.appointment_id||null, tags:r.tags||[], styleName:r.style_name||"", styleComment:r.style_comment||"", isPublic:r.is_public||false, paidAt:r.paid_at||null }; },
-  style: (r) => ({ id:r.id, images:r.images||[], coverImage:r.cover_image||null, category:r.category||"ladies", length:r.length||"", stylistName:r.stylist_name||"", stylistComment:r.stylist_comment||"", styleName:r.style_name||"", menuFlags:r.menu_flags||[], menuText:r.menu_text||"", couponMenuId:r.coupon_menu_id||null, hashtags:r.hashtags||[], modelVolume:r.model_volume||"", modelTexture:r.model_texture||"", modelThickness:r.model_thickness||"", modelCurl:r.model_curl||"", modelFace:r.model_face||"", modelAge:r.model_age||"", sortOrder:r.sort_order||0, createdAt:r.created_at||null }),
+  style: (r) => ({ id:r.id, images:r.images||[], coverImage:r.cover_image||null, category:r.category||"ladies", length:r.length||"", stylistName:r.stylist_name||"", stylistComment:r.stylist_comment||"", styleName:r.style_name||"", menuFlags:r.menu_flags||[], menuText:r.menu_text||"", couponMenuId:r.coupon_menu_id||null, hashtags:r.hashtags||[], tags:r.tags||[], modelVolume:r.model_volume||"", modelTexture:r.model_texture||"", modelThickness:r.model_thickness||"", modelCurl:r.model_curl||"", modelFace:r.model_face||"", modelAge:r.model_age||"", sortOrder:r.sort_order||0, createdAt:r.created_at||null }),
   blog: (r) => ({ id:r.id, images:r.images||[], coverImage:r.cover_image||null, category:r.category||"", title:r.title||"", body:r.body||"", bodyBlocks:r.body_blocks||[], couponMenuId:r.coupon_menu_id||null, authorName:r.author_name||"", sortOrder:r.sort_order||0, createdAt:r.created_at||null }),
   appointment: (r) => ({ id:r.id, customerId:r.customer_id, date:r.date, time:r.time||"", endTime:r.end_time||"", duration:r.duration||60, menuIds:r.menu_ids||[], notes:r.notes||"", color:r.color||"#00b4a6", paid:r.paid||false, shimeika:r.shimeika||"shimeika", customerType:r.customer_type||"existing", hpbPoint:r.hpb_point||0, bookingStatus:r.booking_status||"confirmed" }),
   privateEvent: (r) => ({ id:r.id, title:r.title||"予定", date:r.date, time:r.time||"", endTime:r.end_time||"", memo:r.memo||"", color:r.color||"#9a9088", isShared:r.is_shared!==false, recurrence:r.recurrence||"none", recurrenceUntil:r.recurrence_until||"" }),
@@ -503,7 +503,7 @@ function App() {
         sbRetry(() => sb.from("appointments").select().order("date")),
         sbRetry(() => sb.from("tag_categories").select().order("sort_order")),
         sbRetry(() => sb.from("tag_items").select().order("sort_order")),
-        sbRetry(() => sb.from("styles").select("id,style_name,category,length,coupon_menu_id,hashtags,sort_order,created_at,cover_image,stylist_name").order("created_at", {ascending:false})),
+        sbRetry(() => sb.from("styles").select("id,style_name,category,length,coupon_menu_id,hashtags,tags,sort_order,created_at,cover_image,stylist_name").order("created_at", {ascending:false})),
         sbRetry(() => sb.from("blogs").select("id,title,category,coupon_menu_id,sort_order,created_at,cover_image,author_name").order("created_at", {ascending:false})),
         sbRetry(() => sb.from("private_events").select().order("date")),
       ]);
@@ -770,6 +770,7 @@ function App() {
     if ("menuText" in changes) dbChanges.menu_text = changes.menuText;
     if ("couponMenuId" in changes) dbChanges.coupon_menu_id = changes.couponMenuId;
     if ("hashtags" in changes) dbChanges.hashtags = changes.hashtags;
+    if ("tags" in changes) dbChanges.tags = changes.tags;
     if ("modelVolume" in changes) dbChanges.model_volume = changes.modelVolume;
     if ("modelTexture" in changes) dbChanges.model_texture = changes.modelTexture;
     if ("modelThickness" in changes) dbChanges.model_thickness = changes.modelThickness;
@@ -1055,7 +1056,7 @@ function App() {
         {tab === "lineBookingSettings" && <LineBookingSettingsTab setTab={setTab} notify={notify} lineBooking={lineBooking} setLineBooking={setLineBooking} saveSetting={saveSetting} />}
         {tab === "mergeCustomers" && <MergeCustomersTab setTab={setTab} notify={notify} customers={customers} setCustomers={setCustomers} setVisits={setVisits} setAppointments={setAppointments} />}
         {tab === "styleList" && <StyleListTab setTab={setTab} notify={notify} styles={styles} menus={menus} deleteStyle={deleteStyle} setEditingStyleId={setEditingStyleId} />}
-        {tab === "styleForm" && <StyleFormTab setTab={setTab} notify={notify} menus={menus} styles={styles} editingStyleId={editingStyleId} addStyle={addStyle} updateStyle={updateStyle} />}
+        {tab === "styleForm" && <StyleFormTab setTab={setTab} notify={notify} menus={menus} styles={styles} editingStyleId={editingStyleId} addStyle={addStyle} updateStyle={updateStyle} tagCategories={tagCategories} />}
         {tab === "blogList" && <BlogListTab setTab={setTab} notify={notify} blogs={blogs} menus={menus} deleteBlog={deleteBlog} setEditingBlogId={setEditingBlogId} />}
         {tab === "blogForm" && <BlogFormTab setTab={setTab} notify={notify} menus={menus} blogs={blogs} editingBlogId={editingBlogId} addBlog={addBlog} updateBlog={updateBlog} />}
         {tab === "tagSettings" && <TagSettingsTab setTab={setTab} notify={notify} tagCategories={tagCategories} setTagCategories={setTagCategories} />}
@@ -3345,21 +3346,6 @@ function MoreTab({ setTab }) {
       svg: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8a8880" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     },
     {
-      tab: "tagSettings", label: "タグ設定", sub: "スタイルタグのカテゴリ・項目管理",
-      iconBg: "#eaf4f2", iconColor: "#4a9a90",
-      svg: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4a9a90" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
-    },
-    {
-      tab: "blogPrompt", label: "ブログプロンプト編集", sub: "ブログAI生成の指示内容を編集",
-      iconBg: "#f2eff8", iconColor: "#8070b8",
-      svg: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8070b8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-    },
-    {
-      tab: "stylupPrompt", label: "スタイルアップ プロンプト編集", sub: "スタイルアップAI生成の指示内容を編集",
-      iconBg: "#f8f0f5", iconColor: "#a878a0",
-      svg: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a878a0" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-    },
-    {
       tab: "logoSettings", label: "サロンロゴ設定", sub: "読み込み画面に表示するロゴ",
       iconBg: "#f0f4f8", iconColor: "#6a88b8",
       svg: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6a88b8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
@@ -3926,6 +3912,16 @@ function StyleListTab({ setTab, notify, styles, menus, deleteStyle, setEditingSt
         <div style={{ width: 60 }} />
       </div>
       <div style={{ padding: 16 }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+          <button onClick={() => setTab("tagSettings")}
+            style={{ flex: 1, padding: 10, borderRadius: 10, border: `1px solid ${C.border}`, background: "#fff", color: C.sub, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+            🏷 タグ設定
+          </button>
+          <button onClick={() => setTab("stylupPrompt")}
+            style={{ flex: 1, padding: 10, borderRadius: 10, border: `1px solid ${C.border}`, background: "#fff", color: C.sub, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+            ✎ スタイルアップ プロンプト編集
+          </button>
+        </div>
         <button onClick={() => { setEditingStyleId(null); setTab("styleForm"); }}
           style={{ width: "100%", padding: 14, borderRadius: 12, border: "none", background: "#b5548a", color: "#fff", fontWeight: 800, fontSize: 15, cursor: "pointer", marginBottom: 16 }}>
           ＋ 新規スタイル登録
@@ -3945,6 +3941,13 @@ function StyleListTab({ setTab, notify, styles, menus, deleteStyle, setEditingSt
               {s.hashtags && s.hashtags.length > 0 && (
                 <div style={{ fontSize: 11, color: C.sub, marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {s.hashtags.map(h => "#" + h).join(" ")}
+                </div>
+              )}
+              {s.tags && s.tags.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+                  {s.tags.map(t => (
+                    <span key={t} style={{ fontSize: 10, padding: "1px 7px", borderRadius: 10, background: "#eaf4f2", color: "#4a9a90", fontWeight: 700 }}>{t}</span>
+                  ))}
                 </div>
               )}
             </div>
@@ -4039,6 +4042,10 @@ function BlogListTab({ setTab, notify, blogs, menus, deleteBlog, setEditingBlogI
         <div style={{ width: 60 }} />
       </div>
       <div style={{ padding: 16 }}>
+        <button onClick={() => setTab("blogPrompt")}
+          style={{ width: "100%", padding: 10, borderRadius: 10, border: `1px solid ${C.border}`, background: "#fff", color: C.sub, fontWeight: 700, fontSize: 12, cursor: "pointer", marginBottom: 10 }}>
+          ✎ ブログプロンプト編集
+        </button>
         <button onClick={() => { setEditingBlogId(null); setTab("blogForm"); }}
           style={{ width: "100%", padding: 14, borderRadius: 12, border: "none", background: "#e8924a", color: "#fff", fontWeight: 800, fontSize: 15, cursor: "pointer", marginBottom: 16 }}>
           ＋ 新規ブログ作成
@@ -4112,7 +4119,7 @@ function BlogListTab({ setTab, notify, blogs, menus, deleteBlog, setEditingBlogI
   );
 }
 
-function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle, updateStyle }) {
+function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle, updateStyle, tagCategories }) {
   const editing = editingStyleId ? styles.find(s => s.id === editingStyleId) : null;
   const [form, setForm] = useState(() => editing ? {
     images: [], // 個別取得までは空(カルテ写真と同じ遅延読込方針)。読込後にセット
@@ -4124,6 +4131,7 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
     menuFlags: editing.menuFlags || [],
     menuText: editing.menuText || "",
     hashtags: editing.hashtags || [],
+    tags: editing.tags || [],
     modelVolume: editing.modelVolume || "設定しない",
     modelTexture: editing.modelTexture || "設定しない",
     modelThickness: editing.modelThickness || "設定しない",
@@ -4132,11 +4140,11 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
     modelAge: editing.modelAge || "設定しない",
   } : {
     images: [], category: "ladies", length: "", stylistName: "", stylistComment: "", styleName: "",
-    menuFlags: [], menuText: "", hashtags: [],
+    menuFlags: [], menuText: "", hashtags: [], tags: [],
     modelVolume: "設定しない", modelTexture: "設定しない", modelThickness: "設定しない", modelCurl: "設定しない", modelFace: "設定しない", modelAge: "設定しない",
   });
   const [hashtagInput, setHashtagInput] = useState("");
-  const [dataLoaded, setDataLoaded] = useState(!editing); // 新規は既存データがないので最初から編集可。編集時はstyles一覧が軽量列のみ(id,style_name,category,length,coupon_menu_id,hashtags,sort_order,created_at,cover_image)しか持たないため、写真だけでなくコメント/メニュー/モデル情報等もこのフラグで全件読み込みするまで待つ
+  const [dataLoaded, setDataLoaded] = useState(!editing); // 新規は既存データがないので最初から編集可。編集時はstyles一覧が軽量列のみ(id,style_name,category,length,coupon_menu_id,hashtags,tags,sort_order,created_at,cover_image)しか持たないため、写真だけでなくコメント/メニュー/モデル情報等もこのフラグで全件読み込みするまで待つ
   const [saving, setSaving] = useState(false);
   const fileRefs = [useRef(), useRef(), useRef()];
 
@@ -4160,6 +4168,7 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
           menuFlags: full.menuFlags || [],
           menuText: full.menuText || "",
           hashtags: full.hashtags || [],
+          tags: full.tags || [],
           modelVolume: full.modelVolume || "設定しない",
           modelTexture: full.modelTexture || "設定しない",
           modelThickness: full.modelThickness || "設定しない",
@@ -4223,6 +4232,8 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
   };
   const removeHashtag = (t) => setForm(p => ({ ...p, hashtags: p.hashtags.filter(x => x !== t) }));
   const toggleMenuFlag = (key) => setForm(p => ({ ...p, menuFlags: p.menuFlags.includes(key) ? p.menuFlags.filter(x => x !== key) : [...p.menuFlags, key] }));
+  // タグ設定(tag_categories/tag_items)のタグ。SalonBoard自動転記(Apostie)には使わない、店内管理・お客様ページ用の分類
+  const toggleTag = (t) => setForm(p => ({ ...p, tags: p.tags.includes(t) ? p.tags.filter(x => x !== t) : [...p.tags, t] }));
 
   // 過去のスタイルで使われたスタイリスト名/ハッシュタグを集計し、選ぶだけで再利用できるようにする
   const stylistNames = useMemo(() => [...new Set(styles.map(s => s.stylistName).filter(Boolean))], [styles]);
@@ -4459,6 +4470,33 @@ function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle,
             ))}
           </div>
         </div>
+
+        {/* タグ(タグ設定で管理するカテゴリ・項目。SalonBoard自動転記には使用しません) */}
+        {tagCategories && tagCategories.length > 0 && (
+          <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 10 }}>タグ</div>
+            {tagCategories.map(cat => (
+              <div key={cat.id} style={{ marginBottom: 10 }}>
+                <div style={{ marginBottom: 6 }}>
+                  <button onClick={() => toggleTag(cat.name)}
+                    style={{ padding: "5px 14px", borderRadius: 20, border: form.tags.includes(cat.name) ? "1.5px solid #b5548a" : `1px solid ${C.border}`, background: form.tags.includes(cat.name) ? "#faf0f5" : "#fff", color: form.tags.includes(cat.name) ? "#b5548a" : C.text, fontSize: 13, fontWeight: 800, cursor: "pointer" }}>
+                    {form.tags.includes(cat.name) ? "✓ " : ""}{cat.name}
+                  </button>
+                </div>
+                {cat.items && cat.items.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, paddingLeft: 8 }}>
+                    {cat.items.map(item => (
+                      <button key={item.id} onClick={() => toggleTag(item.name)}
+                        style={{ padding: "5px 12px", borderRadius: 20, border: form.tags.includes(item.name) ? "1.5px solid #b5548a" : `1px solid ${C.border}`, background: form.tags.includes(item.name) ? "#faf0f5" : "#fff", color: form.tags.includes(item.name) ? "#b5548a" : C.sub, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                        {form.tags.includes(item.name) ? "✓ " : ""}{item.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* モデル情報 */}
         <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
@@ -5107,7 +5145,7 @@ function TagSettingsTab({ setTab, notify, tagCategories, setTagCategories }) {
   return (
     <div style={{ background:C.bg, minHeight:"100vh" }}>
       <div style={{ background:"#E8DCC3", padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-        <button onClick={() => setTab("more")} style={{ background:"none", border:"none", color:"#fff", fontSize:15, fontWeight:700, cursor:"pointer" }}>← 戻る</button>
+        <button onClick={() => setTab("styleList")} style={{ background:"none", border:"none", color:"#fff", fontSize:15, fontWeight:700, cursor:"pointer" }}>← 戻る</button>
         <div style={{ fontWeight:800, fontSize:16, color:"#fff" }}>タグ設定</div>
         <div style={{ width:48 }} />
       </div>
@@ -5182,12 +5220,12 @@ function BlogPromptTab({ setTab, notify }) {
     try { localStorage.setItem("blogPrompt", prompt); } catch(e) {}
     await sb.from("settings").upsert({ key: "blogPrompt", value: prompt }, { onConflict: "key" });
     notify("プロンプトを保存しました ✓");
-    setTab("more");
+    setTab("blogList");
   };
   return (
     <div style={{ background:C.bg, minHeight:"100vh" }}>
       <div style={{ background:"linear-gradient(135deg,#ff4d88,#ff9500)", padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-        <button onClick={() => setTab("more")} style={{ background:"none", border:"none", color:"#fff", fontSize:15, fontWeight:700, cursor:"pointer" }}>← 戻る</button>
+        <button onClick={() => setTab("blogList")} style={{ background:"none", border:"none", color:"#fff", fontSize:15, fontWeight:700, cursor:"pointer" }}>← 戻る</button>
         <div style={{ fontWeight:800, fontSize:16, color:"#fff" }}>ブログプロンプト編集</div>
         <button onClick={save} style={{ border:"1.5px solid #fff", borderRadius:8, padding:"5px 14px", background:"transparent", color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer" }}>保存</button>
       </div>
@@ -5208,12 +5246,12 @@ function StylupPromptTab({ setTab, notify }) {
     try { localStorage.setItem("stylupPrompt", prompt); } catch(e) {}
     await sb.from("settings").upsert({ key: "stylupPrompt", value: prompt }, { onConflict: "key" });
     notify("プロンプトを保存しました ✓");
-    setTab("more");
+    setTab("styleList");
   };
   return (
     <div style={{ background:C.bg, minHeight:"100vh" }}>
       <div style={{ background:"linear-gradient(135deg,#5856d6,#7a6848)", padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-        <button onClick={() => setTab("more")} style={{ background:"none", border:"none", color:"#fff", fontSize:15, fontWeight:700, cursor:"pointer" }}>← 戻る</button>
+        <button onClick={() => setTab("styleList")} style={{ background:"none", border:"none", color:"#fff", fontSize:15, fontWeight:700, cursor:"pointer" }}>← 戻る</button>
         <div style={{ fontWeight:800, fontSize:16, color:"#fff" }}>スタイルアップ プロンプト編集</div>
         <button onClick={save} style={{ border:"1.5px solid #fff", borderRadius:8, padding:"5px 14px", background:"transparent", color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer" }}>保存</button>
       </div>
