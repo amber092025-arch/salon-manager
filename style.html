@@ -143,6 +143,23 @@
   .modal-prod-desc { font-size:13px; color:var(--muted); line-height:1.7; margin-bottom:16px; }
   .modal-prod-meta { font-size:11px; color:var(--muted); margin-bottom:16px; }
   .footer { text-align: center; padding: 20px; font-size: 11px; color: var(--muted); background: #fff; border-top: 1px solid var(--border); }
+
+  /* ── Blog ── */
+  .blog-list { padding:16px 12px 100px; display:flex; flex-direction:column; gap:14px; }
+  .blog-card { background:#fff; border-radius:14px; overflow:hidden; box-shadow:0 2px 12px rgba(0,0,0,0.06); cursor:pointer; animation:fadeUp 0.4s ease both; }
+  .blog-card:active { opacity:0.85; transform:scale(0.99); }
+  .blog-cover { width:100%; aspect-ratio:16/9; object-fit:cover; display:block; background:linear-gradient(135deg,var(--warm-light),var(--border)); }
+  .blog-card-body { padding:14px 16px 16px; }
+  .blog-card-cat { display:inline-block; font-size:10px; padding:3px 10px; border-radius:10px; background:var(--charcoal); color:#fff; margin-bottom:8px; }
+  .blog-card-title { font-size:15px; font-weight:500; color:var(--charcoal); line-height:1.5; margin-bottom:8px; }
+  .blog-card-meta { font-size:11px; color:var(--muted); }
+  .blog-detail-cover { width:100%; aspect-ratio:16/9; object-fit:cover; display:block; }
+  .blog-detail-body { padding:18px 20px 24px; }
+  .blog-detail-cat { display:inline-block; font-size:10px; padding:3px 10px; border-radius:10px; background:var(--charcoal); color:#fff; margin-bottom:10px; }
+  .blog-detail-title { font-size:18px; font-weight:700; color:var(--charcoal); line-height:1.5; margin-bottom:8px; }
+  .blog-detail-meta { font-size:11px; color:var(--muted); margin-bottom:18px; }
+  .blog-block-text { font-size:14px; color:var(--charcoal); line-height:1.9; white-space:pre-wrap; margin-bottom:16px; }
+  .blog-block-img { width:100%; border-radius:10px; display:block; margin-bottom:16px; }
 </style>
 </head>
 <body>
@@ -155,6 +172,7 @@
 <div class="page-tabs">
   <button class="page-tab active" id="tab-style" onclick="switchTab('style')">スタイル</button>
   <button class="page-tab" id="tab-products" onclick="switchTab('products')">商品</button>
+  <button class="page-tab" id="tab-blog" onclick="switchTab('blog')">ブログ</button>
 </div>
 <div class="filter-wrap" id="filterWrap">
   <div class="filter-bar">
@@ -205,6 +223,10 @@
   <div id="prodList"></div>
 </div>
 
+<div id="blogApp" style="display:none">
+  <div id="blogList"></div>
+</div>
+
 <!-- 商品絞り込みモーダル -->
 <div class="filter-modal-overlay" id="prodFilterModalOverlay" onclick="handleProdFilterOverlayClick(event)">
   <div class="filter-modal">
@@ -241,9 +263,11 @@
 
 <div class="footer">
   大阪府茨木市春日1－4－14 春日ビル4階　072－665－4644
+  <div id="versionLabel" style="margin-top:6px; font-size:9px; opacity:0.5;"></div>
 </div>
 
 <script>
+const STYLE_VERSION = "v2026.08.05-a"; // このファイルのバージョン(反映確認用)
 const SUPABASE_URL = "https://yvsavbxijdggzihvoram.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2c2F2YnhpamRnZ3ppaHZvcmFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NTkyNTEsImV4cCI6MjA5NTUzNTI1MX0.v_5yFWKizgOSUHifx10vSm7OEafy6fZhjy5cff-QHQw";
 const HP_URL = "https://beauty.hotpepper.jp/slnH000767692/";
@@ -253,39 +277,41 @@ const headers = { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_
 let allStyles = [];
 let tagCategories = [];
 let allProducts = [];
+let allBlogs = [];
 let activeFilters = new Set();
 let currentModalId = null;
-let currentModalPhotoType = "after";
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;" }[c]));
+}
 
 async function fetchData() {
-  const [visitsRes, catRes, itemRes, prodsRes] = await Promise.all([
-    fetch(`${SUPABASE_URL}/rest/v1/visits?select=id,date,photo_data,tags,menus,style_name,style_comment,is_public&order=date.desc`, { headers }),
-    fetch(`${SUPABASE_URL}/rest/v1/tag_categories?select=*&order=sort_order`, { headers }),
-    fetch(`${SUPABASE_URL}/rest/v1/tag_items?select=*&order=sort_order`, { headers }),
+  const [stylesRes, prodsRes, blogsRes] = await Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/styles?select=id,style_name,stylist_name,stylist_comment,category,length,menu_text,hashtags,cover_image,created_at&order=created_at.desc`, { headers }),
     fetch(`${SUPABASE_URL}/rest/v1/products?select=id,name,price,category,sub_category,description,is_public&order=id`, { headers }),
+    fetch(`${SUPABASE_URL}/rest/v1/blogs?select=id,title,category,cover_image,author_name,created_at&order=created_at.desc`, { headers }),
   ]);
-  const visits = await visitsRes.json();
-  const cats = await catRes.json();
-  const items = await itemRes.json();
+  const stylesData = await stylesRes.json();
 
-  tagCategories = (cats || []).map(c => ({
-    id: c.id, name: c.name,
-    items: (items || []).filter(i => i.category_id === c.id).map(i => i.name)
-  }));
-
-  allStyles = (visits || []).map(v => {
-    let pd = {};
-    try { pd = v.photo_data ? JSON.parse(v.photo_data) : {}; } catch(e) {}
+  // 8/5: お客様ページ側を新しい「styles」テーブルに接続(旧visits.is_public方式は8/4のスタイル管理機能移行で廃止済み)。
+  // 公開/非公開のトグルは設けず、登録された全スタイル(写真ありのもの)を自動で公開する運用。
+  allStyles = (stylesData || []).map(s => {
+    const categoryLabel = s.category === "mens" ? "メンズ" : "レディース";
+    const hashtags = s.hashtags || [];
     return {
-      id: v.id, date: v.date,
-      isPublic: v.is_public || false,
-      after: pd.after || [], before: pd.before || [],
-      tags: v.tags || [],
-      menus: v.menus || [],
-      styleName: v.style_name || "",
-      styleComment: v.style_comment || ""
+      id: s.id,
+      styleName: s.style_name || "",
+      stylistComment: s.stylist_comment || "",
+      categoryLabel, length: s.length || "",
+      menuText: s.menu_text || "",
+      hashtags,
+      coverImage: s.cover_image || "",
+      facets: [categoryLabel, s.length, ...hashtags].filter(Boolean),
+      images: [], imagesLoaded: false,
     };
-  }).filter(s => (s.after.length > 0 || s.before.length > 0) && s.isPublic);
+  }).filter(s => s.coverImage); // 写真が無いスタイルはお客様ページには出さない
+
+  buildFilters();
 
   const prodsData = await prodsRes.json();
   allProducts = (prodsData || []).filter(p => p.is_public).map(p => ({
@@ -294,16 +320,37 @@ async function fetchData() {
     photos: [], photosLoaded: false, description: p.description||""
   }));
 
-  buildFilters();
+  // 8/5: ブログタブ新設。blogsテーブルから一覧を取得し、本文(body_blocks)はモーダルを開いた時に遅延取得
+  const blogsData = await blogsRes.json();
+  allBlogs = (blogsData || []).map(b => ({
+    id: b.id, title: b.title || "", category: b.category || "",
+    coverImage: b.cover_image || "", authorName: b.author_name || "",
+    createdAt: b.created_at || "", bodyBlocks: [], bodyLoaded: false,
+  }));
+
   renderGallery();
   renderProducts();
+  renderBlogList();
 }
 
 let tempFilters = new Set();
 
+// 8/5: 絞り込みの元データを、旧tag_categories/tag_itemsテーブルではなく
+// 読み込んだスタイル自身のカテゴリ・長さ・ハッシュタグから動的に組み立てる方式に変更
 function buildFilters() {
   const wrap = document.getElementById("filterWrap");
-  if (!tagCategories.length) return;
+  const catSet = new Set(), lengthSet = new Set(), tagCounts = {};
+  allStyles.forEach(s => {
+    catSet.add(s.categoryLabel);
+    if (s.length) lengthSet.add(s.length);
+    s.hashtags.forEach(t => { if (t) tagCounts[t] = (tagCounts[t] || 0) + 1; });
+  });
+  tagCategories = [
+    { name: "カテゴリ", items: [...catSet] },
+    { name: "長さ", items: [...lengthSet] },
+    { name: "ハッシュタグ", items: Object.keys(tagCounts).sort((a,b) => tagCounts[b]-tagCounts[a]) },
+  ].filter(c => c.items.length > 0);
+  if (!tagCategories.length) { wrap.style.display = "none"; return; }
   wrap.style.display = "block";
   updateFilterBar();
 }
@@ -386,10 +433,9 @@ function updateFilterBar() {
 
 function renderGallery() {
   const app = document.getElementById("app");
-  const catNames = new Set(tagCategories.map(c => c.name));
   let filtered = allStyles;
   if (activeFilters.size > 0) {
-    filtered = allStyles.filter(s => [...activeFilters].every(f => s.tags.includes(f)));
+    filtered = allStyles.filter(s => [...activeFilters].every(f => s.facets.includes(f)));
   }
   if (!filtered.length) {
     app.innerHTML = `<div class="empty"><div class="empty-icon">✂️</div><div class="empty-text">スタイルがまだありません</div></div>`;
@@ -404,18 +450,16 @@ function renderGallery() {
     <div class="gallery">`;
 
   filtered.forEach((s, idx) => {
-    const imgUrl = (s.after[0] || s.before[0])?.url || "";
-    const catTags = s.tags.filter(t => catNames.has(t));
-    const subTags = s.tags.filter(t => !catNames.has(t));
     html += `
       <div class="card" style="animation-delay:${idx * 0.04}s" onclick="openModal(${s.id})">
         <div class="card-photos">
-          ${imgUrl ? `<img class="card-img" src="${imgUrl}" alt="style" loading="lazy">` : `<div class="card-img-placeholder">📷</div>`}
+          <img class="card-img" src="${s.coverImage}" alt="style" loading="lazy">
         </div>
         <div class="card-body">
           <div class="card-tags">
-            ${catTags.map(t => `<span class="card-tag cat">${t}</span>`).join("")}
-            ${subTags.map(t => `<span class="card-tag">${t}</span>`).join("")}
+            <span class="card-tag cat">${s.categoryLabel}</span>
+            ${s.length ? `<span class="card-tag">${s.length}</span>` : ""}
+            ${s.hashtags.slice(0, 3).map(t => `<span class="card-tag">${t}</span>`).join("")}
           </div>
         </div>
       </div>`;
@@ -424,46 +468,35 @@ function renderGallery() {
   app.innerHTML = html;
 }
 
-function openModal(id) {
+// 8/5: 一覧はcover_image(軽量サムネイル)のみで表示し、詳細を開いた時だけ
+// 本来の写真(imagesカラム・最大3枚)を個別取得する(商品タブと同じ遅延読込パターン)
+async function openModal(id) {
   const s = allStyles.find(x => x.id === id);
   if (!s) return;
   currentModalId = id;
-  currentModalPhotoType = s.after.length > 0 ? "after" : "before";
-  const catNames = new Set(tagCategories.map(c => c.name));
-  const catTags = s.tags.filter(t => catNames.has(t));
-  const subTags = s.tags.filter(t => !catNames.has(t));
-  const hasBA = s.after.length > 0 && s.before.length > 0;
-  const mainImg = (currentModalPhotoType === "after" ? s.after[0] : s.before[0])?.url || "";
 
-  // サムネイル行（Before/After）
-  let thumbsHtml = "";
-  if (hasBA) {
-    thumbsHtml = `<div class="modal-ba-row">`;
-    s.after.forEach((img, i) => {
-      thumbsHtml += `
-        <div>
-          <img class="modal-thumb ${i === 0 && currentModalPhotoType === 'after' ? 'active' : ''}"
-            src="${img.url}" onclick="switchModalPhoto('after', ${i})" loading="lazy">
-          ${i === 0 ? `<div class="modal-thumb-label">After</div>` : ""}
-        </div>`;
-    });
-    s.before.forEach((img, i) => {
-      thumbsHtml += `
-        <div>
-          <img class="modal-thumb ${i === 0 && currentModalPhotoType === 'before' ? 'active' : ''}"
-            src="${img.url}" onclick="switchModalPhoto('before', ${i})" loading="lazy">
-          ${i === 0 ? `<div class="modal-thumb-label">Before</div>` : ""}
-        </div>`;
-    });
-    thumbsHtml += `</div>`;
+  if (!s.imagesLoaded) {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/styles?select=images&id=eq.${id}`, { headers });
+      const data = await res.json();
+      s.images = data[0]?.images || [];
+      s.imagesLoaded = true;
+    } catch(e) { s.images = []; s.imagesLoaded = true; }
   }
 
-  // メニュー
-  const menusHtml = s.menus.length > 0
-    ? `<div class="modal-menus">${s.menus.map((m, i) => `
+  const imgs = s.images.length ? s.images : [s.coverImage];
+  const mainImg = imgs[0] || "";
+
+  const thumbsHtml = imgs.length > 1
+    ? `<div class="modal-ba-row">${imgs.map((url, i) => `
+        <img class="modal-thumb ${i === 0 ? 'active' : ''}" src="${url}" onclick="switchModalPhoto(${id}, ${i})" loading="lazy">`).join("")}</div>`
+    : "";
+
+  const menusHtml = s.menuText
+    ? `<div class="modal-menus">${s.menuText.split("＋").map(t => t.trim()).filter(Boolean).map((name, i) => `
         <div class="modal-menu-item">
           <div class="modal-menu-dot" style="background:${MENU_COLORS[i % MENU_COLORS.length]}"></div>
-          <div class="modal-menu-name">${m.name}</div>
+          <div class="modal-menu-name">${name}</div>
         </div>`).join("")}</div>`
     : "";
 
@@ -474,12 +507,13 @@ function openModal(id) {
     ${thumbsHtml}
     <div class="modal-body">
       ${s.styleName ? `<div class="modal-style-name">${s.styleName}</div>` : ""}
-      ${s.styleComment ? `<div class="modal-style-comment">${s.styleComment}</div>` : ""}
+      ${s.stylistComment ? `<div class="modal-style-comment">${s.stylistComment}</div>` : ""}
       ${menusHtml}
-      ${s.tags.length > 0 ? `<div class="modal-tags">
-        ${catTags.map(t => `<span class="modal-tag cat">${t}</span>`).join("")}
-        ${subTags.map(t => `<span class="modal-tag">${t}</span>`).join("")}
-      </div>` : ""}
+      <div class="modal-tags">
+        <span class="modal-tag cat">${s.categoryLabel}</span>
+        ${s.length ? `<span class="modal-tag">${s.length}</span>` : ""}
+        ${s.hashtags.map(t => `<span class="modal-tag">${t}</span>`).join("")}
+      </div>
       <a href="${HP_URL}" target="_blank" class="modal-btn-reserve">ホットペッパーで予約する</a>
       <button class="modal-btn-close" onclick="closeModal()">閉じる</button>
     </div>`;
@@ -488,17 +522,11 @@ function openModal(id) {
   document.body.style.overflow = "hidden";
 }
 
-window.switchModalPhoto = (type, idx) => {
-  const s = allStyles.find(x => x.id === currentModalId);
-  if (!s) return;
-  currentModalPhotoType = type;
-  const imgs = type === "after" ? s.after : s.before;
-  if (!imgs[idx]) return;
-  document.getElementById("modalMainImg").src = imgs[idx].url;
-  document.querySelectorAll(".modal-thumb").forEach(el => el.classList.remove("active"));
-  const allImgs = [...s.after, ...s.before];
-  const globalIdx = type === "after" ? idx : s.after.length + idx;
-  document.querySelectorAll(".modal-thumb")[globalIdx]?.classList.add("active");
+window.switchModalPhoto = (id, idx) => {
+  const s = allStyles.find(x => x.id === id);
+  if (!s || !s.images[idx]) return;
+  document.getElementById("modalMainImg").src = s.images[idx];
+  document.querySelectorAll(".modal-thumb").forEach((el, i) => el.classList.toggle("active", i === idx));
 };
 
 function closeModal() {
@@ -515,10 +543,12 @@ function handleOverlayClick(e) {
 function switchTab(tab) {
   document.getElementById("tab-style").classList.toggle("active", tab === "style");
   document.getElementById("tab-products").classList.toggle("active", tab === "products");
+  document.getElementById("tab-blog").classList.toggle("active", tab === "blog");
   document.getElementById("filterWrap").style.display = tab === "style" ? "block" : "none";
   document.getElementById("app").style.display = tab === "style" ? "block" : "none";
   document.getElementById("productsApp").style.display = tab === "products" ? "block" : "none";
-  // タブ切り替え時にスライドショー起動
+  document.getElementById("blogApp").style.display = tab === "blog" ? "block" : "none";
+  // タブ切り替え時にスライドショー起動(ブログタブはスライドショー無し)
   stopSlideshow();
   if (tab === "style") {
     setTimeout(startSlideshow, 300);
@@ -526,6 +556,67 @@ function switchTab(tab) {
     setTimeout(startProductSlideshow, 300);
   }
 }
+
+// ── Blog ──
+function renderBlogList() {
+  const el = document.getElementById("blogList");
+  if (!allBlogs.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">📝</div><div class="empty-text">ブログはまだありません</div></div>`;
+    return;
+  }
+  let html = `<div class="blog-list">`;
+  allBlogs.forEach((b, idx) => {
+    const dateStr = b.createdAt ? new Date(b.createdAt).toLocaleDateString("ja-JP") : "";
+    html += `
+      <div class="blog-card" style="animation-delay:${idx * 0.04}s" onclick="openBlogModal(${b.id})">
+        ${b.coverImage ? `<img class="blog-cover" src="${b.coverImage}" loading="lazy">` : `<div class="blog-cover"></div>`}
+        <div class="blog-card-body">
+          ${b.category ? `<span class="blog-card-cat">${escapeHtml(b.category)}</span>` : ""}
+          <div class="blog-card-title">${escapeHtml(b.title)}</div>
+          <div class="blog-card-meta">${[b.authorName, dateStr].filter(Boolean).map(escapeHtml).join(" ・ ")}</div>
+        </div>
+      </div>`;
+  });
+  html += `</div>`;
+  el.innerHTML = html;
+}
+
+// 本文(body_blocks)はモーダルを開いた時に個別取得(一覧取得を軽くするため)
+async function openBlogModal(id) {
+  const b = allBlogs.find(x => x.id === id);
+  if (!b) return;
+
+  if (!b.bodyLoaded) {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/blogs?select=body_blocks&id=eq.${id}`, { headers });
+      const data = await res.json();
+      b.bodyBlocks = data[0]?.body_blocks || [];
+      b.bodyLoaded = true;
+    } catch(e) { b.bodyBlocks = []; b.bodyLoaded = true; }
+  }
+
+  const dateStr = b.createdAt ? new Date(b.createdAt).toLocaleDateString("ja-JP") : "";
+  const blocksHtml = b.bodyBlocks.map(blk => {
+    if (blk.type === "image" && blk.image) return `<img class="blog-block-img" src="${blk.image}" loading="lazy">`;
+    if (blk.type === "text" && blk.text) return `<div class="blog-block-text">${escapeHtml(blk.text)}</div>`;
+    return "";
+  }).join("");
+
+  document.getElementById("modalContent").innerHTML = `
+    ${b.coverImage ? `<img class="blog-detail-cover" src="${b.coverImage}">` : ""}
+    <div class="blog-detail-body">
+      ${b.category ? `<span class="blog-detail-cat">${escapeHtml(b.category)}</span>` : ""}
+      <div class="blog-detail-title">${escapeHtml(b.title)}</div>
+      <div class="blog-detail-meta">${[b.authorName, dateStr].filter(Boolean).map(escapeHtml).join(" ・ ")}</div>
+      ${blocksHtml}
+      <a href="${HP_URL}" target="_blank" class="modal-btn-reserve">ホットペッパーで予約する</a>
+      <button class="modal-btn-close" onclick="closeModal()">閉じる</button>
+    </div>`;
+
+  document.getElementById("modal").classList.add("open");
+  document.body.style.overflow = "hidden";
+}
+window.openBlogModal = openBlogModal;
 
 let activeProdFilters = new Set();
 let tempProdFilters = new Set();
@@ -731,8 +822,7 @@ const SLIDE_INTERVAL = 3000;
 function buildSlideshowImages() {
   const imgs = [];
   allStyles.forEach(s => {
-    const url = (s.after[0] || s.before[0])?.url || "";
-    if (url) imgs.push({ url, styleName: s.styleName, tags: s.tags });
+    if (s.coverImage) imgs.push({ url: s.coverImage, styleName: s.styleName, tags: s.facets });
   });
   return imgs;
 }
@@ -805,6 +895,8 @@ function showSlide(idx) {
     showSlide(ssIndex);
   }, SLIDE_INTERVAL);
 }
+
+document.getElementById("versionLabel").textContent = STYLE_VERSION;
 
 fetchData().then(() => {
   // データ読み込み完了後にスライドショー自動スタート

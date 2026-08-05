@@ -33,7 +33,7 @@ const HDRS = { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY
 const C = { bg:"#faf8f4", card:"#ffffff", border:"#ece7df", text:"#2a2218", sub:"#9a9088", accent:"#7a6848", red:"#ff3b30", orange:"#e8924a", green:"#6aaa7a" };
 const yen = n => "¥" + (n||0).toLocaleString();
 
-const fromDb = r => ({ id:r.id, name:r.name, price:r.price||0, cost:r.cost||0, stock:r.stock||0, minStock:r.min_stock||3, category:r.category||"", subCategory:r.sub_category||"", placeholder:r.placeholder||false, sortOrder:r.sort_order||0, productCode:(r.product_code||"").trim() });
+const fromDb = r => ({ id:r.id, name:r.name, price:r.price||0, cost:r.cost||0, stock:r.stock||0, minStock:r.min_stock||3, category:r.category||"", subCategory:r.sub_category||"", placeholder:r.placeholder||false, sortOrder:r.sort_order||0, productCode:(r.product_code||"").trim(), isPublic:r.is_public||false });
 
 // あいまい照合用の正規化：空白除去・小文字化・カタカナ→ひらがな・全角英数→半角
 const normalize = s => (s||"").toLowerCase()
@@ -176,7 +176,7 @@ const css = {
   label: { fontSize:12, color:C.sub, fontWeight:700, marginBottom:6 },
 };
 
-const STOCK_VERSION = "v2026.08.03-c"; // このファイルのバージョン(ヘッダーに表示、アップロード反映確認用)
+const STOCK_VERSION = "v2026.08.05-a"; // このファイルのバージョン(ヘッダーに表示、アップロード反映確認用)
 
 function App() {
   const [authed, setAuthed] = useState(localStorage.getItem("stock_auth") === "1");
@@ -196,7 +196,7 @@ function App() {
   const [recordDate, setRecordDate] = useState(""); // 入出庫の記録日(空欄=今日)。過去日付での入庫記録に使う
   const [movLoading, setMovLoading] = useState(false);
 
-  const emptyForm = { name:"", code:"", category:"", subCategory:"", price:"", cost:"", stock:"", minStock:"3" };
+  const emptyForm = { name:"", code:"", category:"", subCategory:"", price:"", cost:"", stock:"", minStock:"3", isPublic:false };
   const [modal, setModal] = useState(null); // { mode:"add"|"edit", id? }
   const [selectMode, setSelectMode] = useState(false);
   const [openCats, setOpenCats] = useState({});
@@ -287,7 +287,7 @@ function App() {
     try {
       setLoadError(false);
       const [pRes, sRes] = await Promise.all([
-        fetch(SUPABASE_URL + "/rest/v1/products?select=id,name,price,cost,stock,min_stock,category,sub_category,placeholder,sort_order,product_code&order=sort_order", { headers: HDRS }),
+        fetch(SUPABASE_URL + "/rest/v1/products?select=id,name,price,cost,stock,min_stock,category,sub_category,placeholder,sort_order,product_code,is_public&order=sort_order", { headers: HDRS }),
         fetch(SUPABASE_URL + "/rest/v1/settings?select=value&key=eq.shopCategoryList", { headers: HDRS }),
       ]);
       if (!pRes.ok || !sRes.ok) throw new Error();
@@ -540,7 +540,7 @@ function App() {
 
   // ── 追加・編集・削除・在庫増減 ──
   const openAdd = () => { setForm(emptyForm); setModal({ mode:"add" }); };
-  const openEdit = (p) => { setForm({ name:p.name, code:p.productCode||"", category:p.category||"", subCategory:p.subCategory||"", price:String(p.price||0), cost:String(p.cost||0), stock:String(p.stock||0), minStock:String(p.minStock||3) }); setModal({ mode:"edit", id:p.id }); };
+  const openEdit = (p) => { setForm({ name:p.name, code:p.productCode||"", category:p.category||"", subCategory:p.subCategory||"", price:String(p.price||0), cost:String(p.cost||0), stock:String(p.stock||0), minStock:String(p.minStock||3), isPublic:p.isPublic||false }); setModal({ mode:"edit", id:p.id }); };
 
   const saveProduct = async () => {
     if (!form.name.trim()) return notify("商品名を入力してください","error");
@@ -554,13 +554,14 @@ function App() {
       cost: parseInt(form.cost)||0,
       stock: parseInt(form.stock)||0,
       min_stock: parseInt(form.minStock)||3,
+      is_public: form.isPublic||false,
     };
     setSaving(true);
     try {
       await ensureShopCategory(body.category);
       if (modal.mode === "add") {
         const res = await fetch(SUPABASE_URL + "/rest/v1/products", { method:"POST", headers:HDRS,
-          body: JSON.stringify({ ...body, placeholder:false, photos:[], is_public:false, description:null, sort_order: Date.now() }) });
+          body: JSON.stringify({ ...body, placeholder:false, photos:[], description:null, sort_order: Date.now() }) });
         if (!res.ok) throw new Error(await res.text());
         const rows = await res.json();
         if (rows.length) setProducts(p => [...p, fromDb(rows[0])]);
@@ -1197,6 +1198,12 @@ function App() {
                   ))}
                 </div>
               )}
+            </div>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 2px", marginBottom:12, borderTop:`1px solid ${C.border}`, borderBottom:`1px solid ${C.border}` }}>
+              <span style={{ fontSize:14, color:C.sub }}>お客様ページへの公開</span>
+              <button onClick={() => setForm(p=>({...p,isPublic:!p.isPublic}))} style={{ width:48, height:28, borderRadius:14, border:"none", background:form.isPublic?"#E8DCC3":"#d1d1d6", cursor:"pointer", position:"relative", flexShrink:0 }}>
+                <div style={{ width:22, height:22, borderRadius:"50%", background:"#fff", position:"absolute", top:3, left:form.isPublic?23:3, transition:"left 0.2s", boxShadow:"0 1px 4px rgba(0,0,0,0.2)" }} />
+              </button>
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
               {[["price","売価"],["cost","原価"],["stock","在庫数"],["minStock","最小在庫"]].filter(([k]) => k !== "price" || view !== "gyomu").map(([k,l]) => (
