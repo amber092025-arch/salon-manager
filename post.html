@@ -28,7 +28,7 @@
 
 const { useState, useRef, useCallback, useEffect, useMemo } = React;
 
-const POST_VERSION = "v2026.08.05-a"; // このアプリのバージョン(反映確認用)
+const POST_VERSION = "v2026.08.05-b"; // このアプリのバージョン(反映確認用)
 
 // ── Supabase client ──
 const SUPABASE_URL = "https://yvsavbxijdggzihvoram.supabase.co";
@@ -308,20 +308,25 @@ function App() {
   }
 
   return (
-    <div>
+    <div style={{ background: C.bg, height: "100dvh", maxWidth: 480, margin: "0 auto", fontFamily: "-apple-system, 'Hiragino Sans', 'Yu Gothic UI', sans-serif", position: "relative", overflowX: "hidden", display: "flex", flexDirection: "column" }}>
       {loadError && (
-        <div style={{ background: "#ffe8e8", color: C.red, fontSize: 12, padding: "8px 16px", textAlign: "center" }}>
-          一部データの読み込みに失敗しました。電波の良い場所で再読み込みしてください
+        <div style={{ position: "sticky", top: 0, zIndex: 300, background: "#c0392b", color: "#fff", padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, fontSize: 13, flexShrink: 0 }}>
+          <span style={{ flex: 1, fontWeight: 600 }}>一部データの読み込みに失敗しました</span>
+          <button onClick={() => window.location.reload()} style={{ background: "#fff", color: "#c0392b", border: "none", borderRadius: 8, padding: "6px 12px", fontWeight: 700, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>再読み込み</button>
+          <button onClick={() => setLoadError(false)} style={{ background: "transparent", color: "#fff", border: "none", fontSize: 16, cursor: "pointer", padding: "2px 4px" }}>✕</button>
         </div>
       )}
-      {tab === "more" && <HomeMenuTab setTab={setTab} styleCount={styles.length} blogCount={blogs.length} />}
-      {tab === "styleList" && <StyleListTab setTab={setTab} notify={notify} styles={styles} menus={menus} deleteStyle={deleteStyle} setEditingStyleId={setEditingStyleId} />}
-      {tab === "styleForm" && <StyleFormTab setTab={setTab} notify={notify} menus={menus} styles={styles} editingStyleId={editingStyleId} addStyle={addStyle} updateStyle={updateStyle} tagCategories={tagCategories} />}
-      {tab === "blogList" && <BlogListTab setTab={setTab} notify={notify} blogs={blogs} menus={menus} deleteBlog={deleteBlog} setEditingBlogId={setEditingBlogId} />}
-      {tab === "blogForm" && <BlogFormTab setTab={setTab} notify={notify} menus={menus} blogs={blogs} editingBlogId={editingBlogId} addBlog={addBlog} updateBlog={updateBlog} />}
-      {tab === "tagSettings" && <TagSettingsTab setTab={setTab} notify={notify} tagCategories={tagCategories} setTagCategories={setTagCategories} />}
-      {tab === "blogPrompt" && <BlogPromptTab setTab={setTab} notify={notify} />}
-      {tab === "stylupPrompt" && <StylupPromptTab setTab={setTab} notify={notify} />}
+      {/* このアプリの唯一のスクロール領域(index.htmlと同じ構成: 外枠height:100dvh+flex:1+minHeight:0+overflowY:auto) */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+        {tab === "more" && <HomeMenuTab setTab={setTab} styleCount={styles.length} blogCount={blogs.length} />}
+        {tab === "styleList" && <StyleListTab setTab={setTab} notify={notify} styles={styles} menus={menus} deleteStyle={deleteStyle} setEditingStyleId={setEditingStyleId} />}
+        {tab === "styleForm" && <StyleFormTab setTab={setTab} notify={notify} menus={menus} styles={styles} editingStyleId={editingStyleId} addStyle={addStyle} updateStyle={updateStyle} tagCategories={tagCategories} />}
+        {tab === "blogList" && <BlogListTab setTab={setTab} notify={notify} blogs={blogs} menus={menus} deleteBlog={deleteBlog} setEditingBlogId={setEditingBlogId} />}
+        {tab === "blogForm" && <BlogFormTab setTab={setTab} notify={notify} menus={menus} blogs={blogs} editingBlogId={editingBlogId} addBlog={addBlog} updateBlog={updateBlog} />}
+        {tab === "tagSettings" && <TagSettingsTab setTab={setTab} notify={notify} tagCategories={tagCategories} setTagCategories={setTagCategories} />}
+        {tab === "blogPrompt" && <BlogPromptTab setTab={setTab} notify={notify} />}
+        {tab === "stylupPrompt" && <StylupPromptTab setTab={setTab} notify={notify} />}
+      </div>
       {toast && <Toast msg={toast.msg} type={toast.type} />}
     </div>
   );
