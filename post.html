@@ -1,0 +1,1674 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="投稿" />
+  <link rel="apple-touch-icon" href="icon_post.png" />
+  <link rel="icon" href="icon_post.png" />
+  <title>スタイル・ブログ投稿 | Amber</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; overflow: hidden; } /* 実際のスクロールはアプリ内のコンテンツ領域が担う(下部ナビをposition:fixedにしないための土台) */
+    body { font-family: -apple-system, 'Hiragino Sans', sans-serif; background: #faf8f4; }
+    #root { max-width: 480px; margin: 0 auto; height: 100%; }
+    .photo-preview { height: 375px !important; max-height: 375px !important; overflow: hidden !important; position: relative; flex-shrink: 0; }
+    .photo-preview img { width: 100%; height: 375px !important; max-height: 375px !important; object-fit: cover; display: block; }
+    input[type="date"] { -webkit-appearance: none; appearance: none; }
+    input[type="date"]::-webkit-date-and-time-value { text-align: left; }
+  </style>
+</head>
+<body>
+  <div id="root"><div style="display:flex;align-items:center;justify-content:center;height:100vh;font-size:18px;color:#666">読み込み中...</div></div>
+  <script type="text/babel" data-presets="react">
+
+const { useState, useRef, useCallback, useEffect, useMemo } = React;
+
+const POST_VERSION = "v2026.08.05-a"; // このアプリのバージョン(反映確認用)
+
+// ── Supabase client ──
+const SUPABASE_URL = "https://yvsavbxijdggzihvoram.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2c2F2YnhpamRnZ3ppaHZvcmFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NTkyNTEsImV4cCI6MjA5NTUzNTI1MX0.v_5yFWKizgOSUHifx10vSm7OEafy6fZhjy5cff-QHQw";
+
+const sb = {
+  from: (table) => ({
+    _table: table,
+    select: function(cols = "*") { this._cols = cols; this._filters = []; return this; },
+    insert: function(data) { this._method = "POST"; this._data = data; return this; },
+    upsert: function(data) { this._method = "POST"; this._data = data; this._upsert = true; return this; },
+    update: function(data) { this._method = "PATCH"; this._data = data; this._filters = []; return this; },
+    delete: function() { this._method = "DELETE"; this._filters = []; return this; },
+    eq: function(col, val) { this._filters = [...(this._filters||[]), `${col}=eq.${val}`]; return this; },
+    order: function(col, opts={}) { this._order = `${col}.${opts.ascending===false?"desc":"asc"}`; return this; },
+    then: async function(resolve, reject) {
+      try {
+        const base = `${SUPABASE_URL}/rest/v1/${this._table}`;
+        const headers = {
+          "apikey": SUPABASE_KEY,
+          "Authorization": `Bearer ${SUPABASE_KEY}`,
+          "Content-Type": "application/json",
+          "Prefer": this._upsert ? "resolution=merge-duplicates,return=representation" : "return=representation",
+        };
+        let url = base;
+        const params = [];
+        if (this._cols && !this._method) params.push(`select=${this._cols}`);
+        if (this._filters) this._filters.forEach(f => params.push(f));
+        if (this._order) params.push(`order=${this._order}`);
+        if (params.length) url += "?" + params.join("&");
+
+        const method = this._method || "GET";
+        const res = await fetch(url, {
+          method,
+          headers,
+          body: this._data ? JSON.stringify(this._data) : undefined,
+        });
+        if (!res.ok) {
+          const err = await res.text();
+          throw new Error(err);
+        }
+        const data = method === "DELETE" || method === "PATCH" ? [] : await res.json();
+        resolve({ data, error: null });
+      } catch(e) {
+        resolve({ data: null, error: e });
+      }
+    }
+  })
+};
+
+// ── 通信リトライヘルパー（失敗時は1秒→2秒→3秒待って最大3回試行） ──
+const sbRetry = async (buildQuery, tries = 3) => {
+  let last = null;
+  for (let i = 0; i < tries; i++) {
+    const r = await buildQuery();
+    if (!r.error) return r;
+    last = r;
+    console.warn("sbRetry: attempt " + (i + 1) + " failed", r.error);
+    if (i < tries - 1) await new Promise(res => setTimeout(res, 1000 * (i + 1)));
+  }
+  return last;
+};
+const C = {
+  bg: "#faf8f4", card: "#ffffff", border: "#ece7df",
+  text: "#2a2218", sub: "#9a9088", accent: "#7a6848",
+  green: "#6aaa7a", red: "#ff3b30", orange: "#e8924a",
+  pink: "#ff2d55", purple: "#9a8aaa",
+};
+
+const css = {
+  card: { background: C.card, borderRadius: 14, padding: "16px", marginBottom: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" },
+  input: { width: "100%", border: `1px solid ${C.border}`, borderRadius: 10, padding: "11px 14px", fontSize: 15, background: "#fff", color: C.text, outline: "none", boxSizing: "border-box", fontFamily: "inherit" },
+  label: { fontSize: 13, color: C.sub, display: "block", marginBottom: 4, fontWeight: 500 },
+  btn: (color = C.accent, fill = true) => ({
+    padding: "11px 20px", borderRadius: 12, border: fill ? "none" : `1.5px solid ${color}`,
+    background: fill ? color : "transparent", color: fill ? "#fff" : color,
+    fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+  }),
+  tag: (color) => ({ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600, background: color + "18", color }),
+  section: { fontSize: 13, fontWeight: 700, color: C.sub, letterSpacing: "0.06em", textTransform: "uppercase", padding: "20px 0 8px" },
+};
+
+function Badge({ color, children }) {
+  return <span style={css.tag(color)}>{children}</span>;
+}
+function Divider() {
+  return <div style={{ height: 1, background: C.border, margin: "4px 0" }} />;
+}
+function Toast({ msg, type }) {
+  return (
+    <div style={{
+      position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", zIndex: 9999,
+      background: type === "error" ? C.red : "#2a2218", color: "#fff",
+      padding: "12px 24px", borderRadius: 100, fontSize: 14, fontWeight: 600,
+      boxShadow: "0 4px 20px rgba(0,0,0,0.25)", whiteSpace: "nowrap",
+    }}>{msg}</div>
+  );
+}
+
+// 音声入力共通フック：マイクボタンから検索欄などにテキストを流し込む(iOS Safari前提、非対応ブラウザではsupported=falseでボタン自体を出さない)
+// status: idle→starting(タップ直後〜接続+安全バッファ待ち)→listening(合図音を鳴らして「話してOK」を通知)
+// onstartが発火しても実際の音声キャプチャがすぐには安定しないため、onstart後にREADY_BUFFER_MSだけ余裕を持たせてから合図音+赤表示にしている(stock.htmlと同じ実装)
+
+// ── データ変換(index.htmlと同じ定義。menus/styles/blogsのみ) ──
+const toDb = {
+  menu: (m) => ({ name:m.name, price:m.price||0, category:m.category||null, duration:m.duration||60, show_tilde:m.showTilde||false, tags:m.tags||[], sort_order:m.sortOrder||Date.now() }),
+  style: (s) => ({ images:s.images||[], cover_image:s.coverImage||null, category:s.category||"ladies", length:s.length||"", stylist_name:s.stylistName||"", stylist_comment:s.stylistComment||"", style_name:s.styleName||"", menu_flags:s.menuFlags||[], menu_text:s.menuText||"", coupon_menu_id:s.couponMenuId||null, hashtags:s.hashtags||[], tags:s.tags||[], model_volume:s.modelVolume||"", model_texture:s.modelTexture||"", model_thickness:s.modelThickness||"", model_curl:s.modelCurl||"", model_face:s.modelFace||"", model_age:s.modelAge||"", sort_order:s.sortOrder||Date.now() }),
+  blog: (b) => ({ images:b.images||[], cover_image:b.coverImage||null, category:b.category||"", title:b.title||"", body:b.body||"", body_blocks:b.bodyBlocks||[], coupon_menu_id:b.couponMenuId||null, author_name:b.authorName||"", sort_order:b.sortOrder||Date.now() }),
+};
+const fromDb = {
+  menu: (r) => ({ id:r.id, name:r.name, price:r.price||0, category:r.category||"", duration:r.duration||60, showTilde:r.show_tilde||false, tags:r.tags||[], sortOrder:r.sort_order||0, menuKind:r.menu_kind||"menu", targetCustomer:r.target_customer||"all", isBookable:r.is_bookable!==false }),
+  style: (r) => ({ id:r.id, images:r.images||[], coverImage:r.cover_image||null, category:r.category||"ladies", length:r.length||"", stylistName:r.stylist_name||"", stylistComment:r.stylist_comment||"", styleName:r.style_name||"", menuFlags:r.menu_flags||[], menuText:r.menu_text||"", couponMenuId:r.coupon_menu_id||null, hashtags:r.hashtags||[], tags:r.tags||[], modelVolume:r.model_volume||"", modelTexture:r.model_texture||"", modelThickness:r.model_thickness||"", modelCurl:r.model_curl||"", modelFace:r.model_face||"", modelAge:r.model_age||"", sortOrder:r.sort_order||0, createdAt:r.created_at||null }),
+  blog: (r) => ({ id:r.id, images:r.images||[], coverImage:r.cover_image||null, category:r.category||"", title:r.title||"", body:r.body||"", bodyBlocks:r.body_blocks||[], couponMenuId:r.coupon_menu_id||null, authorName:r.author_name||"", sortOrder:r.sort_order||0, createdAt:r.created_at||null }),
+};
+
+
+// ── HomeMenuTab: このアプリのトップ画面(スタイル管理・ブログ管理への入口) ──
+function HomeMenuTab({ setTab, styleCount, blogCount }) {
+  return (
+    <div style={{ background: C.bg, minHeight: "100vh" }}>
+      <div style={{ background: "#fff", padding: "20px 16px 16px", borderBottom: `1px solid ${C.border}` }}>
+        <div style={{ fontWeight: 800, fontSize: 20, color: C.text }}>Amber スタイル&ブログ</div>
+        <div style={{ fontSize: 11, color: C.sub, marginTop: 2 }}>{POST_VERSION}</div>
+      </div>
+      <div style={{ padding: 16 }}>
+        <div onClick={() => setTab("styleList")}
+          style={{ display: "flex", alignItems: "center", gap: 14, background: "#fff", borderRadius: 16, padding: 18, marginBottom: 14, border: `1px solid ${C.border}`, cursor: "pointer" }}>
+          <div style={{ width: 48, height: 48, borderRadius: 14, background: "#faf0f5", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>💇</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 800, fontSize: 16, color: C.text }}>スタイル管理</div>
+            <div style={{ fontSize: 12, color: C.sub, marginTop: 2 }}>{styleCount}件登録済み</div>
+          </div>
+          <div style={{ color: C.sub, fontSize: 18 }}>›</div>
+        </div>
+        <div onClick={() => setTab("blogList")}
+          style={{ display: "flex", alignItems: "center", gap: 14, background: "#fff", borderRadius: 16, padding: 18, border: `1px solid ${C.border}`, cursor: "pointer" }}>
+          <div style={{ width: 48, height: 48, borderRadius: 14, background: "#fff3e8", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>📝</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 800, fontSize: 16, color: C.text }}>ブログ管理</div>
+            <div style={{ fontSize: 12, color: C.sub, marginTop: 2 }}>{blogCount}件投稿済み</div>
+          </div>
+          <div style={{ color: C.sub, fontSize: 18 }}>›</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [tab, setTab] = useState("more"); // "more"=トップ画面(HomeMenuTab)。index.html側の各タブが"← メニュー"でsetTab("more")するのと合わせている
+  const [menus, setMenus] = useState([]);
+  const [styles, setStyles] = useState([]);
+  const [editingStyleId, setEditingStyleId] = useState(null);
+  const [blogs, setBlogs] = useState([]);
+  const [editingBlogId, setEditingBlogId] = useState(null);
+  const [tagCategories, setTagCategories] = useState([]);
+  const [toast, setToast] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+
+  const notify = useCallback((msg, type = "ok") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 2800);
+  }, []);
+
+  // 初回読み込み: このアプリで必要な最小限のデータのみ(顧客・来店・予約・商品などは読まない軽量版)
+  useEffect(() => {
+    (async () => {
+      try {
+        // プロンプト設定をlocalStorageへ同期(index.html側の「スタイルアップ プロンプト編集」「ブログプロンプト編集」で
+        // 保存された内容がSupabaseのsettingsテーブル経由でこちらにも反映される)
+        const s = await sbRetry(() => sb.from("settings").select());
+        if (!s.error && s.data) {
+          const settingsMap = {};
+          s.data.forEach(row => { settingsMap[row.key] = row.value; });
+          if (settingsMap.blogPrompt && !settingsMap.blogPrompt.includes("ここに")) { try { localStorage.setItem("blogPrompt", settingsMap.blogPrompt); } catch(e) {} }
+          if (settingsMap.stylupPrompt && !settingsMap.stylupPrompt.includes("ここに")) { try { localStorage.setItem("stylupPrompt", settingsMap.stylupPrompt); } catch(e) {} }
+        }
+
+        const [m, tc, ti, st, bg] = await Promise.all([
+          sbRetry(() => sb.from("menus").select("id,name,price,duration,category,tags,show_tilde,sort_order,menu_kind,target_customer,is_bookable").order("sort_order")),
+          sbRetry(() => sb.from("tag_categories").select().order("sort_order")),
+          sbRetry(() => sb.from("tag_items").select().order("sort_order")),
+          sbRetry(() => sb.from("styles").select("id,style_name,category,length,coupon_menu_id,hashtags,tags,sort_order,created_at,cover_image,stylist_name").order("created_at", {ascending:false})),
+          sbRetry(() => sb.from("blogs").select("id,title,category,coupon_menu_id,sort_order,created_at,cover_image,author_name").order("created_at", {ascending:false})),
+        ]);
+        if (m.error) { setLoadError(true); console.error("menus load error", m.error); }
+        else setMenus(m.data.map(fromDb.menu));
+        if (!st.error && st.data) setStyles(st.data.map(fromDb.style));
+        if (!bg.error && bg.data) setBlogs(bg.data.map(fromDb.blog));
+        if (!tc.error && !ti.error) {
+          const items = ti.data || [];
+          setTagCategories((tc.data || []).map(cat => ({
+            id: cat.id, name: cat.name, sortOrder: cat.sort_order,
+            items: items.filter(i => i.category_id === cat.id).map(i => ({ id: i.id, name: i.name, sortOrder: i.sort_order }))
+          })));
+        }
+      } catch(e) {
+        setLoadError(true);
+        console.error("initial load error", e);
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  const addStyle = useCallback(async (s) => {
+    const { data, error } = await sb.from("styles").insert([toDb.style(s)]).select();
+    if (error) { notify("保存に失敗しました", "error"); return null; }
+    const saved = fromDb.style(data[0]);
+    setStyles(p => [saved, ...p]);
+    return saved;
+  }, []);
+
+  const updateStyle = useCallback(async (id, changes) => {
+    const dbChanges = {};
+    if ("images" in changes) dbChanges.images = changes.images;
+    if ("coverImage" in changes) dbChanges.cover_image = changes.coverImage;
+    if ("category" in changes) dbChanges.category = changes.category;
+    if ("length" in changes) dbChanges.length = changes.length;
+    if ("stylistName" in changes) dbChanges.stylist_name = changes.stylistName;
+    if ("stylistComment" in changes) dbChanges.stylist_comment = changes.stylistComment;
+    if ("styleName" in changes) dbChanges.style_name = changes.styleName;
+    if ("menuFlags" in changes) dbChanges.menu_flags = changes.menuFlags;
+    if ("menuText" in changes) dbChanges.menu_text = changes.menuText;
+    if ("couponMenuId" in changes) dbChanges.coupon_menu_id = changes.couponMenuId;
+    if ("hashtags" in changes) dbChanges.hashtags = changes.hashtags;
+    if ("tags" in changes) dbChanges.tags = changes.tags;
+    if ("modelVolume" in changes) dbChanges.model_volume = changes.modelVolume;
+    if ("modelTexture" in changes) dbChanges.model_texture = changes.modelTexture;
+    if ("modelThickness" in changes) dbChanges.model_thickness = changes.modelThickness;
+    if ("modelCurl" in changes) dbChanges.model_curl = changes.modelCurl;
+    if ("modelFace" in changes) dbChanges.model_face = changes.modelFace;
+    if ("modelAge" in changes) dbChanges.model_age = changes.modelAge;
+    await sb.from("styles").update(dbChanges).eq("id", id);
+    setStyles(p => p.map(s => s.id === id ? { ...s, ...changes } : s));
+  }, []);
+
+  const deleteStyle = useCallback(async (id) => {
+    await sb.from("styles").delete().eq("id", id);
+    setStyles(p => p.filter(s => s.id !== id));
+  }, []);
+
+  const addBlog = useCallback(async (b) => {
+    const { data, error } = await sb.from("blogs").insert([toDb.blog(b)]).select();
+    if (error) { notify("保存に失敗しました", "error"); return null; }
+    const saved = fromDb.blog(data[0]);
+    setBlogs(p => [saved, ...p]);
+    return saved;
+  }, []);
+
+  const updateBlog = useCallback(async (id, changes) => {
+    const dbChanges = {};
+    if ("images" in changes) dbChanges.images = changes.images;
+    if ("coverImage" in changes) dbChanges.cover_image = changes.coverImage;
+    if ("category" in changes) dbChanges.category = changes.category;
+    if ("title" in changes) dbChanges.title = changes.title;
+    if ("body" in changes) dbChanges.body = changes.body;
+    if ("bodyBlocks" in changes) dbChanges.body_blocks = changes.bodyBlocks;
+    if ("couponMenuId" in changes) dbChanges.coupon_menu_id = changes.couponMenuId;
+    if ("authorName" in changes) dbChanges.author_name = changes.authorName;
+    await sb.from("blogs").update(dbChanges).eq("id", id);
+    setBlogs(p => p.map(b => b.id === id ? { ...b, ...changes } : b));
+  }, []);
+
+  const deleteBlog = useCallback(async (id) => {
+    await sb.from("blogs").delete().eq("id", id);
+    setBlogs(p => p.filter(b => b.id !== id));
+  }, []);
+
+  if (loading) {
+    return (
+      <div style={{ background: C.bg, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 10 }}>
+        <div style={{ fontWeight: 800, fontSize: 20, color: C.accent }}>Amber</div>
+        <div style={{ fontSize: 13, color: C.sub }}>読み込み中...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {loadError && (
+        <div style={{ background: "#ffe8e8", color: C.red, fontSize: 12, padding: "8px 16px", textAlign: "center" }}>
+          一部データの読み込みに失敗しました。電波の良い場所で再読み込みしてください
+        </div>
+      )}
+      {tab === "more" && <HomeMenuTab setTab={setTab} styleCount={styles.length} blogCount={blogs.length} />}
+      {tab === "styleList" && <StyleListTab setTab={setTab} notify={notify} styles={styles} menus={menus} deleteStyle={deleteStyle} setEditingStyleId={setEditingStyleId} />}
+      {tab === "styleForm" && <StyleFormTab setTab={setTab} notify={notify} menus={menus} styles={styles} editingStyleId={editingStyleId} addStyle={addStyle} updateStyle={updateStyle} tagCategories={tagCategories} />}
+      {tab === "blogList" && <BlogListTab setTab={setTab} notify={notify} blogs={blogs} menus={menus} deleteBlog={deleteBlog} setEditingBlogId={setEditingBlogId} />}
+      {tab === "blogForm" && <BlogFormTab setTab={setTab} notify={notify} menus={menus} blogs={blogs} editingBlogId={editingBlogId} addBlog={addBlog} updateBlog={updateBlog} />}
+      {tab === "tagSettings" && <TagSettingsTab setTab={setTab} notify={notify} tagCategories={tagCategories} setTagCategories={setTagCategories} />}
+      {tab === "blogPrompt" && <BlogPromptTab setTab={setTab} notify={notify} />}
+      {tab === "stylupPrompt" && <StylupPromptTab setTab={setTab} notify={notify} />}
+      {toast && <Toast msg={toast.msg} type={toast.type} />}
+    </div>
+  );
+}
+
+const STYLE_LENGTHS = {
+  ladies: ["ベリーショート","ショート","ミディアム","セミロング","ロング","その他"],
+  mens: ["ボウズ","ベリーショート","ショート","ミディアム","ロング","その他"],
+};
+const STYLE_MENU_FLAGS = [
+  { key: "perm", label: "パーマ" },
+  { key: "straight", label: "ストレートパーマ・縮毛矯正" },
+  { key: "extension", label: "エクステ" },
+  { key: "bleach", label: "ブリーチ" },
+];
+const STYLE_MODEL_OPTIONS = {
+  volume: ["設定しない","少ない","普通","多い"],
+  texture: ["設定しない","柔らかい","普通","硬い"],
+  thickness: ["設定しない","細い","普通","太い"],
+  curl: ["設定しない","なし","少し","強い"],
+  face: ["設定しない","逆三角","丸型","ベース","卵型","面長","四角"],
+  age: ["設定しない","キッズ","10代","20代","30代","40代","50代","60代以上"],
+};
+
+// SalonBoardのスタイル登録画面へ自動入力するコードを生成する。
+// 顔型/年代/髪量/髪質/太さ/クセの区分コードはSalonBoard側のフォーム構造(事実情報)に基づく対応表。
+const SB_FACE_CODE = {"丸型":"1","卵型":"2","四角":"3","逆三角":"4","ベース":"5","面長":"6"};
+const SB_AGE_CODE = {"キッズ":"0","10代":"1","20代":"2","30代":"3","40代":"4","50代":"5","60代以上":"6"};
+const SB_VOL_CODE = {"少ない":"1","普通":"2","多い":"3"};
+const SB_TEX_CODE = {"柔らかい":"1","普通":"2","硬い":"3"};
+const SB_THICK_CODE = {"細い":"1","普通":"2","太い":"3"};
+const SB_CURL_CODE = {"なし":"1","少し":"2","強い":"3"};
+
+// 実機診断で判明した構成: 本文はblogContents1〜5(文章5枠)の間にimagePath1〜4(画像4枚)が交互に並ぶ固定構成。
+// bodyBlocksの並びを、連続する文章ブロックをまとめて1つの文章枠にしつつこの構成へ変換する。
+// 画像の挿入操作(#sendFileへの投入で正しい枠に入るか)は実機未確認のため推測込み、結果はチェックリストで報告する。
+function buildBlogSalonBoardScript(b) {
+  const blocks = b.bodyBlocks || [];
+  // nicEdit要素は実機診断で1つのみと判明。画像アップロードボタンも1つだけで、
+  // SalonBoard側はおそらく「現在のカーソル位置」に画像を挿入する仕組みのため、
+  // ブロックの並び順どおりに、文章を追記→カーソルを末尾へ→画像アップロード、を繰り返す
+  const preparedBlocks = [];
+  let imgCount = 0;
+  blocks.forEach(blk => {
+    if (blk.type === "image") {
+      imgCount++;
+      if (imgCount > 4) return; // SalonBoardは画像4枚まで
+      const m = (blk.image || "").match(/^data:([^;]+);base64,(.+)$/);
+      if (m) preparedBlocks.push({ type: "image", b64: m[2], mime: m[1] });
+    } else if ((blk.text || "").trim()) {
+      preparedBlocks.push({ type: "text", text: blk.text });
+    }
+  });
+
+  const D = {
+    title: b.title || "",
+    category: b.category || "",
+    blocks: preparedBlocks,
+  };
+
+  return [
+    '(async function(){',
+    '"use strict";',
+    'var D=' + JSON.stringify(D) + ';',
+    'var R={};',
+    'var completed=false;',
+    'function done(v){if(completed)return;completed=true;if(typeof completion==="function")completion(v);}',
+    'function q(s){return document.querySelector(s);}',
+    'function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}',
+    'async function waitFor(sel,to){to=to||8000;var end=Date.now()+to;while(Date.now()<end){var el=q(sel);if(el)return el;await sleep(150);}return null;}',
+    'function setValue(sel,v){var el=q(sel);if(!el)return false;el.value=v||"";el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));return true;}',
+    'function setSelectByLabel(sel,label){var el=q(sel);if(!el||!label)return false;for(var i=0;i<el.options.length;i++){var o=el.options[i];if(o.textContent.trim()===label||o.textContent.includes(label)){el.value=o.value;el.dispatchEvent(new Event("change",{bubbles:true}));return true;}}return false;}',
+    'function selectFirstNonBlank(sel){var el=q(sel);if(!el)return false;for(var i=0;i<el.options.length;i++){if(el.options[i].value){el.value=el.options[i].value;el.dispatchEvent(new Event("change",{bubbles:true}));return true;}}return false;}',
+    'function b64toFile(b64,name,mime){var bin=atob(b64);var arr=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);return new File([arr],name||"blog.jpg",{type:mime||"image/jpeg"});}',
+    'async function injectFile(inputSel,file){for(var attempt=0;attempt<2;attempt++){var input=await waitFor(inputSel);if(!input)return false;input.value="";var dt=new DataTransfer();dt.items.add(file);input.files=dt.files;input.dispatchEvent(new Event("change",{bubbles:true}));await sleep(400);if(input.files&&input.files.length>0)return true;await sleep(500);}return false;}',
+    'function findButtonByText(t){var els=document.querySelectorAll("button,input[type=button],a");for(var i=0;i<els.length;i++){var lbl=(els[i].textContent||els[i].value||"").trim();if(lbl.includes(t))return els[i];}return null;}',
+    'function appendTextToEditor(el,text){var lines=(text||"").split("\\n");lines.forEach(function(line,i){if(i>0)el.appendChild(document.createElement("br"));if(line)el.appendChild(document.createTextNode(line));});}',
+    'function placeCursorAtEnd(el){try{el.focus();var range=document.createRange();range.selectNodeContents(el);range.collapse(false);var sel=window.getSelection();sel.removeAllRanges();sel.addRange(range);}catch(e){}}',
+    'async function waitForImageCount(expected,to){to=to||6000;var end=Date.now()+to;while(Date.now()<end){var ed=q(".nicEdit-main");if(ed&&ed.querySelectorAll("img").length>=expected)return true;await sleep(200);}return false;}',
+    'try{',
+    '  if(!location.hostname.includes("salonboard.com")){alert("SALON BOARDのブログ編集 入力画面で実行してください");done(false);return;}',
+    '  done(true);',
+    '  R["タイトル"]=setValue("input#blogTitle",D.title);',
+    '  R["投稿者"]=selectFirstNonBlank("select#stylistId");',
+    '  R["カテゴリ"]=D.category?setSelectByLabel("select#blogCategoryCd",D.category):null;',
+    '  R["nicEdit要素"]=!!q(".nicEdit-main");',
+    '  if(q(".nicEdit-main")){',
+    '    for(var bi=0;bi<D.blocks.length;bi++){',
+    '      var blk=D.blocks[bi];',
+    '      if(blk.type==="text"){',
+    '        var ed1=q(".nicEdit-main");',
+    '        appendTextToEditor(ed1,blk.text);',
+    '        ed1.dispatchEvent(new Event("input",{bubbles:true}));',
+    '        await sleep(400);',
+    '        R["ブロック"+(bi+1)+"文章"]=true;',
+    '      } else {',
+    '        placeCursorAtEnd(q(".nicEdit-main"));',
+    '        var uploadBtn=findButtonByText("画像アップロード");',
+    '        R["ブロック"+(bi+1)+"画像アップロードボタン"]=!!uploadBtn;',
+    '        var imgCountBefore=q(".nicEdit-main").querySelectorAll("img").length;',
+    '        if(uploadBtn){uploadBtn.click();await sleep(900);}',
+    '        R["ブロック"+(bi+1)+"画像挿入"]=await injectFile("input#sendFile",b64toFile(blk.b64,"blog"+(bi+1)+".jpg",blk.mime));',
+    '        await sleep(1200);',
+    '        var confirmBtn=findButtonByText("登録する");',
+    '        R["ブロック"+(bi+1)+"画像確定"]=!!confirmBtn;',
+    '        if(confirmBtn){confirmBtn.click();}',
+    '        R["ブロック"+(bi+1)+"画像が本文に反映"]=await waitForImageCount(imgCountBefore+1,6000);',
+    '        await sleep(300);',
+    '        placeCursorAtEnd(q(".nicEdit-main"));',
+    '      }',
+    '    }',
+    '    var edFinal=q(".nicEdit-main");',
+    '    var imgs=Array.prototype.slice.call(edFinal.querySelectorAll("img"));',
+    '    var frag=document.createDocumentFragment();',
+    '    var imgIdx=0;',
+    '    for(var ri=0;ri<D.blocks.length;ri++){',
+    '      var rb=D.blocks[ri];',
+    '      if(ri>0)frag.appendChild(document.createElement("br"));',
+    '      if(rb.type==="text"){',
+    '        var rlines=(rb.text||"").split("\\n");',
+    '        for(var li=0;li<rlines.length;li++){',
+    '          if(li>0)frag.appendChild(document.createElement("br"));',
+    '          if(rlines[li])frag.appendChild(document.createTextNode(rlines[li]));',
+    '        }',
+    '      } else if(imgs[imgIdx]){',
+    '        frag.appendChild(imgs[imgIdx]);',
+    '        imgIdx++;',
+    '      }',
+    '    }',
+    '    edFinal.innerHTML="";',
+    '    edFinal.appendChild(frag);',
+    '    edFinal.dispatchEvent(new Event("input",{bubbles:true}));',
+    '    R["並び順を最後に組み直し"]=(imgIdx===imgs.length);',
+    '    setValue("textarea#blogContents",edFinal.innerHTML||"");',
+    '  }',
+    '  var lines=Object.keys(R).map(function(k){var v=R[k];return k+": "+(v===null?"(対象外)":typeof v==="number"?v:v?"○":"×");});',
+    '  alert("入力結果\\n"+lines.join("\\n")+"\\n\\n※文章と写真の位置関係を必ず確認してください。内容を確認して「確認する」ボタンを押してください。");',
+    '}catch(err){alert("エラー: "+err.message);done(false);}',
+    '})();',
+  ].join("\n");
+}
+
+function buildStyleSalonBoardScript(s) {
+  // スタイル写真は最大3枚(前/横/後ろの想定順)保存されているので、それぞれbase64データと形式を取り出す
+  const imgs = (s.images || []).slice(0, 3).map(img => {
+    const mm = (img || "").match(/^data:([^;]+);base64,(.+)$/);
+    return mm ? { b64: mm[2], mime: mm[1] } : null;
+  });
+
+  const D = {
+    styleName: s.styleName || "",
+    comment: s.stylistComment || "",
+    menu: s.menuText || "",
+    tags: (s.hashtags || []).slice(0, 20),
+    catCode: s.category === "mens" ? "SG02" : "SG01",
+    length: s.length || "",
+    faceCode: SB_FACE_CODE[s.modelFace] || "",
+    ageCode: SB_AGE_CODE[s.modelAge] || "",
+    volCode: SB_VOL_CODE[s.modelVolume] || "",
+    texCode: SB_TEX_CODE[s.modelTexture] || "",
+    thickCode: SB_THICK_CODE[s.modelThickness] || "",
+    curlCode: SB_CURL_CODE[s.modelCurl] || "",
+    imgs,
+  };
+
+  // テンプレート文字列のプレースホルダをJSONで安全に埋め込む(バッククォート等の混入を避けるため)
+  // 顔型/年代/髪量/髪質/太さ/クセの6項目は、ページ読み込み直後にはまだDOMに現れず少し遅れて描画されるため、
+  // 要素が出現するまで待ってから設定するsetRadioWaitを使う(value自体の対応表は元から正しかったことを実機診断で確認済み)。
+  // 各項目の成功/失敗は簡易チェックリストとして毎回alertで表示する(今後SalonBoard側の仕様変更があった際の早期発見用)。
+  // done()はShortcuts「Webページ上でJavaScriptを実行」から呼ばれた場合のみcompletion()を呼ぶ安全なラッパー。
+  // 通常のブックマークレットとして実行した場合はcompletionが存在しないため何もしない(同じコードが両方で動く)。
+  // Shortcutsの「Webページ上でJavaScriptを実行」はcompletion()呼び出しまでの時間制限が厳しく(数秒程度)、
+  // 写真3枚化等で処理時間が伸びた結果タイムアウトすることが実機で判明。そのため合図は早い段階(ホスト確認直後)で
+  // 一度だけ送り、実際の入力・写真アップロード処理はそのままページ上で継続させる(completedフラグで二重送信を防止)。
+  return [
+    '(async function(){',
+    '"use strict";',
+    'var D=' + JSON.stringify(D) + ';',
+    'var R={};',
+    'var completed=false;',
+    'function done(v){if(completed)return;completed=true;if(typeof completion==="function")completion(v);}',
+    'function q(s){return document.querySelector(s);}',
+    'function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}',
+    'async function waitFor(sel,to){to=to||8000;var end=Date.now()+to;while(Date.now()<end){var el=q(sel);if(el)return el;await sleep(150);}return null;}',
+    'function setValue(sel,v){var el=q(sel);if(!el)return false;el.value=v||"";el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));return true;}',
+    'function setSelectByLabel(sel,label){var el=q(sel);if(!el||!label)return false;for(var i=0;i<el.options.length;i++){var o=el.options[i];if(o.textContent.trim()===label||o.textContent.includes(label)){el.value=o.value;el.dispatchEvent(new Event("change",{bubbles:true}));return true;}}return false;}',
+    'function selectFirstNonBlank(sel){var el=q(sel);if(!el)return false;for(var i=0;i<el.options.length;i++){if(el.options[i].value){el.value=el.options[i].value;el.dispatchEvent(new Event("change",{bubbles:true}));return true;}}return false;}',
+    'async function waitSetSelectByLabel(sel,label,to){if(!label)return false;var el=await waitFor(sel,to||4000);if(!el)return false;for(var i=0;i<el.options.length;i++){var o=el.options[i];if(o.textContent.trim()===label||o.textContent.includes(label)){el.value=o.value;el.dispatchEvent(new Event("change",{bubbles:true}));return true;}}return false;}',
+    'function setRadio(name,val){if(!val)return false;var r=document.querySelector(\'input[name="\'+name+\'"][value="\'+val+\'"]\');if(r){r.checked=true;r.dispatchEvent(new Event("change",{bubbles:true}));return true;}return false;}',
+    'async function setRadioWait(name,val,to){if(!val)return false;var r=await waitFor(\'input[name="\'+name+\'"][value="\'+val+\'"]\',to||5000);if(!r)return false;r.checked=true;r.dispatchEvent(new Event("change",{bubbles:true}));return true;}',
+    'function b64toFile(b64,name,mime){var bin=atob(b64);var arr=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);return new File([arr],name||"photo.jpg",{type:mime||"image/jpeg"});}',
+    'async function injectFile(inputSel,file){for(var attempt=0;attempt<2;attempt++){var input=await waitFor(inputSel);if(!input)return false;var dt=new DataTransfer();dt.items.add(file);input.files=dt.files;input.dispatchEvent(new Event("change",{bubbles:true}));await sleep(300);if(input.files&&input.files.length>0)return true;await sleep(500);}return false;}',
+    'try{',
+    '  if(!location.hostname.includes("salonboard.com")){alert("SALON BOARDのスタイル登録画面で実行してください");done(false);return;}',
+    '  done(true);',
+    '  R["スタイル名"]=setValue("input#styleNameTxt",D.styleName);',
+    '  R["コメント"]=setValue("textarea#stylistCommentTxt",D.comment);',
+    '  R["スタイリスト"]=selectFirstNonBlank("select#stylistCheckCd");',
+    '  R["メニュー"]=setValue("textarea#menuDetailTxt",D.menu);',
+    '  R["カテゴリ"]=setRadio("frmStyleEditStyleDto.styleCategoryCd",D.catCode);',
+    '  if(D.length){R["レングス"]=setSelectByLabel(D.catCode==="SG01"?"select#ladiesHairLengthCd":"select#mensHairLengthCd",D.length);}',
+    '  R["顔型"]=await setRadioWait("frmStyleEditStyleModelDto.modelFaceTypeKbn",D.faceCode);',
+    '  R["年代"]=await setRadioWait("frmStyleEditStyleModelDto.modelAgeKbn",D.ageCode);',
+    '  R["髪量"]=await setRadioWait("frmStyleEditStyleModelDto.modelHairVolumeKbn",D.volCode);',
+    '  R["髪質"]=await setRadioWait("frmStyleEditStyleModelDto.modelHairTypeKbn",D.texCode);',
+    '  R["太さ"]=await setRadioWait("frmStyleEditStyleModelDto.modelHairThicknessKbn",D.thickCode);',
+    '  R["クセ"]=await setRadioWait("frmStyleEditStyleModelDto.modelHairCurlyKbn",D.curlCode);',
+    '  var tagInput=q("input#hashTagTxt");',
+    '  var tagAddBtn=q("button.jsc_style_edit-editCommon__tag--addBtn");',
+    '  R["ハッシュタグ欄"]=!!(tagInput&&tagAddBtn);',
+    '  if(tagInput&&tagAddBtn&&D.tags.length){',
+    '    for(var i=0;i<D.tags.length;i++){',
+    '      tagInput.focus();tagInput.value=D.tags[i];',
+    '      tagInput.dispatchEvent(new Event("input",{bubbles:true}));',
+    '      tagInput.dispatchEvent(new Event("change",{bubbles:true}));',
+    '      await sleep(200);',
+    '      if(tagAddBtn.disabled)tagAddBtn.disabled=false;',
+    '      tagAddBtn.click();',
+    '      await sleep(300);',
+    '    }',
+    '    tagInput.value="";tagInput.dispatchEvent(new Event("input",{bubbles:true}));',
+    '  }',
+    // 写真枠3つ(前/横/後ろ)を順番に処理。前(FRONT)のトリガーセレクタは実機で動作確認済み、
+    // 横(SIDE)・後ろ(BACK)は隠しinputのname(SIDE_IMG_ID/BACK_IMG_ID、実機診断で確認済み)から
+    // 同じ命名規則と推測して組み立てている。各枠には別途FRONT/SIDE/BACK等を選ぶ種別ドロップダウン
+    // (styleClassCd01〜03、実機スクリーンショットで確認済み)があるため、写真確定後にそれも設定する。
+    '  var slots=[["FRONT_IMG_ID","写真1(前)","styleClassCd01","FRONT"],["SIDE_IMG_ID","写真2(横)","styleClassCd02","SIDE"],["BACK_IMG_ID","写真3(後ろ)","styleClassCd03","BACK"]];',
+    '  for(var pi=0;pi<slots.length;pi++){',
+    '    var slotName=slots[pi][0],label=slots[pi][1],classSel=slots[pi][2],typeLabel=slots[pi][3],picD=D.imgs[pi];',
+    '    if(!picD)continue;',
+    '    var trg=await waitFor("#"+slotName+"_PC_NEW_NO_PHOTO, img#"+slotName+"_IMG",4000);',
+    '    R[label+"枠"]=!!trg;',
+    '    if(trg)trg.click();',
+    '    await sleep(1000);',
+    '    R[label+"挿入"]=await injectFile(\'input#formFile, input[name="formFile"], input.jscImageUploaderModalInput\',b64toFile(picD.b64,"photo"+(pi+1)+".jpg",picD.mime));',
+    '    await sleep(1200);',
+    '    var sub=q(".jscImageUploaderModalSubmitButton, .imageUploaderModalSubmitButton");',
+    '    R[label+"確定"]=!!sub;',
+    '    if(sub)sub.click();',
+    '    await sleep(1200);',
+    '    R[label+"種別"]=await waitSetSelectByLabel(\'select[name="frmStyleEditStyleInfoDto.\'+classSel+\'"]\',typeLabel);',
+    '    await sleep(800);',
+    '  }',
+    '  var lines=Object.keys(R).map(function(k){return k+": "+(R[k]?"○":"×");});',
+    '  alert("入力結果\\n"+lines.join("\\n")+"\\n\\n内容を確認して「登録」ボタンを押してください。");',
+    '  done(true);',
+    '}catch(err){alert("エラー: "+err.message);done(false);}',
+    '})();',
+  ].join("\n");
+}
+
+function StyleListTab({ setTab, notify, styles, menus, deleteStyle, setEditingStyleId }) {
+  const [sbModal, setSbModal] = useState(null); // { style, script } | { loading: true }
+  const openSalonBoardExport = async (s) => {
+    setSbModal({ loading: true });
+    try {
+      const r = await sbRetry(() => sb.from("styles").select("*").eq("id", s.id));
+      if (r.error || !r.data || !r.data[0]) throw new Error();
+      const full = fromDb.style(r.data[0]);
+      setSbModal({ style: full, script: buildStyleSalonBoardScript(full) });
+    } catch (e) {
+      notify("スタイル情報の取得に失敗しました", "error");
+      setSbModal(null);
+    }
+  };
+  return (
+    <div style={{ background: C.bg, minHeight: "100vh" }}>
+      <div style={{ background: "#fff", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.border}` }}>
+        <button onClick={() => setTab("more")} style={{ background: "none", border: "none", color: "#7a6848", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>← メニュー</button>
+        <div style={{ fontWeight: 800, fontSize: 16 }}>スタイル管理</div>
+        <div style={{ width: 60 }} />
+      </div>
+      <div style={{ padding: 16 }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+          <button onClick={() => setTab("tagSettings")}
+            style={{ flex: 1, padding: 10, borderRadius: 10, border: `1px solid ${C.border}`, background: "#fff", color: C.sub, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+            🏷 タグ設定
+          </button>
+          <button onClick={() => setTab("stylupPrompt")}
+            style={{ flex: 1, padding: 10, borderRadius: 10, border: `1px solid ${C.border}`, background: "#fff", color: C.sub, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+            ✎ スタイルアップ プロンプト編集
+          </button>
+        </div>
+        <button onClick={() => { setEditingStyleId(null); setTab("styleForm"); }}
+          style={{ width: "100%", padding: 14, borderRadius: 12, border: "none", background: "#b5548a", color: "#fff", fontWeight: 800, fontSize: 15, cursor: "pointer", marginBottom: 16 }}>
+          ＋ 新規スタイル登録
+        </button>
+        {styles.length === 0 && (
+          <div style={{ textAlign: "center", color: C.sub, fontSize: 13, padding: "30px 0" }}>まだスタイルが登録されていません</div>
+        )}
+        {styles.map((s, i) => (
+          <div key={s.id} onClick={() => { setEditingStyleId(s.id); setTab("styleForm"); }}
+            style={{ display: "flex", gap: 12, background: "#fff", borderRadius: 14, padding: 12, marginBottom: 12, border: `1px solid ${C.border}`, cursor: "pointer" }}>
+            <div style={{ width: 66, height: 88, borderRadius: 10, background: s.coverImage ? "transparent" : "#f0ece4", flexShrink: 0, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {s.coverImage ? <img src={s.coverImage} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 10, color: C.sub }}>No.{styles.length - i}</span>}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 11, color: C.sub, fontWeight: 700 }}>No.{styles.length - i}　{s.category === "mens" ? "メンズ" : "レディース"}{s.length ? "・" + s.length : ""}</div>
+              <div style={{ fontSize: 14, fontWeight: 800, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.styleName || "(スタイル名未設定)"}</div>
+              {s.hashtags && s.hashtags.length > 0 && (
+                <div style={{ fontSize: 11, color: C.sub, marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {s.hashtags.map(h => "#" + h).join(" ")}
+                </div>
+              )}
+              {s.tags && s.tags.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+                  {s.tags.map(t => (
+                    <span key={t} style={{ fontSize: 10, padding: "1px 7px", borderRadius: 10, background: "#eaf4f2", color: "#4a9a90", fontWeight: 700 }}>{t}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button onClick={(e) => { e.stopPropagation(); if (window.confirm(`「${s.styleName || "このスタイル"}」を削除しますか？`)) deleteStyle(s.id); }}
+              style={{ background: "none", border: "none", color: "#ff6b6b", fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0, alignSelf: "flex-start", padding: 4 }}>
+              削除
+            </button>
+            <button onClick={(e) => { e.stopPropagation(); openSalonBoardExport(s); }}
+              style={{ background: "none", border: "1px solid #7a9aba", borderRadius: 8, color: "#7a9aba", fontSize: 11, fontWeight: 700, cursor: "pointer", flexShrink: 0, alignSelf: "flex-start", padding: "4px 8px", marginTop: 4 }}>
+              SalonBoardへ
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {sbModal && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 970, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px 16px", boxSizing: "border-box" }}>
+          <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)" }} onClick={() => setSbModal(null)} />
+          <div style={{ position: "relative", zIndex: 1, background: "#fff", borderRadius: 16, padding: 20, width: "100%", maxWidth: 460, maxHeight: "85vh", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+            {sbModal.loading ? (
+              <div style={{ textAlign: "center", color: C.sub, fontSize: 13, padding: "30px 0" }}>読み込み中...</div>
+            ) : (
+              <React.Fragment>
+                <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>SalonBoard登録用コード</div>
+                <div style={{ fontSize: 12, color: C.sub, marginBottom: 14, lineHeight: 1.6 }}>
+                  「{sbModal.style.styleName || "このスタイル"}」の内容を、SALON BOARDのスタイル登録画面に自動で入力するコードです。実行後は必ず内容を確認してから「登録」ボタンを押してください。写真・区分コードの対応はSALON BOARD側の仕様変更で動かなくなる場合があります。
+                </div>
+
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.sub, marginBottom: 6 }}>① PC(Mac)で使う場合</div>
+                <div style={{ fontSize: 11.5, color: C.sub, marginBottom: 10, lineHeight: 1.7 }}>
+                  SALON BOARDのスタイル登録画面を開く → F12(またはSafariの「開発」→「JavaScriptコンソールを表示」) → 下のコードを貼り付けてEnter
+                </div>
+                <textarea readOnly value={sbModal.script} onClick={e => e.target.select()}
+                  style={{ width: "100%", boxSizing: "border-box", height: 90, fontSize: 10, fontFamily: "monospace", border: "1px solid " + C.border, borderRadius: 8, padding: 8, marginBottom: 8, resize: "none" }} />
+                <button onClick={() => { navigator.clipboard.writeText(sbModal.script); notify("コピーしました ✓"); }}
+                  style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "1px solid #7a9aba", background: "#fff", color: "#7a9aba", fontWeight: 700, fontSize: 13, cursor: "pointer", marginBottom: 16 }}>
+                  📋 このコードをコピー
+                </button>
+
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.sub, marginBottom: 6 }}>② iPhone/iPadで使う場合(ショートカット・おすすめ)</div>
+                <div style={{ fontSize: 11.5, color: C.sub, marginBottom: 10, lineHeight: 1.7 }}>
+                  1. 「ショートカット」アプリで新規作成→「Webページ上でJavaScriptを実行」を追加(初回は「スクリプトの実行を許可」をON)<br/>
+                  2. JavaScriptの入力欄をタップ→候補に出る「クリップボード」を選ぶ(それだけが内容になるようにする)<br/>
+                  3. 詳細(ⓘ)で「共有シートに表示」をON、対応する種類は「Safariのwebページ」のみに<br/>
+                  4. SALON BOARDのスタイル登録画面を開く→下の「コピー」→共有ボタンからこのショートカットを実行
+                </div>
+                <button onClick={() => { navigator.clipboard.writeText(sbModal.script); notify("コピーしました ✓"); }}
+                  style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "none", background: "#7a9aba", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer", marginBottom: 16 }}>
+                  📋 コードをコピー(ショートカット用)
+                </button>
+
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.sub, marginBottom: 6 }}>③ iPhone/iPadで使う場合(ブックマークレット)</div>
+                <div style={{ fontSize: 11.5, color: C.sub, marginBottom: 10, lineHeight: 1.7 }}>
+                  1. Safariで適当なページをブックマークに追加(名前は「スタイル登録」など)<br/>
+                  2. ブックマークを編集→URL欄を全部削除→下の「ブックマークレットをコピー」の内容を貼り付けて保存<br/>
+                  3. SALON BOARDのスタイル登録画面を開き、そのブックマークをタップして実行
+                </div>
+                <button onClick={() => { navigator.clipboard.writeText("javascript:" + encodeURIComponent(sbModal.script)); notify("ブックマークレットをコピーしました ✓"); }}
+                  style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "1px solid #7a9aba", background: "#fff", color: "#7a9aba", fontWeight: 700, fontSize: 13, cursor: "pointer", marginBottom: 16 }}>
+                  🔖 ブックマークレットをコピー
+                </button>
+
+                <button onClick={() => setSbModal(null)} style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "1px solid " + C.border, background: "#fff", color: C.sub, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>閉じる</button>
+              </React.Fragment>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BlogListTab({ setTab, notify, blogs, menus, deleteBlog, setEditingBlogId }) {
+  const [sbModal, setSbModal] = useState(null); // { blog, script } | { loading: true }
+  const openSalonBoardExport = async (b) => {
+    setSbModal({ loading: true });
+    try {
+      const r = await sbRetry(() => sb.from("blogs").select("*").eq("id", b.id));
+      if (r.error || !r.data || !r.data[0]) throw new Error();
+      const full = fromDb.blog(r.data[0]);
+      setSbModal({ blog: full, script: buildBlogSalonBoardScript(full) });
+    } catch (e) {
+      notify("ブログ情報の取得に失敗しました", "error");
+      setSbModal(null);
+    }
+  };
+  return (
+    <div style={{ background: C.bg, minHeight: "100vh" }}>
+      <div style={{ background: "#fff", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.border}` }}>
+        <button onClick={() => setTab("more")} style={{ background: "none", border: "none", color: "#7a6848", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>← メニュー</button>
+        <div style={{ fontWeight: 800, fontSize: 16 }}>ブログ管理</div>
+        <div style={{ width: 60 }} />
+      </div>
+      <div style={{ padding: 16 }}>
+        <button onClick={() => setTab("blogPrompt")}
+          style={{ width: "100%", padding: 10, borderRadius: 10, border: `1px solid ${C.border}`, background: "#fff", color: C.sub, fontWeight: 700, fontSize: 12, cursor: "pointer", marginBottom: 10 }}>
+          ✎ ブログプロンプト編集
+        </button>
+        <button onClick={() => { setEditingBlogId(null); setTab("blogForm"); }}
+          style={{ width: "100%", padding: 14, borderRadius: 12, border: "none", background: "#e8924a", color: "#fff", fontWeight: 800, fontSize: 15, cursor: "pointer", marginBottom: 16 }}>
+          ＋ 新規ブログ作成
+        </button>
+        {blogs.length === 0 && (
+          <div style={{ textAlign: "center", color: C.sub, fontSize: 13, padding: "30px 0" }}>まだブログが登録されていません</div>
+        )}
+        {blogs.map((b, i) => (
+          <div key={b.id} onClick={() => { setEditingBlogId(b.id); setTab("blogForm"); }}
+            style={{ display: "flex", gap: 12, background: "#fff", borderRadius: 14, padding: 12, marginBottom: 12, border: `1px solid ${C.border}`, cursor: "pointer" }}>
+            <div style={{ width: 66, height: 66, borderRadius: 10, background: b.coverImage ? "transparent" : "#f0ece4", flexShrink: 0, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {b.coverImage ? <img src={b.coverImage} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 10, color: C.sub }}>No.{blogs.length - i}</span>}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 11, color: C.sub, fontWeight: 700 }}>No.{blogs.length - i}{b.category ? "　" + b.category : ""}</div>
+              <div style={{ fontSize: 14, fontWeight: 800, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{b.title || "(タイトル未設定)"}</div>
+              {b.authorName && <div style={{ fontSize: 11, color: C.sub, marginTop: 4 }}>投稿者: {b.authorName}</div>}
+            </div>
+            <button onClick={(e) => { e.stopPropagation(); if (window.confirm(`「${b.title || "このブログ"}」を削除しますか？`)) deleteBlog(b.id); }}
+              style={{ background: "none", border: "none", color: "#ff6b6b", fontSize: 12, fontWeight: 700, cursor: "pointer", flexShrink: 0, alignSelf: "flex-start", padding: 4 }}>
+              削除
+            </button>
+            <button onClick={(e) => { e.stopPropagation(); openSalonBoardExport(b); }}
+              style={{ background: "none", border: "1px solid #7a9aba", borderRadius: 8, color: "#7a9aba", fontSize: 11, fontWeight: 700, cursor: "pointer", flexShrink: 0, alignSelf: "flex-start", padding: "4px 8px", marginTop: 4 }}>
+              SalonBoardへ
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {sbModal && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 970, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px 16px", boxSizing: "border-box" }}>
+          <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)" }} onClick={() => setSbModal(null)} />
+          <div style={{ position: "relative", zIndex: 1, background: "#fff", borderRadius: 16, padding: 20, width: "100%", maxWidth: 460, maxHeight: "85vh", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+            {sbModal.loading ? (
+              <div style={{ textAlign: "center", color: C.sub, fontSize: 13, padding: "30px 0" }}>読み込み中...</div>
+            ) : (
+              <React.Fragment>
+                <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>SalonBoard登録用コード(ブログ)</div>
+                <div style={{ fontSize: 12, color: C.sub, marginBottom: 14, lineHeight: 1.6 }}>
+                  「{sbModal.blog.title || "このブログ"}」の内容を、SALON BOARDの「ブログ編集 入力」画面に自動で入力するコードです。実行後は必ず内容(特に写真の挿入位置)を確認してから「確認する」ボタンを押してください。画像の挿入操作はSALON BOARD側の仕様変更で動かなくなる場合があります。
+                </div>
+
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.sub, marginBottom: 6 }}>① PC(Mac)で使う場合</div>
+                <div style={{ fontSize: 11.5, color: C.sub, marginBottom: 10, lineHeight: 1.7 }}>
+                  SALON BOARDの「ブログ編集 入力」画面を開く → F12(またはSafariの「開発」→「JavaScriptコンソールを表示」) → 下のコードを貼り付けてEnter
+                </div>
+                <textarea readOnly value={sbModal.script} onClick={e => e.target.select()}
+                  style={{ width: "100%", boxSizing: "border-box", height: 90, fontSize: 10, fontFamily: "monospace", border: "1px solid " + C.border, borderRadius: 8, padding: 8, marginBottom: 8, resize: "none" }} />
+                <button onClick={() => { navigator.clipboard.writeText(sbModal.script); notify("コピーしました ✓"); }}
+                  style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "1px solid #7a9aba", background: "#fff", color: "#7a9aba", fontWeight: 700, fontSize: 13, cursor: "pointer", marginBottom: 16 }}>
+                  📋 このコードをコピー
+                </button>
+
+                <div style={{ fontSize: 12, fontWeight: 700, color: C.sub, marginBottom: 6 }}>② iPhone/iPadで使う場合(ショートカット)</div>
+                <div style={{ fontSize: 11.5, color: C.sub, marginBottom: 10, lineHeight: 1.7 }}>
+                  スタイルの時に作った「Webページ上でJavaScriptを実行」のショートカットがそのまま使えます(クリップボードの中身がこの診断コードに変わるだけ)。
+                </div>
+                <button onClick={() => { navigator.clipboard.writeText(sbModal.script); notify("コピーしました ✓"); }}
+                  style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "none", background: "#7a9aba", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer", marginBottom: 16 }}>
+                  📋 コードをコピー(ショートカット用)
+                </button>
+
+                <button onClick={() => setSbModal(null)} style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "1px solid " + C.border, background: "#fff", color: C.sub, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>閉じる</button>
+              </React.Fragment>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StyleFormTab({ setTab, notify, menus, styles, editingStyleId, addStyle, updateStyle, tagCategories }) {
+  const editing = editingStyleId ? styles.find(s => s.id === editingStyleId) : null;
+  const [form, setForm] = useState(() => editing ? {
+    images: [], // 個別取得までは空(カルテ写真と同じ遅延読込方針)。読込後にセット
+    category: editing.category || "ladies",
+    length: editing.length || "",
+    stylistName: editing.stylistName || "",
+    stylistComment: editing.stylistComment || "",
+    styleName: editing.styleName || "",
+    menuFlags: editing.menuFlags || [],
+    menuText: editing.menuText || "",
+    hashtags: editing.hashtags || [],
+    tags: editing.tags || [],
+    modelVolume: editing.modelVolume || "設定しない",
+    modelTexture: editing.modelTexture || "設定しない",
+    modelThickness: editing.modelThickness || "設定しない",
+    modelCurl: editing.modelCurl || "設定しない",
+    modelFace: editing.modelFace || "設定しない",
+    modelAge: editing.modelAge || "設定しない",
+  } : {
+    images: [], category: "ladies", length: "", stylistName: "", stylistComment: "", styleName: "",
+    menuFlags: [], menuText: "", hashtags: [], tags: [],
+    modelVolume: "設定しない", modelTexture: "設定しない", modelThickness: "設定しない", modelCurl: "設定しない", modelFace: "設定しない", modelAge: "設定しない",
+  });
+  const [hashtagInput, setHashtagInput] = useState("");
+  const [dataLoaded, setDataLoaded] = useState(!editing); // 新規は既存データがないので最初から編集可。編集時はstyles一覧が軽量列のみ(id,style_name,category,length,coupon_menu_id,hashtags,tags,sort_order,created_at,cover_image)しか持たないため、写真だけでなくコメント/メニュー/モデル情報等もこのフラグで全件読み込みするまで待つ
+  const [saving, setSaving] = useState(false);
+  const fileRefs = [useRef(), useRef(), useRef()];
+
+  // 編集時のみ、この1件分をフル取得(起動時の一括読込はしない・カルテ/メニュー写真と同じ方針)。
+  // 一覧のstyles配列は軽量列のみのため、ここで select("*") しないとコメント/メニュー内容/モデル情報等が
+  // 空のまま保存され、既存データを消してしまう(実際に発生した不具合の原因)
+  useEffect(() => {
+    if (!editing) return;
+    (async () => {
+      const r = await sbRetry(() => sb.from("styles").select("*").eq("id", editing.id));
+      if (!r.error && r.data && r.data[0]) {
+        const full = fromDb.style(r.data[0]);
+        setForm(p => ({
+          ...p,
+          images: full.images || [],
+          category: full.category || "ladies",
+          length: full.length || "",
+          stylistName: full.stylistName || "",
+          stylistComment: full.stylistComment || "",
+          styleName: full.styleName || "",
+          menuFlags: full.menuFlags || [],
+          menuText: full.menuText || "",
+          hashtags: full.hashtags || [],
+          tags: full.tags || [],
+          modelVolume: full.modelVolume || "設定しない",
+          modelTexture: full.modelTexture || "設定しない",
+          modelThickness: full.modelThickness || "設定しない",
+          modelCurl: full.modelCurl || "設定しない",
+          modelFace: full.modelFace || "設定しない",
+          modelAge: full.modelAge || "設定しない",
+        }));
+        setDataLoaded(true);
+      }
+    })();
+  }, [editing && editing.id]);
+
+  // 画像を3:4に中央クロップし、フル画質(カルテより鮮明)＋一覧用サムネイルの2種を生成
+  const processStyleImage = (dataUrl, cb) => {
+    const img = new Image();
+    img.onload = () => {
+      const targetRatio = 3 / 4;
+      let sx = 0, sy = 0, sw = img.width, sh = img.height;
+      if (sw / sh > targetRatio) { sw = sh * targetRatio; sx = (img.width - sw) / 2; }
+      else { sh = sw / targetRatio; sy = (img.height - sh) / 2; }
+      const mkCanvas = (outW) => {
+        const outH = Math.round(outW / targetRatio);
+        const c = document.createElement("canvas");
+        c.width = outW; c.height = outH;
+        c.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+        return c;
+      };
+      const full = mkCanvas(1000).toDataURL("image/jpeg", 0.88);   // フル画質(カルテ:800px/0.6より鮮明)
+      const thumb = mkCanvas(160).toDataURL("image/jpeg", 0.6);     // 一覧用サムネイル(軽量)
+      cb(full, thumb);
+    };
+    img.src = dataUrl;
+  };
+
+  const handlePickImage = (idx, e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      processStyleImage(ev.target.result, (full, thumb) => {
+        setForm(p => {
+          const next = [...p.images];
+          next[idx] = full;
+          return { ...p, images: next };
+        });
+        if (idx === 0) setForm(p => ({ ...p, __coverImage: thumb }));
+      });
+    };
+    reader.readAsDataURL(f);
+    e.target.value = "";
+  };
+  const removeImage = (idx) => setForm(p => { const next = [...p.images]; next[idx] = null; return { ...p, images: next }; });
+
+  const addHashtag = () => {
+    const t = hashtagInput.trim().replace(/^#/, "");
+    if (!t) return;
+    if (form.hashtags.includes(t)) { setHashtagInput(""); return; }
+    if (form.hashtags.length >= 20) { notify("ハッシュタグは最大20個までです", "error"); return; }
+    setForm(p => ({ ...p, hashtags: [...p.hashtags, t] }));
+    setHashtagInput("");
+  };
+  const removeHashtag = (t) => setForm(p => ({ ...p, hashtags: p.hashtags.filter(x => x !== t) }));
+  const toggleMenuFlag = (key) => setForm(p => ({ ...p, menuFlags: p.menuFlags.includes(key) ? p.menuFlags.filter(x => x !== key) : [...p.menuFlags, key] }));
+  // タグ設定(tag_categories/tag_items)のタグ。SalonBoard自動転記(Apostie)には使わない、店内管理・お客様ページ用の分類
+  const toggleTag = (t) => setForm(p => ({ ...p, tags: p.tags.includes(t) ? p.tags.filter(x => x !== t) : [...p.tags, t] }));
+
+  // 過去のスタイルで使われたスタイリスト名/ハッシュタグを集計し、選ぶだけで再利用できるようにする
+  const stylistNames = useMemo(() => [...new Set(styles.map(s => s.stylistName).filter(Boolean))], [styles]);
+  const tagPool = useMemo(() => {
+    const counts = {};
+    styles.forEach(s => (s.hashtags || []).forEach(t => { counts[t] = (counts[t] || 0) + 1; }));
+    return Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+  }, [styles]);
+  const toggleHashtag = (t) => setForm(p => {
+    if (p.hashtags.includes(t)) return { ...p, hashtags: p.hashtags.filter(x => x !== t) };
+    if (p.hashtags.length >= 20) { notify("ハッシュタグは最大20個までです", "error"); return p; }
+    return { ...p, hashtags: [...p.hashtags, t] };
+  });
+
+  // メニュー内容は「＋」区切りの文字列がそのままSalonBoardへ転記される単一の情報源。
+  // ピッカー導入前に自由入力されていたテキストが残っているケースがあるため、実在するメニュー名と
+  // 完全一致する部分だけを「選択中」として扱う(一致しない古い文言はタップ操作をした時点で残らない)
+  const menuNameSet = useMemo(() => new Set(menus.map(m => m.name)), [menus]);
+  const selectedMenuNames = form.menuText ? form.menuText.split("＋").map(s => s.trim()).filter(Boolean).filter(n => menuNameSet.has(n)) : [];
+  const toggleMenuItem = (name) => {
+    const next = selectedMenuNames.includes(name) ? selectedMenuNames.filter(n => n !== name) : [...selectedMenuNames, name];
+    setForm(p => ({ ...p, menuText: next.join("＋") }));
+  };
+  // メニューをカテゴリごとにまとめ、選択済みがあるカテゴリだけ初期状態で開いておく(見やすさ重視のプルダウン化)
+  const menusByCategory = useMemo(() => {
+    const groups = {};
+    menus.forEach(m => { const cat = m.category || "その他"; (groups[cat] = groups[cat] || []).push(m); });
+    return groups;
+  }, [menus]);
+  const [expandedCats, setExpandedCats] = useState(() => {
+    const init = {};
+    Object.keys(menusByCategory).forEach(cat => {
+      init[cat] = menusByCategory[cat].some(m => selectedMenuNames.includes(m.name));
+    });
+    return init;
+  });
+  const toggleCategoryOpen = (cat) => setExpandedCats(p => ({ ...p, [cat]: !p[cat] }));
+
+  // カルテ詳細にあった「スタイルアップ」(AIへスタイル名・コメント生成プロンプトを渡す機能)をこちらへ移設。
+  // カルテ側は来店1件のmenus/memoを補足情報にしていたが、こちらはスタイル自体のメニュー内容を使う。
+  // ChatGPTはURLスキーム(chatgpt://)で直接起動。Geminiは単体アプリの確実なURLスキームが見つからず、
+  // Web版(gemini.google.com)へのlocation.href遷移はSafari内で開いてしまいアプリが起動しなかったため、
+  // ショートカットの「Appを開く」アクション(名前指定のみで確実に起動できる)を経由する方式にした。
+  // 事前に「Gemini起動」という名前でOpen Appアクションのみのショートカットを用意してもらう必要がある
+  const generateStyleup = (dest) => {
+    let savedPrompt = "";
+    try { savedPrompt = localStorage.getItem("stylupPrompt") || ""; } catch (e) {}
+    const defaultPrompt = "あなたはプロのライター兼美容師向けSEOライターです。\n\nホットペッパービューティーの「ヘアスタイル掲載ページ」用に、写真からスタイル名とコメントを作成してください。\n\n【目的】\n・人が書いたような自然な文章\n・見た人が「この髪型にしたい」と思う内容\n・美容室集客につながる内容\n・SEO対策、AIO対策を意識\n・ホットペッパービューティーのスタイル掲載で検索されやすい内容\n\n【出力ルール】\n写真を分析し、以下の順番で出力\n\n【スタイル名候補】\n①\n②\n③\n④\n⑤\n⑥\n⑦\n⑧\n⑨\n⑩\n\n【スタイル名条件】\n・30文字以内\n・検索されやすいキーワードを含める\n・髪型、カラー、質感が伝わる\n・ホットペッパー検索を意識\n・実際の美容師が付けそうな自然な名前\n・盛りすぎない\n・同じ表現を繰り返さない\n\nスタイル名候補を10個出した後、「気に入った番号を選んでください」と表示して終了する。コメントはまだ作成しない。\n\nーーーーーーーーーー\n\nユーザーが番号を選んだら、そのスタイル名で完成版を作成する。\n\n出力順\n選ばれたスタイル名\nコメント\n\n【コメント条件】\n・120文字以内\n・写真の質感、艶感、シルエットを自然に表現\n・検索されやすいキーワードを含める\n・読んだ人がやってみたいと思う内容\n・ホットペッパービューティー掲載向け\n・人が書いたような自然な文章\n・絵文字禁止\n・半角記号禁止\n・過剰表現禁止\n・写真から髪の長さ、カラー、質感、デザインを分析して反映\n・ユーザーから補足情報がある場合は反映\n\n重要\n・スタイル名選択前にコメントを作らない\n・選択後は完成版のみ出力\n・余計な説明をしない\n・コピペしやすい形で出力\n・ホットペッパービューティー掲載を前提にする\n・美容室集客を最優先にする\n・写真を必ず分析してスタイル名とコメントに反映する";
+    const prompt = (savedPrompt || defaultPrompt) + "\n\n【補足情報】\n施術内容：" + (form.menuText || "記載なし");
+    try { var el = document.createElement("textarea"); el.value = prompt; document.body.appendChild(el); el.select(); document.execCommand("copy"); document.body.removeChild(el); } catch (e) {}
+    if (dest === "gemini") window.location.href = "shortcuts://run-shortcut?name=" + encodeURIComponent("Gemini起動");
+    else window.location.href = "chatgpt://";
+  };
+
+  const save = async () => {
+    if (!dataLoaded) return notify("データの読み込みが完了していません。少し待ってから保存してください", "error");
+    if (!form.styleName.trim()) return notify("スタイル名を入力してください", "error");
+    setSaving(true);
+    const images = form.images.filter(Boolean);
+    const coverImage = form.__coverImage || (editing ? editing.coverImage : null) || null;
+    const payload = { ...form, images, coverImage };
+    delete payload.__coverImage;
+    if (editing) await updateStyle(editing.id, payload);
+    else await addStyle(payload);
+    setSaving(false);
+    notify(editing ? "更新しました ✓" : "登録しました ✓");
+    setTab("styleList");
+  };
+
+  const lengthOptions = STYLE_LENGTHS[form.category] || STYLE_LENGTHS.ladies;
+
+  return (
+    <div style={{ background: C.bg, minHeight: "100vh" }}>
+      <div style={{ background: "#fff", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.border}` }}>
+        <button onClick={() => setTab("styleList")} style={{ background: "none", border: "none", color: "#7a6848", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>← 一覧</button>
+        <div style={{ fontWeight: 800, fontSize: 16 }}>{editing ? "スタイル編集" : "新規スタイル登録"}</div>
+        <div style={{ width: 60 }} />
+      </div>
+      <div style={{ padding: 16, paddingBottom: 100 }}>
+
+        {/* 写真 */}
+        <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 4 }}>スタイル写真（最大3枚・3:4）</div>
+          {!dataLoaded ? (
+            <div style={{ fontSize: 12, color: C.sub, padding: "8px 0" }}>データを読み込み中…（完了するまで変更できません）</div>
+          ) : (
+            <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+              {[0, 1, 2].map(idx => (
+                <div key={idx} style={{ flex: 1 }}>
+                  <div onClick={() => fileRefs[idx].current && fileRefs[idx].current.click()}
+                    style={{ width: "100%", aspectRatio: "3/4", borderRadius: 10, overflow: "hidden", background: "#f0ece4", border: `1px dashed ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", position: "relative" }}>
+                    {form.images[idx] ? (
+                      <img src={form.images[idx]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ) : (
+                      <span style={{ fontSize: 24, color: C.sub, fontWeight: 300 }}>＋</span>
+                    )}
+                  </div>
+                  {form.images[idx] && (
+                    <button onClick={() => removeImage(idx)} style={{ width: "100%", marginTop: 6, padding: "5px 0", fontSize: 11, color: C.sub, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 6, cursor: "pointer" }}>削除</button>
+                  )}
+                  <input ref={fileRefs[idx]} type="file" accept="image/*" style={{ display: "none" }} onChange={e => handlePickImage(idx, e)} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* スタイリストコメント */}
+        <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 6 }}>スタイリスト名</div>
+          {stylistNames.length > 0 && (
+            <select value="" onChange={e => { if (e.target.value) setForm(p => ({ ...p, stylistName: e.target.value })); }}
+              style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 12px", fontSize: 13, marginBottom: 8, background: "#fff", color: C.sub, outline: "none" }}>
+              <option value="">既存の名前から選択…</option>
+              {stylistNames.map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+          )}
+          <input type="text" value={form.stylistName} onChange={e => setForm(p => ({ ...p, stylistName: e.target.value }))}
+            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, marginBottom: 14, outline: "none" }} />
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ fontSize: 12, color: C.sub, fontWeight: 700 }}>スタイリストコメント</div>
+            <div style={{ fontSize: 11, color: form.stylistComment.length >= 120 ? "#d9534f" : C.sub }}>{form.stylistComment.length}/120</div>
+          </div>
+          <textarea value={form.stylistComment} onChange={e => setForm(p => ({ ...p, stylistComment: e.target.value.slice(0, 120) }))} rows={3}
+            placeholder="【気に入って頂いたスタイルは、ブックマークをしてご提示ください】〔レイヤーカット/ボブ/ショートボブ...〕"
+            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 13, lineHeight: 1.6, resize: "vertical", outline: "none", fontFamily: "inherit" }} />
+          <div style={{ fontSize: 11, color: C.sub, marginTop: 10, marginBottom: 6 }}>スタイルアップ(生成プロンプトをコピーして起動)</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => generateStyleup("chatgpt")} style={{ flex: 1, padding: "12px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#5856d6,#7a6848)", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+              ChatGPTで
+            </button>
+            <button onClick={() => generateStyleup("gemini")} style={{ flex: 1, padding: "12px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#4285f4,#9b72cb)", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+              Geminiで
+            </button>
+          </div>
+        </div>
+
+        {/* スタイル */}
+        <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ fontSize: 12, color: C.sub, fontWeight: 700 }}>スタイル名 *</div>
+            <div style={{ fontSize: 11, color: form.styleName.length >= 30 ? "#d9534f" : C.sub }}>{form.styleName.length}/30</div>
+          </div>
+          <input type="text" value={form.styleName} onChange={e => setForm(p => ({ ...p, styleName: e.target.value }))} maxLength={30}
+            placeholder="例：オリーブカラー×カラー専用髪質改善トリートメント"
+            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, marginBottom: 14, outline: "none" }} />
+
+          <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 6 }}>カテゴリ</div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+            {[["ladies","レディース"],["mens","メンズ"]].map(([v,l]) => (
+              <button key={v} onClick={() => setForm(p => ({ ...p, category: v, length: "" }))}
+                style={{ flex: 1, padding: "10px 0", borderRadius: 10, border: form.category === v ? "2px solid #b5548a" : `1px solid ${C.border}`, background: form.category === v ? "#faf0f5" : "#fff", color: form.category === v ? "#b5548a" : C.sub, fontWeight: 800, fontSize: 13, cursor: "pointer" }}>{l}</button>
+            ))}
+          </div>
+
+          <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 6 }}>長さ</div>
+          <select value={form.length} onChange={e => setForm(p => ({ ...p, length: e.target.value }))}
+            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, marginBottom: 14, background: "#fff", outline: "none" }}>
+            <option value="">未設定</option>
+            {lengthOptions.map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
+
+          <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 6 }}>メニュー内容</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+            {STYLE_MENU_FLAGS.map(f => (
+              <button key={f.key} onClick={() => toggleMenuFlag(f.key)}
+                style={{ padding: "7px 12px", borderRadius: 20, border: form.menuFlags.includes(f.key) ? "1.5px solid #b5548a" : `1px solid ${C.border}`, background: form.menuFlags.includes(f.key) ? "#faf0f5" : "#fff", color: form.menuFlags.includes(f.key) ? "#b5548a" : C.sub, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+          {menus.length > 0 ? (
+            <div style={{ marginBottom: 14 }}>
+              {Object.keys(menusByCategory).map(cat => {
+                const items = menusByCategory[cat];
+                const selCount = items.filter(m => selectedMenuNames.includes(m.name)).length;
+                const isOpen = !!expandedCats[cat];
+                return (
+                  <div key={cat} style={{ border: `1px solid ${C.border}`, borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
+                    <button onClick={() => toggleCategoryOpen(cat)}
+                      style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: "#faf7f2", border: "none", cursor: "pointer" }}>
+                      <span style={{ fontSize: 13, fontWeight: 800, color: C.text }}>
+                        {cat}{selCount > 0 && <span style={{ color: "#b5548a", marginLeft: 6 }}>({selCount})</span>}
+                      </span>
+                      <span style={{ fontSize: 11, color: C.sub, transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>▼</span>
+                    </button>
+                    {isOpen && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: 12 }}>
+                        {items.map(m => (
+                          <button key={m.id} onClick={() => toggleMenuItem(m.name)}
+                            style={{ padding: "7px 12px", borderRadius: 20, border: selectedMenuNames.includes(m.name) ? "1.5px solid #b5548a" : `1px solid ${C.border}`, background: selectedMenuNames.includes(m.name) ? "#faf0f5" : "#fff", color: selectedMenuNames.includes(m.name) ? "#b5548a" : C.sub, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                            {m.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, color: C.sub, marginBottom: 14 }}>登録済みのメニューがありません。メニュー管理から追加してください</div>
+          )}
+        </div>
+
+        {/* ハッシュタグ */}
+        <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <div style={{ fontSize: 12, color: C.sub, fontWeight: 700 }}>ハッシュタグ</div>
+            <div style={{ fontSize: 11, color: C.sub }}>{form.hashtags.length}/20</div>
+          </div>
+          {tagPool.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+              {tagPool.map(t => (
+                <button key={t} onClick={() => toggleHashtag(t)}
+                  style={{ padding: "6px 12px", borderRadius: 20, border: form.hashtags.includes(t) ? "1.5px solid #b5548a" : `1px solid ${C.border}`, background: form.hashtags.includes(t) ? "#faf0f5" : "#fff", color: form.hashtags.includes(t) ? "#b5548a" : C.sub, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                  #{t}
+                </button>
+              ))}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, marginBottom: form.hashtags.length > 0 ? 10 : 0 }}>
+            <input type="text" value={hashtagInput} onChange={e => setHashtagInput(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addHashtag(); } }}
+              placeholder="他のタグを追加(#なしで入力)" style={{ flex: 1, boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 12px", fontSize: 14, outline: "none" }} />
+            <button onClick={addHashtag} style={{ padding: "0 18px", borderRadius: 10, border: "none", background: "#b5548a", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>追加</button>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {form.hashtags.map(t => (
+              <span key={t} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#faf0f5", color: "#b5548a", borderRadius: 14, padding: "5px 10px", fontSize: 12, fontWeight: 700 }}>
+                #{t}
+                <button onClick={() => removeHashtag(t)} style={{ background: "none", border: "none", color: "#b5548a", cursor: "pointer", fontSize: 13, padding: 0, lineHeight: 1 }}>✕</button>
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* タグ(タグ設定で管理するカテゴリ・項目。SalonBoard自動転記には使用しません) */}
+        {tagCategories && tagCategories.length > 0 && (
+          <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 10 }}>タグ</div>
+            {tagCategories.map(cat => (
+              <div key={cat.id} style={{ marginBottom: 10 }}>
+                <div style={{ marginBottom: 6 }}>
+                  <button onClick={() => toggleTag(cat.name)}
+                    style={{ padding: "5px 14px", borderRadius: 20, border: form.tags.includes(cat.name) ? "1.5px solid #b5548a" : `1px solid ${C.border}`, background: form.tags.includes(cat.name) ? "#faf0f5" : "#fff", color: form.tags.includes(cat.name) ? "#b5548a" : C.text, fontSize: 13, fontWeight: 800, cursor: "pointer" }}>
+                    {form.tags.includes(cat.name) ? "✓ " : ""}{cat.name}
+                  </button>
+                </div>
+                {cat.items && cat.items.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, paddingLeft: 8 }}>
+                    {cat.items.map(item => (
+                      <button key={item.id} onClick={() => toggleTag(item.name)}
+                        style={{ padding: "5px 12px", borderRadius: 20, border: form.tags.includes(item.name) ? "1.5px solid #b5548a" : `1px solid ${C.border}`, background: form.tags.includes(item.name) ? "#faf0f5" : "#fff", color: form.tags.includes(item.name) ? "#b5548a" : C.sub, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                        {form.tags.includes(item.name) ? "✓ " : ""}{item.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* モデル情報 */}
+        <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 4 }}>スタイルのモデル情報</div>
+          <div style={{ fontSize: 11, color: C.sub, marginBottom: 12 }}>すべて任意項目です</div>
+          {[["髪量","modelVolume","volume"],["髪質","modelTexture","texture"],["太さ","modelThickness","thickness"],["クセ","modelCurl","curl"],["顔型","modelFace","face"],["年代","modelAge","age"]].map(([label, field, optKey]) => (
+            <div key={field} style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 6 }}>{label}</div>
+              <select value={form[field]} onChange={e => setForm(p => ({ ...p, [field]: e.target.value }))}
+                style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 12px", fontSize: 13, background: "#fff", outline: "none" }}>
+                {STYLE_MODEL_OPTIONS[optKey].map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+          ))}
+        </div>
+
+        <button onClick={save} disabled={saving}
+          style={{ width: "100%", padding: 14, borderRadius: 12, border: "none", background: saving ? C.sub : "#b5548a", color: "#fff", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>
+          {saving ? "保存中..." : editing ? "更新する" : "登録する"}
+        </button>
+        <div style={{ fontSize: 11, color: C.sub, marginTop: 10, lineHeight: 1.7, textAlign: "center" }}>
+          この内容はアプリ内の記録用です。実際のサロンボードへの掲載は、これまでどおり手動での入力が必要です。
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BlogFormTab({ setTab, notify, menus, blogs, editingBlogId, addBlog, updateBlog }) {
+  const editing = editingBlogId ? blogs.find(b => b.id === editingBlogId) : null;
+  const newBlockId = () => Date.now() + Math.random();
+  // bodyBlocksは本文を構成する部品の並び(文章ブロック/写真ブロック)。SalonBoardの本文は
+  // 「文章の途中に写真が挟まる」構成のため、images/bodyを分けずこの1本の並びで管理する
+  const [form, setForm] = useState(() => editing ? {
+    bodyBlocks: [], category: editing.category || "", title: editing.title || "",
+    couponMenuId: editing.couponMenuId || "", authorName: editing.authorName || "",
+  } : {
+    bodyBlocks: [{ id: newBlockId(), type: "text", text: "" }], category: "", title: "", couponMenuId: "", authorName: "",
+  });
+  const [dataLoaded, setDataLoaded] = useState(!editing);
+  const [saving, setSaving] = useState(false);
+  const imageBlockFileRef = useRef();
+
+  // 編集時のみ、この1件分をフル取得(スタイルと同じ方針：一覧は軽量列のみのため)
+  useEffect(() => {
+    if (!editing) return;
+    (async () => {
+      const r = await sbRetry(() => sb.from("blogs").select("*").eq("id", editing.id));
+      if (!r.error && r.data && r.data[0]) {
+        const full = fromDb.blog(r.data[0]);
+        let blocks = full.bodyBlocks && full.bodyBlocks.length ? full.bodyBlocks : null;
+        if (!blocks) {
+          // body_blocks列が無い(旧データ)場合、旧images+bodyから簡易的に組み立てる救済措置
+          blocks = [];
+          (full.images || []).forEach(img => blocks.push({ id: newBlockId(), type: "image", image: img }));
+          if (full.body) blocks.push({ id: newBlockId(), type: "text", text: full.body });
+          if (!blocks.length) blocks = [{ id: newBlockId(), type: "text", text: "" }];
+        }
+        setForm(p => ({ ...p, bodyBlocks: blocks, category: full.category || "", title: full.title || "", couponMenuId: full.couponMenuId || "", authorName: full.authorName || "" }));
+        setDataLoaded(true);
+      }
+    })();
+  }, [editing && editing.id]);
+
+  // ブログ写真はスタイルと違い決まった縦横比の指定がSalonBoard側に見当たらないため、
+  // 元の縦横比のまま最大辺1000pxにリサイズするだけにしている(クロップしない)
+  const processBlogImage = (dataUrl, cb) => {
+    const img = new Image();
+    img.onload = () => {
+      const maxDim = 1000;
+      let w = img.width, h = img.height;
+      if (w > maxDim || h > maxDim) { const scale = maxDim / Math.max(w, h); w = Math.round(w * scale); h = Math.round(h * scale); }
+      const c = document.createElement("canvas"); c.width = w; c.height = h;
+      c.getContext("2d").drawImage(img, 0, 0, w, h);
+      const full = c.toDataURL("image/jpeg", 0.85);
+      const scale2 = 160 / Math.max(w, h);
+      const c2 = document.createElement("canvas"); c2.width = Math.round(w * scale2); c2.height = Math.round(h * scale2);
+      c2.getContext("2d").drawImage(img, 0, 0, c2.width, c2.height);
+      const thumb = c2.toDataURL("image/jpeg", 0.6);
+      cb(full, thumb);
+    };
+    img.src = dataUrl;
+  };
+
+  const imageBlockCount = form.bodyBlocks.filter(b => b.type === "image").length;
+  const addTextBlock = () => setForm(p => ({ ...p, bodyBlocks: [...p.bodyBlocks, { id: newBlockId(), type: "text", text: "" }] }));
+  const handleAddImageBlock = (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    if (imageBlockCount >= 4) { notify("写真は4枚までです", "error"); return; }
+    const reader = new FileReader();
+    reader.onload = ev => {
+      processBlogImage(ev.target.result, (full) => {
+        setForm(p => ({ ...p, bodyBlocks: [...p.bodyBlocks, { id: newBlockId(), type: "image", image: full }] }));
+      });
+    };
+    reader.readAsDataURL(f);
+  };
+  const updateTextBlock = (id, text) => setForm(p => ({ ...p, bodyBlocks: p.bodyBlocks.map(b => b.id === id ? { ...b, text } : b) }));
+  const removeBlock = (id) => setForm(p => ({ ...p, bodyBlocks: p.bodyBlocks.filter(b => b.id !== id) }));
+  const moveBlock = (id, dir) => setForm(p => {
+    const arr = [...p.bodyBlocks];
+    const i = arr.findIndex(b => b.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= arr.length) return p;
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+    return { ...p, bodyBlocks: arr };
+  });
+
+  // ChatGPT/Geminiの回答をそのまま貼り付け→空行区切りで段落ごとに文章ブロックへ自動分割する。
+  // これまでは画像を挟んだ後に1段落ずつコピペし直す必要があったための改善
+  const [showPaste, setShowPaste] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const splitPasteIntoBlocks = () => {
+    const paragraphs = pasteText.split(/\n\s*\n/).map(s => s.trim()).filter(Boolean);
+    if (!paragraphs.length) return;
+    setForm(p => {
+      let blocks = p.bodyBlocks;
+      if (blocks.length === 1 && blocks[0].type === "text" && !blocks[0].text.trim()) blocks = []; // 未入力の初期ブロックは貼り付け後に不要なので除く
+      return { ...p, bodyBlocks: [...blocks, ...paragraphs.map(text => ({ id: newBlockId(), type: "text", text }))] };
+    });
+    notify(`${paragraphs.length}個の文章ブロックに分けました ✓`);
+    setPasteText("");
+    setShowPaste(false);
+  };
+
+  // 過去のブログで使われた投稿者名/カテゴリを集計し、選ぶだけで再利用できるようにする(スタイルと同じ発想)
+  const authorNames = useMemo(() => [...new Set(blogs.map(b => b.authorName).filter(Boolean))], [blogs]);
+  const categoryPool = useMemo(() => [...new Set(blogs.map(b => b.category).filter(Boolean))], [blogs]);
+  const bodyPlainText = form.bodyBlocks.filter(b => b.type === "text").map(b => b.text).join("\n");
+  const bodyCharCount = bodyPlainText.length;
+  const lineBreakCount = (bodyPlainText.match(/\n/g) || []).length;
+
+  // カルテ詳細にあった「ブログを書く」(AIへブログ生成プロンプトを渡す機能)をこちらへ移設。
+  // カルテ側は来店1件のビフォーアフター写真枚数等を補足情報にしていたが、こちらはカテゴリのみ使う
+  const generateBlogPrompt = (dest) => {
+    let savedPrompt = "";
+    try { savedPrompt = localStorage.getItem("blogPrompt") || ""; } catch (e) {}
+    const defaultPrompt = "あなたはプロのライター。ホットペッパービューティーでSEO対策、AIO対策をしたブログを「人が書いた自然さ」「読んでる人がしてみたい」と思うような内容を書いて\n\n条件\n- タイトルを２５文字以内で候補１０個あげる\n- 本文の最初に「こんにちは、茨木市の美容室Amberの大岡です^ - ^」をいれる\n- 本文は1000文字以内\n- 写真の仕上がりや雰囲気が伝わる説明を必ず入れる\n- 文章の流れ・語尾・リズムを最適化\n- 環境依存文字、半角記号を使わない\n- どんな人にお勧めなのか\n- 箇条書き内容は自然な文章に展開\n- できるだけ読みやすいように箇条書きなどもいれる\n\n- 本文の最後に「大阪府茨木市春日1－4－14春日ビル4階　072－665－4644　Amber」をいれる\n- 本文の内容に合うSEO対策用のハッシュタグ20個を改行せず最下部に入れる";
+    const prompt = (savedPrompt || defaultPrompt) + (form.category ? "\n\nカテゴリ：" + form.category : "");
+    try { var el = document.createElement("textarea"); el.value = prompt; document.body.appendChild(el); el.select(); document.execCommand("copy"); document.body.removeChild(el); } catch (e) {}
+    if (dest === "gemini") window.location.href = "shortcuts://run-shortcut?name=" + encodeURIComponent("Gemini起動");
+    else window.location.href = "chatgpt://";
+  };
+
+  const save = async () => {
+    if (!dataLoaded) return notify("データの読み込みが完了していません。少し待ってから保存してください", "error");
+    if (!form.title.trim()) return notify("タイトルを入力してください", "error");
+    setSaving(true);
+    // images/bodyはbodyBlocksから毎回導出する(一覧サムネイル用・簡易テキスト参照用に維持)
+    const images = form.bodyBlocks.filter(b => b.type === "image").map(b => b.image);
+    const coverImage = images[0] || null;
+    const payload = { ...form, images, coverImage, body: bodyPlainText };
+    if (editing) await updateBlog(editing.id, payload);
+    else await addBlog(payload);
+    setSaving(false);
+    notify(editing ? "更新しました ✓" : "登録しました ✓");
+    setTab("blogList");
+  };
+
+  return (
+    <div style={{ background: C.bg, minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      <div style={{ background: "#fff", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.border}` }}>
+        <button onClick={() => setTab("blogList")} style={{ background: "none", border: "none", color: "#7a6848", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>← 一覧</button>
+        <div style={{ fontWeight: 800, fontSize: 16 }}>{editing ? "ブログ編集" : "新規ブログ作成"}</div>
+        <div style={{ width: 60 }} />
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch", padding: 16 }}>
+
+        {/* ブログを書く(AI生成プロンプトをコピーして起動) */}
+        <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 11, color: C.sub, marginBottom: 8 }}>ブログを書く(生成プロンプトをコピーして起動)</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => generateBlogPrompt("chatgpt")} style={{ flex: 1, padding: "12px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#ff4d88,#ff9500)", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+              ChatGPTで
+            </button>
+            <button onClick={() => generateBlogPrompt("gemini")} style={{ flex: 1, padding: "12px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#4285f4,#9b72cb)", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+              Geminiで
+            </button>
+          </div>
+        </div>
+
+        {/* 投稿者・カテゴリ */}
+        <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 6 }}>投稿者</div>
+          {authorNames.length > 0 && (
+            <select value="" onChange={e => { if (e.target.value) setForm(p => ({ ...p, authorName: e.target.value })); }}
+              style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 12px", fontSize: 13, marginBottom: 8, background: "#fff", color: C.sub, outline: "none" }}>
+              <option value="">既存の名前から選択…</option>
+              {authorNames.map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+          )}
+          <input type="text" value={form.authorName} onChange={e => setForm(p => ({ ...p, authorName: e.target.value }))}
+            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, marginBottom: 14, outline: "none" }} />
+
+          <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 6 }}>カテゴリ</div>
+          {categoryPool.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+              {categoryPool.map(cat => (
+                <button key={cat} onClick={() => setForm(p => ({ ...p, category: cat }))}
+                  style={{ padding: "6px 12px", borderRadius: 20, border: form.category === cat ? "1.5px solid #e8924a" : `1px solid ${C.border}`, background: form.category === cat ? "#fff3e8" : "#fff", color: form.category === cat ? "#e8924a" : C.sub, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                  {cat}
+                </button>
+              ))}
+            </div>
+          )}
+          <input type="text" value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value }))}
+            placeholder="例：おすすめスタイル"
+            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, outline: "none" }} />
+        </div>
+
+        {/* タイトル・本文 */}
+        <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ fontSize: 12, color: C.sub, fontWeight: 700 }}>タイトル *</div>
+            <div style={{ fontSize: 11, color: form.title.length >= 25 ? "#d9534f" : C.sub }}>{form.title.length}/25</div>
+          </div>
+          <input type="text" value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value.slice(0, 25) }))} maxLength={25}
+            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, marginBottom: 14, outline: "none" }} />
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ fontSize: 12, color: C.sub, fontWeight: 700 }}>本文</div>
+            <div style={{ fontSize: 11 }}>
+              <span style={{ color: bodyCharCount >= 1000 ? "#d9534f" : C.sub }}>{bodyCharCount}/1000</span>
+              <span style={{ marginLeft: 10, color: lineBreakCount >= 80 ? "#d9534f" : C.sub }}>改行{lineBreakCount}/80</span>
+              <span style={{ marginLeft: 10, color: imageBlockCount >= 4 ? "#d9534f" : C.sub }}>画像{imageBlockCount}/4</span>
+            </div>
+          </div>
+          <div style={{ fontSize: 11, color: C.sub, marginBottom: 10, lineHeight: 1.6 }}>
+            SalonBoardと同じく、文章と写真を好きな順番に並べられます。↑↓で並び替え、写真は本文の途中にも挟めます。
+          </div>
+          {dataLoaded && (showPaste ? (
+            <div style={{ marginBottom: 12, border: `1.5px solid #e8924a`, borderRadius: 10, padding: 10, background: "#fff8f0" }}>
+              <textarea value={pasteText} onChange={e => setPasteText(e.target.value)} rows={6}
+                placeholder="ChatGPT/Geminiの回答をそのまま貼り付け(空行で区切られた段落ごとに文章ブロックへ分割されます)"
+                style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 10px", fontSize: 13, marginBottom: 8, outline: "none", fontFamily: "inherit" }} />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={splitPasteIntoBlocks} style={{ flex: 1, padding: "9px 0", borderRadius: 8, border: "none", background: "#e8924a", color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>段落ごとに追加</button>
+                <button onClick={() => { setShowPaste(false); setPasteText(""); }} style={{ padding: "9px 16px", borderRadius: 8, border: `1px solid ${C.border}`, background: "#fff", color: C.sub, fontSize: 12, cursor: "pointer" }}>閉じる</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setShowPaste(true)} style={{ width: "100%", padding: "10px 0", borderRadius: 8, border: "1.5px solid #e8924a", background: "#fff3e8", color: "#e8924a", fontWeight: 700, fontSize: 12, cursor: "pointer", marginBottom: 12 }}>
+              📋 AIの回答をまとめて貼り付け→段落ごとに分割
+            </button>
+          ))}
+          {!dataLoaded ? (
+            <div style={{ fontSize: 12, color: C.sub, padding: "8px 0" }}>データを読み込み中…（完了するまで変更できません）</div>
+          ) : (
+            <React.Fragment>
+              {form.bodyBlocks.map((block, i) => (
+                <div key={block.id} style={{ marginBottom: 10, border: `1px solid ${C.border}`, borderRadius: 10, padding: 10 }}>
+                  {block.type === "image" ? (
+                    <img src={block.image} alt="" style={{ width: "100%", maxHeight: 240, objectFit: "cover", borderRadius: 8 }} />
+                  ) : (
+                    <textarea value={block.text} onChange={e => updateTextBlock(block.id, e.target.value)} rows={4} placeholder="文章を入力"
+                      style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 10px", fontSize: 13, lineHeight: 1.6, resize: "vertical", outline: "none", fontFamily: "inherit" }} />
+                  )}
+                  <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                    <button onClick={() => moveBlock(block.id, -1)} disabled={i === 0}
+                      style={{ padding: "4px 10px", borderRadius: 6, border: `1px solid ${C.border}`, background: "#fff", color: i === 0 ? "#ccc" : C.sub, fontSize: 12, cursor: i === 0 ? "default" : "pointer" }}>↑</button>
+                    <button onClick={() => moveBlock(block.id, 1)} disabled={i === form.bodyBlocks.length - 1}
+                      style={{ padding: "4px 10px", borderRadius: 6, border: `1px solid ${C.border}`, background: "#fff", color: i === form.bodyBlocks.length - 1 ? "#ccc" : C.sub, fontSize: 12, cursor: i === form.bodyBlocks.length - 1 ? "default" : "pointer" }}>↓</button>
+                    <button onClick={() => removeBlock(block.id)}
+                      style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #ff6b6b", background: "#fff", color: "#ff6b6b", fontSize: 12, cursor: "pointer", marginLeft: "auto" }}>削除</button>
+                  </div>
+                </div>
+              ))}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={addTextBlock} style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: `1px solid ${C.border}`, background: "#fff", color: C.sub, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>＋文章を追加</button>
+                <button onClick={() => imageBlockCount < 4 ? imageBlockFileRef.current.click() : notify("写真は4枚までです", "error")}
+                  style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: `1px solid ${C.border}`, background: imageBlockCount >= 4 ? "#f5f5f5" : "#fff", color: imageBlockCount >= 4 ? "#ccc" : C.sub, fontWeight: 700, fontSize: 12, cursor: imageBlockCount >= 4 ? "default" : "pointer" }}>＋写真を追加</button>
+                <input ref={imageBlockFileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleAddImageBlock} />
+              </div>
+            </React.Fragment>
+          )}
+        </div>
+
+        {/* クーポン */}
+        <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 14, border: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, marginBottom: 6 }}>クーポン</div>
+          <select value={form.couponMenuId} onChange={e => setForm(p => ({ ...p, couponMenuId: e.target.value }))}
+            style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", fontSize: 14, background: "#fff", outline: "none" }}>
+            <option value="">未設定</option>
+            {menus.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </div>
+
+      </div>
+      <div style={{ background: "#fff", borderTop: `1px solid ${C.border}`, padding: 16 }}>
+        <button onClick={save} disabled={saving}
+          style={{ width: "100%", padding: 14, borderRadius: 12, border: "none", background: saving ? "#ccc" : "#e8924a", color: "#fff", fontWeight: 800, fontSize: 15, cursor: saving ? "default" : "pointer" }}>
+          {saving ? "保存中..." : (editing ? "更新する" : "登録する")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TagSettingsTab({ setTab, notify, tagCategories, setTagCategories }) {
+  const [editCatId, setEditCatId] = useState(null);
+  const [editCatName, setEditCatName] = useState("");
+  const [newCatName, setNewCatName] = useState("");
+  const [editItemId, setEditItemId] = useState(null);
+  const [editItemName, setEditItemName] = useState("");
+  const [newItemName, setNewItemName] = useState("");
+  const [openCatId, setOpenCatId] = useState(null);
+
+  const addCategory = async () => {
+    const name = newCatName.trim();
+    if (!name) return;
+    const { data } = await sb.from("tag_categories").insert([{ name, sort_order: tagCategories.length }]).select();
+    if (data && data[0]) {
+      setTagCategories(p => [...p, { id: data[0].id, name, sortOrder: data[0].sort_order, items: [] }]);
+      setNewCatName("");
+      notify("カテゴリを追加しました ✓");
+    }
+  };
+
+  const updateCategory = async (id) => {
+    const name = editCatName.trim();
+    if (!name) return;
+    await sb.from("tag_categories").update({ name }).eq("id", id);
+    setTagCategories(p => p.map(c => c.id === id ? { ...c, name } : c));
+    setEditCatId(null);
+    notify("更新しました ✓");
+  };
+
+  const deleteCategory = async (id) => {
+    if (!window.confirm("このカテゴリとサブタグを全て削除しますか？")) return;
+    await sb.from("tag_categories").delete().eq("id", id);
+    setTagCategories(p => p.filter(c => c.id !== id));
+    notify("削除しました");
+  };
+
+  const addItem = async (catId) => {
+    const name = newItemName.trim();
+    if (!name) return;
+    const cat = tagCategories.find(c => c.id === catId);
+    const { data } = await sb.from("tag_items").insert([{ category_id: catId, name, sort_order: (cat?.items||[]).length }]).select();
+    if (data && data[0]) {
+      setTagCategories(p => p.map(c => c.id === catId ? { ...c, items: [...(c.items||[]), { id: data[0].id, name, sortOrder: data[0].sort_order }] } : c));
+      setNewItemName("");
+      notify("タグを追加しました ✓");
+    }
+  };
+
+  const updateItem = async (catId, itemId) => {
+    const name = editItemName.trim();
+    if (!name) return;
+    await sb.from("tag_items").update({ name }).eq("id", itemId);
+    setTagCategories(p => p.map(c => c.id === catId ? { ...c, items: c.items.map(i => i.id === itemId ? { ...i, name } : i) } : c));
+    setEditItemId(null);
+    notify("更新しました ✓");
+  };
+
+  const deleteItem = async (catId, itemId) => {
+    await sb.from("tag_items").delete().eq("id", itemId);
+    setTagCategories(p => p.map(c => c.id === catId ? { ...c, items: c.items.filter(i => i.id !== itemId) } : c));
+    notify("削除しました");
+  };
+
+  return (
+    <div style={{ background:C.bg, minHeight:"100vh" }}>
+      <div style={{ background:"#E8DCC3", padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+        <button onClick={() => setTab("styleList")} style={{ background:"none", border:"none", color:"#fff", fontSize:15, fontWeight:700, cursor:"pointer" }}>← 戻る</button>
+        <div style={{ fontWeight:800, fontSize:16, color:"#fff" }}>タグ設定</div>
+        <div style={{ width:48 }} />
+      </div>
+      <div style={{ padding:16 }}>
+        {tagCategories.map(cat => (
+          <div key={cat.id} style={{ background:"#fff", borderRadius:12, marginBottom:12, boxShadow:"0 1px 4px rgba(0,0,0,0.06)", overflow:"hidden" }}>
+            <div style={{ display:"flex", alignItems:"center", padding:"12px 16px", gap:8 }}>
+              {editCatId === cat.id ? (
+                <>
+                  <input value={editCatName} onChange={e => setEditCatName(e.target.value)}
+                    style={{ flex:1, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 10px", fontSize:14 }} />
+                  <button onClick={() => updateCategory(cat.id)} style={{ padding:"6px 12px", borderRadius:8, border:"none", background:"#E8DCC3", color:"#2a2218", fontWeight:700, fontSize:13, cursor:"pointer" }}>保存</button>
+                  <button onClick={() => setEditCatId(null)} style={{ padding:"6px 12px", borderRadius:8, border:`1px solid ${C.border}`, background:"#fff", fontSize:13, cursor:"pointer" }}>✕</button>
+                </>
+              ) : (
+                <>
+                  <button onClick={() => setOpenCatId(openCatId === cat.id ? null : cat.id)} style={{ flex:1, background:"none", border:"none", textAlign:"left", fontSize:15, fontWeight:800, color:C.text, cursor:"pointer" }}>
+                    {cat.name} {openCatId === cat.id ? "▲" : "▼"}
+                  </button>
+                  <button onClick={() => { setEditCatId(cat.id); setEditCatName(cat.name); }} style={{ background:"none", border:"none", fontSize:14, cursor:"pointer", color:C.sub }}>編集</button>
+                  <button onClick={() => deleteCategory(cat.id)} style={{ background:"none", border:"none", fontSize:14, cursor:"pointer", color:"#ff6b6b" }}>削除</button>
+                </>
+              )}
+            </div>
+            {openCatId === cat.id && (
+              <div style={{ padding:"0 16px 14px", borderTop:`1px solid ${C.border}` }}>
+                {(cat.items||[]).map(item => (
+                  <div key={item.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 0", borderBottom:`1px solid ${C.border}` }}>
+                    {editItemId === item.id ? (
+                      <>
+                        <input value={editItemName} onChange={e => setEditItemName(e.target.value)}
+                          style={{ flex:1, border:`1px solid ${C.border}`, borderRadius:8, padding:"5px 8px", fontSize:13 }} />
+                        <button onClick={() => updateItem(cat.id, item.id)} style={{ padding:"5px 10px", borderRadius:8, border:"none", background:"#E8DCC3", color:"#2a2218", fontWeight:700, fontSize:12, cursor:"pointer" }}>保存</button>
+                        <button onClick={() => setEditItemId(null)} style={{ padding:"5px 10px", borderRadius:8, border:`1px solid ${C.border}`, background:"#fff", fontSize:12, cursor:"pointer" }}>✕</button>
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ flex:1, fontSize:14, color:C.text }}>{item.name}</span>
+                        <button onClick={() => { setEditItemId(item.id); setEditItemName(item.name); }} style={{ background:"none", border:"none", fontSize:13, cursor:"pointer", color:C.sub }}>編集</button>
+                        <button onClick={() => deleteItem(cat.id, item.id)} style={{ background:"none", border:"none", fontSize:13, cursor:"pointer", color:"#ff6b6b" }}>削除</button>
+                      </>
+                    )}
+                  </div>
+                ))}
+                <div style={{ display:"flex", gap:8, marginTop:10 }}>
+                  <input value={newItemName} onChange={e => setNewItemName(e.target.value)} placeholder="新しいタグを追加"
+                    style={{ flex:1, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 10px", fontSize:13, outline:"none" }} />
+                  <button onClick={() => addItem(cat.id)} style={{ padding:"6px 14px", borderRadius:8, border:"none", background:"#E8DCC3", color:"#2a2218", fontWeight:700, fontSize:13, cursor:"pointer" }}>追加</button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+        <div style={{ background:"#fff", borderRadius:12, padding:"14px 16px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+          <div style={{ fontSize:13, fontWeight:700, color:C.text, marginBottom:10 }}>新しいカテゴリを追加</div>
+          <div style={{ display:"flex", gap:8 }}>
+            <input value={newCatName} onChange={e => setNewCatName(e.target.value)} placeholder="カテゴリ名"
+              style={{ flex:1, border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 10px", fontSize:14, outline:"none" }} />
+            <button onClick={addCategory} style={{ padding:"8px 16px", borderRadius:8, border:"none", background:"#E8DCC3", color:"#2a2218", fontWeight:700, fontSize:14, cursor:"pointer" }}>追加</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BlogPromptTab({ setTab, notify }) {
+  const defaultPrompt = "あなたはプロのライター。ホットペッパービューティーでSEO対策、AIO対策をしたブログを「人が書いた自然さ」「読んでる人がしてみたい」と思うような内容を書いて\n\n条件\n- タイトルを25文字以内で候補10個あげる\n- 本文の最初に「こんにちは、茨木市の美容室Amberの大岡です^ - ^」をいれる\n- 本文は1000文字以内\n- 写真の仕上がりや雰囲気が伝わる説明を必ず入れる\n- 文章の流れ・語尾・リズムを最適化\n- 環境絵文字、半角記号を使わない\n- どんな人にお勧めなのか\n- 箇条書き内容は自然な文章に展開\n- できるだけ読みやすいように箇条書きなどもいれる\n- 本文の最後に「大阪府茨木市春日1－4－14春日ビル4階　072－665－4644　Amber」をいれる\n- 本文の内容に合うSEO対策用のハッシュタグ20個を改行せず最下部に入れる";
+  const getStored = function() { try { return localStorage.getItem("blogPrompt") || defaultPrompt; } catch(e) { return defaultPrompt; } };
+  const [prompt, setPrompt] = useState(getStored());
+  const save = async function() {
+    try { localStorage.setItem("blogPrompt", prompt); } catch(e) {}
+    await sb.from("settings").upsert({ key: "blogPrompt", value: prompt }, { onConflict: "key" });
+    notify("プロンプトを保存しました ✓");
+    setTab("blogList");
+  };
+  return (
+    <div style={{ background:C.bg, minHeight:"100vh" }}>
+      <div style={{ background:"linear-gradient(135deg,#ff4d88,#ff9500)", padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+        <button onClick={() => setTab("blogList")} style={{ background:"none", border:"none", color:"#fff", fontSize:15, fontWeight:700, cursor:"pointer" }}>← 戻る</button>
+        <div style={{ fontWeight:800, fontSize:16, color:"#fff" }}>ブログプロンプト編集</div>
+        <button onClick={save} style={{ border:"1.5px solid #fff", borderRadius:8, padding:"5px 14px", background:"transparent", color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer" }}>保存</button>
+      </div>
+      <div style={{ padding:16 }}>
+        <div style={{ fontSize:13, color:C.sub, marginBottom:12 }}>AIへの指示内容を編集できます。施術内容・メモ・写真枚数は自動で追加されます。</div>
+        <textarea value={prompt} onChange={e => setPrompt(e.target.value)} style={{ width:"100%", minHeight:400, border:"1px solid "+C.border, borderRadius:12, padding:14, fontSize:14, lineHeight:1.8, resize:"vertical", fontFamily:"inherit", boxSizing:"border-box" }} />
+        <button onClick={() => { setPrompt(defaultPrompt); notify("デフォルトに戻しました"); }} style={{ marginTop:12, background:"none", border:"none", color:C.sub, fontSize:13, cursor:"pointer", textDecoration:"underline" }}>デフォルトに戻す</button>
+      </div>
+    </div>
+  );
+}
+
+function StylupPromptTab({ setTab, notify }) {
+  const defaultPrompt = "あなたはプロのライター兼美容師向けSEOライターです。\n\nホットペッパービューティーの「ヘアスタイル掲載ページ」用に、写真からスタイル名とコメントを作成してください。\n\n【目的】\n・人が書いたような自然な文章\n・見た人が「この髪型にしたい」と思う内容\n・美容室集客につながる内容\n・SEO対策、AIO対策を意識\n・ホットペッパービューティーのスタイル掲載で検索されやすい内容\n\n【出力ルール】\n写真を分析し、以下の順番で出力\n\n【スタイル名候補】\n①\n②\n③\n④\n⑤\n⑥\n⑦\n⑧\n⑨\n⑩\n\nスタイル名候補を10個出した後、「気に入った番号を選んでください」と表示して終了する。コメントはまだ作成しない。\n\nユーザーが番号を選んだら、そのスタイル名で完成版を作成する。\n\n出力順\n選ばれたスタイル名\nコメント（120文字以内）\n\n重要\n・スタイル名選択前にコメントを作らない\n・余計な説明をしない\n・コピペしやすい形で出力\n・写真を必ず分析してスタイル名とコメントに反映する";
+  const getStored = function() { try { return localStorage.getItem("stylupPrompt") || defaultPrompt; } catch(e) { return defaultPrompt; } };
+  const [prompt, setPrompt] = useState(getStored());
+  const save = async function() {
+    try { localStorage.setItem("stylupPrompt", prompt); } catch(e) {}
+    await sb.from("settings").upsert({ key: "stylupPrompt", value: prompt }, { onConflict: "key" });
+    notify("プロンプトを保存しました ✓");
+    setTab("styleList");
+  };
+  return (
+    <div style={{ background:C.bg, minHeight:"100vh" }}>
+      <div style={{ background:"linear-gradient(135deg,#5856d6,#7a6848)", padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+        <button onClick={() => setTab("styleList")} style={{ background:"none", border:"none", color:"#fff", fontSize:15, fontWeight:700, cursor:"pointer" }}>← 戻る</button>
+        <div style={{ fontWeight:800, fontSize:16, color:"#fff" }}>スタイルアップ プロンプト編集</div>
+        <button onClick={save} style={{ border:"1.5px solid #fff", borderRadius:8, padding:"5px 14px", background:"transparent", color:"#fff", fontWeight:700, fontSize:14, cursor:"pointer" }}>保存</button>
+      </div>
+      <div style={{ padding:16 }}>
+        <div style={{ fontSize:13, color:C.sub, marginBottom:12 }}>スタイルアップAIへの指示内容を編集できます。施術内容・メモは自動で追加されます。</div>
+        <textarea value={prompt} onChange={e => setPrompt(e.target.value)} style={{ width:"100%", minHeight:400, border:"1px solid "+C.border, borderRadius:12, padding:14, fontSize:14, lineHeight:1.8, resize:"vertical", fontFamily:"inherit", boxSizing:"border-box" }} />
+        <button onClick={() => { setPrompt(defaultPrompt); notify("デフォルトに戻しました"); }} style={{ marginTop:12, background:"none", border:"none", color:C.sub, fontSize:13, cursor:"pointer", textDecoration:"underline" }}>デフォルトに戻す</button>
+      </div>
+    </div>
+  );
+}
+
+
+const container = document.getElementById("root");
+const root = ReactDOM.createRoot(container);
+root.render(<App />);
+  </script>
+</body>
+</html>
