@@ -84,6 +84,11 @@
   .slideshow-tags { display: flex; flex-wrap: wrap; gap: 5px; }
   .slideshow-tag { font-size: 10px; padding: 3px 10px; border-radius: 20px; background: rgba(255,255,255,0.2); color: #fff; }
   .slideshow-close { position: absolute; top: 20px; right: 20px; width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,0.15); border: none; color: #fff; font-size: 18px; cursor: pointer; z-index: 2; display: flex; align-items: center; justify-content: center; }
+  .slideshow-playpause { position: absolute; top: 20px; right: 68px; width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,0.15); border: none; color: #fff; font-size: 15px; cursor: pointer; z-index: 2; display: flex; align-items: center; justify-content: center; }
+  .slideshow-speed { position: absolute; top: 20px; right: 116px; height: 40px; padding: 0 14px; border-radius: 20px; background: rgba(255,255,255,0.15); border: none; color: #fff; font-size: 12px; font-weight: 600; letter-spacing: 0.5px; cursor: pointer; z-index: 2; display: flex; align-items: center; justify-content: center; white-space: nowrap; }
+  .slideshow-prev, .slideshow-next { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.12); border: none; color: #fff; font-size: 22px; cursor: pointer; z-index: 2; display: flex; align-items: center; justify-content: center; }
+  .slideshow-prev { left: 12px; }
+  .slideshow-next { right: 12px; }
   .slideshow-progress { position: absolute; bottom: 0; left: 0; height: 2px; background: var(--warm); transition: width linear; z-index: 2; }
   .slideshow-counter { position: absolute; top: 20px; left: 20px; font-size: 11px; color: rgba(255,255,255,0.6); letter-spacing: 2px; z-index: 2; }
 
@@ -246,6 +251,10 @@
 <!-- Detail Modal -->
 <div class="slideshow-overlay" id="slideshow" onclick="stopSlideshow()">
   <button class="slideshow-close" onclick="stopSlideshow(event)">✕</button>
+  <button class="slideshow-playpause" id="slideshowPlayPause" onclick="toggleSlideshowPlay(event)"></button>
+  <button class="slideshow-speed" id="slideshowSpeed" onclick="cycleSlideshowSpeed(event)"></button>
+  <button class="slideshow-prev" onclick="slideshowPrev(event)">‹</button>
+  <button class="slideshow-next" onclick="slideshowNext(event)">›</button>
   <div class="slideshow-counter" id="slideshowCounter"></div>
   <img class="slideshow-img" id="slideshowImgA" src="" alt="">
   <img class="slideshow-img" id="slideshowImgB" src="" alt="">
@@ -267,7 +276,7 @@
 </div>
 
 <script>
-const STYLE_VERSION = "v2026.08.05-a"; // このファイルのバージョン(反映確認用)
+const STYLE_VERSION = "v2026.08.05-b"; // このファイルのバージョン(反映確認用)
 const SUPABASE_URL = "https://yvsavbxijdggzihvoram.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2c2F2YnhpamRnZ3ppaHZvcmFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NTkyNTEsImV4cCI6MjA5NTUzNTI1MX0.v_5yFWKizgOSUHifx10vSm7OEafy6fZhjy5cff-QHQw";
 const HP_URL = "https://beauty.hotpepper.jp/slnH000767692/";
@@ -453,7 +462,7 @@ function renderGallery() {
     html += `
       <div class="card" style="animation-delay:${idx * 0.04}s" onclick="openModal(${s.id})">
         <div class="card-photos">
-          <img class="card-img" src="${s.coverImage}" alt="style" loading="lazy">
+          <img class="card-img" id="style-thumb-${s.id}" src="${s.coverImage}" alt="style" loading="lazy">
         </div>
         <div class="card-body">
           <div class="card-tags">
@@ -466,10 +475,26 @@ function renderGallery() {
   });
   html += `</div>`;
   app.innerHTML = html;
+
+  // 8/5: 一覧は軽量サムネイル(cover_image)でまず表示し、直後に本来の写真(高画質)を
+  // 個別取得してサムネイルを差し替える(商品タブと同じ遅延読込パターン)。画質のガビガビ対策
+  filtered.forEach(async (s) => {
+    if (!s.imagesLoaded) {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/styles?select=images&id=eq.${s.id}`, { headers });
+        const data = await res.json();
+        s.images = data[0]?.images || [];
+        s.imagesLoaded = true;
+      } catch(e) { s.images = []; s.imagesLoaded = true; }
+    }
+    const full = s.images[0];
+    if (!full) return;
+    const el = document.getElementById(`style-thumb-${s.id}`);
+    if (el) el.src = full;
+  });
 }
 
-// 8/5: 一覧はcover_image(軽量サムネイル)のみで表示し、詳細を開いた時だけ
-// 本来の写真(imagesカラム・最大3枚)を個別取得する(商品タブと同じ遅延読込パターン)
+// 一覧側で既に高画質を先読みしていればここでは再取得しない(imagesLoadedで判定)
 async function openModal(id) {
   const s = allStyles.find(x => x.id === id);
   if (!s) return;
@@ -808,6 +833,7 @@ async function startProductSlideshow() {
   ssActive = true;
   document.getElementById("slideshow").classList.add("open");
   document.body.style.overflow = "hidden";
+  updateSlideshowControlsUI();
   showSlide(ssIndex);
 }
 
@@ -817,23 +843,82 @@ let ssImages = [];
 let ssTimer = null;
 let ssProgressTimer = null;
 let ssActive = false;
-const SLIDE_INTERVAL = 3000;
+const SPEED_OPTIONS = [2000, 3000, 5000, 8000, 12000];
+let SLIDE_INTERVAL = 3000;
+let ssAutoPlay = true;
+try {
+  const savedInterval = parseInt(localStorage.getItem("ssInterval"));
+  if (SPEED_OPTIONS.includes(savedInterval)) SLIDE_INTERVAL = savedInterval;
+  ssAutoPlay = localStorage.getItem("ssAutoPlay") !== "0";
+} catch(e) {}
+
+function updateSlideshowControlsUI() {
+  const playBtn = document.getElementById("slideshowPlayPause");
+  const speedBtn = document.getElementById("slideshowSpeed");
+  if (playBtn) playBtn.textContent = ssAutoPlay ? "⏸" : "▶";
+  if (speedBtn) { speedBtn.textContent = (SLIDE_INTERVAL / 1000) + "s"; speedBtn.style.display = ssAutoPlay ? "flex" : "none"; }
+}
+
+window.toggleSlideshowPlay = (e) => {
+  if (e) e.stopPropagation();
+  ssAutoPlay = !ssAutoPlay;
+  try { localStorage.setItem("ssAutoPlay", ssAutoPlay ? "1" : "0"); } catch(e) {}
+  updateSlideshowControlsUI();
+  restartSlideshowTimer();
+};
+
+window.cycleSlideshowSpeed = (e) => {
+  if (e) e.stopPropagation();
+  const i = SPEED_OPTIONS.indexOf(SLIDE_INTERVAL);
+  SLIDE_INTERVAL = SPEED_OPTIONS[(i + 1) % SPEED_OPTIONS.length];
+  try { localStorage.setItem("ssInterval", String(SLIDE_INTERVAL)); } catch(e) {}
+  updateSlideshowControlsUI();
+  restartSlideshowTimer();
+};
+
+window.slideshowNext = (e) => {
+  if (e) e.stopPropagation();
+  if (!ssActive || !ssImages.length) return;
+  ssIndex = (ssIndex + 1) % ssImages.length;
+  showSlide(ssIndex);
+};
+
+window.slideshowPrev = (e) => {
+  if (e) e.stopPropagation();
+  if (!ssActive || !ssImages.length) return;
+  ssIndex = (ssIndex - 1 + ssImages.length) % ssImages.length;
+  showSlide(ssIndex);
+};
 
 function buildSlideshowImages() {
   const imgs = [];
   allStyles.forEach(s => {
-    if (s.coverImage) imgs.push({ url: s.coverImage, styleName: s.styleName, tags: s.facets });
+    const url = (s.imagesLoaded && s.images[0]) || s.coverImage;
+    if (url) imgs.push({ url, styleName: s.styleName, tags: s.facets });
   });
   return imgs;
 }
 
-function startSlideshow() {
+async function startSlideshow() {
+  // 画質のガビガビ対策: サムネイルではなく本来の写真(images)を使うため、
+  // まだ未取得のスタイルがあれば先にまとめて取得してからスライドショーを開始する
+  const targets = allStyles.filter(s => !s.imagesLoaded);
+  await Promise.all(targets.map(async s => {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/styles?select=images&id=eq.${s.id}`, { headers });
+      const data = await res.json();
+      s.images = data[0]?.images || [];
+      s.imagesLoaded = true;
+    } catch(e) { s.images = []; s.imagesLoaded = true; }
+  }));
+
   ssImages = buildSlideshowImages();
   if (ssImages.length === 0) return;
   ssIndex = 0;
   ssActive = true;
   document.getElementById("slideshow").classList.add("open");
   document.body.style.overflow = "hidden";
+  updateSlideshowControlsUI();
   showSlide(ssIndex);
 }
 
@@ -856,7 +941,6 @@ function showSlide(idx) {
 
   const counter = document.getElementById("slideshowCounter");
   const info = document.getElementById("slideshowInfo");
-  const progress = document.getElementById("slideshowProgress");
   const imgA = document.getElementById("slideshowImgA");
   const imgB = document.getElementById("slideshowImgB");
 
@@ -880,16 +964,23 @@ function showSlide(idx) {
     ? `<div class="slideshow-style-name">${item.styleName}</div><div class="slideshow-tags">${item.tags.map(t => `<span class="slideshow-tag">${t}</span>`).join("")}</div>`
     : `<div class="slideshow-tags">${item.tags.map(t => `<span class="slideshow-tag">${t}</span>`).join("")}</div>`;
 
-  // プログレスバー
+  restartSlideshowTimer();
+}
+
+// 自動再生タイマー＋プログレスバーの制御(手動モードでは進行しない)
+function restartSlideshowTimer() {
   clearInterval(ssProgressTimer);
+  clearTimeout(ssTimer);
+  const progress = document.getElementById("slideshowProgress");
   progress.style.transition = "none";
   progress.style.width = "0%";
+  if (!ssAutoPlay) return;
+
   setTimeout(() => {
     progress.style.transition = `width ${SLIDE_INTERVAL}ms linear`;
     progress.style.width = "100%";
   }, 30);
 
-  clearTimeout(ssTimer);
   ssTimer = setTimeout(() => {
     ssIndex = (ssIndex + 1) % ssImages.length;
     showSlide(ssIndex);
