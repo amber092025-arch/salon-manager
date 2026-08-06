@@ -76,6 +76,7 @@ const sb = {
 };
 
 const C = { bg:"#faf8f4", card:"#ffffff", border:"#ece7df", text:"#2a2218", sub:"#9a9088", accent:"#7a6848", red:"#c0392b", green:"#3fb98a", orange:"#e8924a" };
+const REPORT_VERSION = "v2026.08.06-a"; // このアプリのバージョン(反映確認用)
 
 // ═══════════════════════════════════════════
 // HPBサロンレポートPDF 解析ロジック
@@ -368,12 +369,109 @@ function App() {
   const latest = reports[reports.length - 1];
   const prevMonth = reports[reports.length - 2];
 
+  // ── AI分析プロンプト生成(スタイルアップ等と同じパターン: コピーしてChatGPT/Geminiを起動) ──
+  // 現状アプリで自動取得できているのはPV系・売上・NET予約数・スタイル閲覧TOPのみ。
+  // CVR/ACR・エリア平均・来店人数内訳・新規リピート率・口コミは未対応のため、
+  // プロンプト内に「手入力してください」の欄として残す(8/6時点)
+  const generateAnalysisPrompt = (dest) => {
+    const last3 = reports.slice(-3);
+    const pvLines = last3.length
+      ? last3.map(r => `${r.month}: 総PV ${r.total_pv ?? "-"} / サロン情報PV ${r.salon_info_pv ?? "-"} / クーポン閲覧PV ${r.coupon_menu_pv ?? "-"} / ブログ閲覧PV ${r.blog_views ?? "-"}`).join("\n")
+      : "未取得";
+    const salesLines = last3.length
+      ? last3.map(r => `${r.month}: 売上高 ${r.net_sales != null ? r.net_sales + "万円" : "-"} / NET予約数 ${r.net_bookings ?? "-"}`).join("\n")
+      : "未取得";
+    const avgUnitPrice = (latest && latest.net_sales != null && latest.net_bookings)
+      ? Math.round((latest.net_sales * 10000) / latest.net_bookings).toLocaleString() + "円(売上高÷NET予約数の概算)"
+      : "未取得";
+    const topStyles = latestStyleViews ? latestStyleViews.list.slice(0, 5).map(s => s.name).join("、") : "未取得";
+
+    const prompt = `# ホットペッパービューティー（HPB）サロンレポート分析・改善施策立案プロンプト
+
+## 目的
+提供されたホットペッパービューティーの「サロンレポート（Salon Report）」データを読み込み、集客上の課題・ボトルネックを特定した上で、売上・予約数を最大化するための具体的かつ即効性のある営業・改善アクションプランを策定してください。
+
+---
+
+## 前提情報・サロン基本プロフィール
+- **サロン名**: Amber【アンバー】
+- **エリア/掲載プラン**: 茨木エリア / ライトプラン
+- **特徴・強み**: 高単価、高いリピート定着率、デザインカラー（ハイトーン・バレイヤージュ・インナーカラー）、ショートカット、髪質改善・ダメージケア技術に強みを持つプライベートサロン。
+
+---
+
+## サロンレポートデータ入力エリア
+
+### 1. PV・アクセスデータ（直近3ヶ月・自動反映）
+${pvLines}
+※エリア平均データはこのアプリでまだ自動取得できていません。お手元のレポートPDFを見ながら追記してください。
+
+### 2. 転換率（CVR / ACR）※このアプリで未対応・手入力してください
+- CVR（サロンTOP → クーポン一覧移行率）: 
+- ACR（クーポン一覧 → 予約完了率）: 
+
+### 3. 売上・予約データ（自動反映分）
+${salesLines}
+- 予約平均単価: ${avgUnitPrice}
+- 来店人数（全体/新規/リピート）・新規リピート率: ※未対応、手入力してください
+
+### 4. コンテンツ・特集・ランキングデータ
+- 人気スタイル（閲覧数上位）: ${topStyles}
+- 流入の多い特集・口コミ件数/平均点: ※未対応、手入力してください
+
+---
+
+## 分析・出力フォーマット指示
+
+以下の5つのステップに沿って、論理的かつ具体的に分析・出力してください。
+
+### 1. 総合評価とボトルネックの特定（ファネル分析）
+- 【認知（PV）】→【興味（CVR）】→【購買（ACR）】のどのフェーズに最大の課題（離脱）があるかを明確に指定してください。
+- 同プラン・同エリアの平均数値と比較し、強み（勝っている点）と弱み（負けている点）を整理してください。
+
+### 2. コンバージョン率（ACR）改善の具体的施策
+- ACR（予約完了率）を高めるための具体的なクーポン改修案を提示してください。
+  - クーポン名のタイトル構成（ターゲット、悩み、施術内容、ベネフィットの入れ方）
+  - 価格設定・割引率の見せ方
+  - 初来店ハードルを下げる工夫
+- 予約枠（受付締切時間、即時予約枠設定、スタイリストシフト開放）の最適化提案を行ってください。
+
+### 3. 集客導線（スタイル・ブログ・特集）の連動強化
+- 閲覧数・ブックマーク数の多い「スタイル写真」および「ブログ記事」から予約へ繋げるための具体的な連動ロジックを提示してください。
+- 参加すべき「特集カテゴリ」の優先順位と、その特集に紐付けるべきキラークーポンの組み合わせを提案してください。
+
+### 4. 既存顧客（リピーター）と新規顧客のバランス戦略
+- 客単価を維持しながら、新規顧客の流入数を無理なく増やすためのバランス戦略を提示してください。
+- 既存客の次回予約促進・2回目の来店（2STEP・3STEPクーポン）の設計案を作成してください。
+
+### 5. 今月実行すべき「優先度高」アクションリスト（ToDo 5選）
+- 今すぐ（1〜3日以内）に修正・実行できる具体的なタスクを優先順位順に5つ箇条書きで出力してください。
+
+---
+
+## 期待する出力トーン＆マナー
+- 理論だけでなく、サロンの現場でそのまま使える実用的な文章・クーポン文面例を含めること。
+- 専門的でありながら、営業・集客のアクションが直感的にイメージできる明瞭な解説を行うこと。`;
+
+    try {
+      var el = document.createElement("textarea");
+      el.value = prompt;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+    } catch (e) {}
+    if (dest === "gemini") window.location.href = "shortcuts://run-shortcut?name=" + encodeURIComponent("Gemini起動");
+    else window.location.href = "chatgpt://";
+  };
+
   return (
     <div style={{ background:C.bg, height:"100dvh", maxWidth:480, margin:"0 auto", display:"flex", flexDirection:"column" }}>
       <div style={{ background:"#fff", padding:"14px 16px", borderBottom:`1px solid ${C.border}` }}>
         <a href="index.html" style={{ display:"inline-flex", alignItems:"center", gap:4, color:"#7a6848", fontSize:14, fontWeight:700, textDecoration:"none", marginBottom:8 }}>‹ ホームに戻る</a>
         <div style={{ fontWeight:800, fontSize:17 }}>レポート分析</div>
         <div style={{ fontSize:12, color:C.sub, marginTop:2 }}>HPBサロンレポートPDFを毎月アップロードして推移を確認</div>
+        <div style={{ fontSize:10, color:C.sub, opacity:0.6, marginTop:4 }}>{REPORT_VERSION}</div>
       </div>
 
       <div style={{ flex:1, overflowY:"auto", padding:16 }}>
@@ -437,6 +535,16 @@ function App() {
                 color={prevMonth && latest && latest.total_pv < prevMonth.total_pv ? C.red : C.green} />
               <StatCard title="NET予約数" value={latest?.net_bookings != null ? latest.net_bookings.toLocaleString() : "-"} />
               <StatCard title="ブログ投稿数" value={latest?.blog_posts != null ? latest.blog_posts.toLocaleString() : "-"} />
+            </div>
+
+            {/* AI分析を依頼(スタイルアップ等と同じパターン: プロンプトをコピーしてChatGPT/Geminiを起動) */}
+            <div style={{ background:C.card, borderRadius:14, padding:16, border:`1px solid ${C.border}`, marginBottom:16 }}>
+              <div style={{ fontSize:13, fontWeight:700, marginBottom:2 }}>AIに改善施策を分析してもらう</div>
+              <div style={{ fontSize:11, color:C.sub, marginBottom:10, lineHeight:1.6 }}>取得済みのPV・売上データを埋め込んだ分析プロンプトをコピーします。CVR/ACR・エリア平均・来店人数内訳などはまだ自動取得できないため、コピー後にAI側で追記してください。</div>
+              <div style={{ display:"flex", gap:8 }}>
+                <button onClick={() => generateAnalysisPrompt("chatgpt")} style={{ flex:1, padding:"12px", borderRadius:10, border:"none", background:"linear-gradient(135deg,#5856d6,#7a6848)", color:"#fff", fontWeight:800, fontSize:13, cursor:"pointer" }}>ChatGPTで</button>
+                <button onClick={() => generateAnalysisPrompt("gemini")} style={{ flex:1, padding:"12px", borderRadius:10, border:"none", background:"linear-gradient(135deg,#4285f4,#9b72cb)", color:"#fff", fontWeight:800, fontSize:13, cursor:"pointer" }}>Geminiで</button>
+              </div>
             </div>
 
             {/* 気づきカード */}
