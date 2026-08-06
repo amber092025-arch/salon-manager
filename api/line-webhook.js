@@ -20,7 +20,7 @@
 const crypto = require("crypto");
 const B = require("./_lib/booking.js");
 
-const VERSION = "LINE-v3";
+const VERSION = "LINE-v4";
 const SALON_NAME = process.env.SALON_NAME || "Amber";
 const PHONE_NOTE = process.env.SALON_PHONE ? `（TEL: ${process.env.SALON_PHONE}）` : "";
 const TIME_PAGE_SIZE = 12; // Quick Replyは最大13個。12件+「もっと見る」
@@ -176,7 +176,14 @@ async function handleEvent(event) {
       ]);
     }
 
-    if (t.includes("予約") || /よやく/.test(t)) {
+    // 予約フローの開始トリガー: ボタン/リッチメニュー由来の完全一致「予約」、または
+    // 「予約したいです」のような短い予約希望メッセージのみに限定する。
+    // 8/6: 「13時30分に予約しましたが〜」のような、既存の予約について連絡している
+    // 長文メッセージまで単純な部分一致(includes)で拾ってしまい、受付停止中の定型文が
+    // 文脈と無関係に返ってしまう不具合があったため修正。該当しないメッセージは下の
+    // 「原則⑤」の分岐（スタッフ確認＋オーナー通知）に自然に流れる。
+    const bookingIntentRe = /^(予約|よやく)(する|したい|希望|お願いします?|お願いいたします|できますか|可能ですか)?[!！。、]*$/;
+    if (bookingIntentRe.test(t) || (t.length <= 20 && (t.includes("予約") || /よやく/.test(t)))) {
       return startFlow(event.replyToken, userId);
     }
 
