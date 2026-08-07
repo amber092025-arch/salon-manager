@@ -5284,7 +5284,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.05-b"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.07-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -5328,6 +5328,10 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
   const [showKarteAppt, setShowKarteAppt] = useState(null); // appt to show karte for
   const [showCheckoutAppt, setShowCheckoutAppt] = useState(null); // appt to checkout
   const [confirmForm, setConfirmForm] = useState(null); // 来店確定→空カルテ作成の情報入力フォーム(アプリ内に未登録の方のみ)
+  // 8/7: 予約者の変更(例: 奥様のアカウントでHPB予約が入ったが、実際の来店はお子様/旦那様というケース)
+  const [changeCustAppt, setChangeCustAppt] = useState(null); // 対象の予約(nullで閉じる)
+  const [changeCustQuery, setChangeCustQuery] = useState(""); // カルテ検索キーワード
+  const [changeCustNewForm, setChangeCustNewForm] = useState(null); // 新規カルテ作成フォーム(nullなら検索モード)
   const [form, setForm] = useState({ customerId: initialCustomer ? initialCustomer.id : (pendingCustomerId || ""), date: todayStr(), time: "10:00", endTime: "11:00", duration: 60, menuIds: [], notes: "", paid: false, shimeika: "shimeika", customerType: "existing" });
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
   const [custSearch, setCustSearch] = useState("");
@@ -5545,6 +5549,77 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
     setConfirmForm(null);
     notify("カルテを作成しました ✓");
   };
+  // ── 予約者の変更(8/7) ──
+  // HPB予約は「予約を取った人のアカウント」で入るため、実際の来店者(お子様・旦那様など)と異なることがある。
+  // 予約を削除して取り直す運用だったものを、予約者だけ差し替えられるようにする。
+  // カルテが変にならないよう、元の方に自動作成された空カルテは削除し、変更先に空カルテを作り直す。
+  // ただし元のカルテに既に入力(メニュー/金額/写真/メモ等)がある場合は事故防止のため削除せず残す。
+  const isEmptyVisit = (v) => {
+    if (!v) return true;
+    const noPhotos = (v.beforeImgs||[]).length === 0 && (v.afterImgs||[]).length === 0 && (v.otherImgs||[]).length === 0;
+    const noProducts = (v.products||[]).length === 0;
+    const noNotes = !(v.notes||"").trim();
+    return (v.total||0) === 0 && noPhotos && noProducts && noNotes && !v.paidAt && !v.paid && (v.drugCost||0) === 0;
+  };
+
+  const openChangeCustomer = (a) => {
+    closeTapMenu();
+    setChangeCustQuery("");
+    setChangeCustNewForm(null);
+    setChangeCustAppt(a);
+  };
+
+  const applyChangeCustomer = async (newCustomerId) => {
+    const a = changeCustAppt;
+    if (!a || !newCustomerId || newCustomerId === a.customerId) { setChangeCustAppt(null); return; }
+    try {
+      // ① 予約の顧客IDを差し替え(HPB予約番号・ポイント・メニュー等はそのまま引き継がれる)
+      const custIdx = customers.findIndex(c => c.id === newCustomerId);
+      const color = APPT_COLORS[custIdx >= 0 ? custIdx % APPT_COLORS.length : 0];
+      await sb.from("appointments").update({ customer_id: newCustomerId, color }).eq("id", a.id);
+      setAppointments(p => p.map(x => x.id === a.id ? { ...x, customerId: newCustomerId, color } : x));
+
+      // ② 元の方に紐づいていた空カルテの扱い(入力済みなら残す)
+      const linked = visits.find(v => v.appointmentId === a.id);
+      let keptOld = false;
+      if (linked) {
+        if (isEmptyVisit(linked)) {
+          await sb.from("visits").delete().eq("id", linked.id); // 予約は消さない(deleteVisitは紐づく予約も消すため使わない)
+          setVisits(p => p.filter(v => v.id !== linked.id));
+        } else {
+          keptOld = true; // 入力済みのため削除せず、元の方のカルテとして残す
+          await sb.from("visits").update({ appointment_id: null }).eq("id", linked.id);
+          setVisits(p => p.map(v => v.id === linked.id ? { ...v, appointmentId: null } : v));
+        }
+        // ③ 変更先の方に空カルテを作り直す(元々カルテが作られていた予約のみ)
+        const priorVisits = visits.filter(v => v.customerId === newCustomerId && v.id !== linked.id).length;
+        await createEmptyVisitFromAppt({ ...a, customerId: newCustomerId }, { customerType: priorVisits > 0 ? "existing" : "new" });
+      }
+
+      const newCust = customers.find(c => c.id === newCustomerId);
+      setChangeCustAppt(null);
+      notify(keptOld
+        ? `予約者を${newCust?.name || ""}様に変更しました(元のカルテは入力済みのため残しています)`
+        : `予約者を${newCust?.name || ""}様に変更しました ✓`);
+    } catch(e) {
+      notify("変更に失敗しました。通信環境を確認してください", "error");
+    }
+  };
+
+  const saveChangeCustNew = async () => {
+    if (!changeCustNewForm?.name) return notify("氏名を入力してください", "error");
+    const saved = await addCustomer({
+      name: changeCustNewForm.name,
+      kana: changeCustNewForm.kana,
+      phone: changeCustNewForm.phone,
+      birthday: bdayToStored(changeCustNewForm.birthday),
+      gender: changeCustNewForm.gender,
+      notes: changeCustNewForm.notes,
+    });
+    if (!saved) return; // addCustomer側でエラー通知済み
+    await applyChangeCustomer(saved.id);
+  };
+
   const handleEditSave = async () => {
     await sb.from("appointments").update(toDb.appointment(showEdit)).eq("id", showEdit.id);
     setAppointments(p => p.map(a => a.id === showEdit.id ? { ...showEdit } : a));
@@ -6102,6 +6177,14 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
               <path d="M5 3L2 6M19 3l3 3"/>
             </svg>
           ),
+          "予約者を変更": (
+            <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#5a7fb8" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <polyline points="16 11 19 8 22 11"/>
+              <path d="M19 8v6"/>
+            </svg>
+          ),
         };
         // このアプリ内にまだカルテ(来店記録)が作られていない予約(HPB取り込み等)にのみ「確定を確認」を出す
         const hasLinkedVisit = visits.some(v => v.appointmentId === a.id);
@@ -6115,6 +6198,7 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
           { label: "お会計", color: "#7a6848", action: () => { setShowCheckoutAppt(a); closeTapMenu(); } },
           { label: "カルテ詳細", color: "#7a6848", action: () => { setShowKarteAppt(a); closeTapMenu(); } },
           { label: "予約編集", color: "#7a6848", action: () => handleEditOpen(a) },
+          { label: "予約者を変更", color: "#5a7fb8", action: () => openChangeCustomer(a) },
           { label: "削除する", color: "#ff3b30", action: () => handleDelete(a.id) },
         ];
         const goToKarteList = () => {
@@ -6246,6 +6330,84 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
           </div>
         </div>
       )}
+
+      {/* ── 予約者の変更(8/7) ── */}
+      {changeCustAppt && (() => {
+        const currentCust = customers.find(c => c.id === changeCustAppt.customerId);
+        const q = changeCustQuery.trim().toLowerCase();
+        const candidates = q
+          ? customers.filter(c => c.id !== changeCustAppt.customerId && (
+              (c.name||"").toLowerCase().includes(q) ||
+              (c.kana||"").toLowerCase().includes(q) ||
+              (c.phone||"").replace(/-/g,"").includes(q.replace(/-/g,""))
+            )).slice(0, 30)
+          : [];
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 950, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px 16px" }}
+            onClick={e => { if (e.target === e.currentTarget) setChangeCustAppt(null); }}>
+            <div style={{ background: C.card, borderRadius: 20, padding: "20px 16px", width: "100%", maxWidth: 440, maxHeight: "85vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <div style={{ fontWeight: 800, fontSize: 17 }}>予約者を変更</div>
+                <button onClick={() => setChangeCustAppt(null)} style={{ background: "none", border: "none", fontSize: 22, color: C.sub, cursor: "pointer" }}>✕</button>
+              </div>
+              <div style={{ fontSize: 12, color: C.sub, marginBottom: 14, lineHeight: 1.6 }}>
+                現在の予約者: <b style={{ color: C.text }}>{currentCust?.name || "-"}</b> 様<br />
+                実際に来店される方へ付け替えます。元の方に自動作成された空のカルテは削除され、変更先の方に作り直されます(入力済みの場合は削除せず残します)。
+              </div>
+
+              {!changeCustNewForm ? (
+                <div>
+                  <label style={css.label}>カルテを検索(氏名・ふりがな・電話番号)</label>
+                  <input type="text" value={changeCustQuery} onChange={e => setChangeCustQuery(e.target.value)} placeholder="例：大岡 / おおおか / 09012345678" style={{ ...css.input, marginBottom: 12 }} />
+                  {q && candidates.length === 0 && (
+                    <div style={{ fontSize: 13, color: C.sub, padding: "10px 2px", marginBottom: 8 }}>該当するカルテが見つかりません。下の「新しくカルテを作る」からご登録ください。</div>
+                  )}
+                  {candidates.map(c => (
+                    <div key={c.id} onClick={() => applyChangeCustomer(c.id)}
+                      style={{ padding: "12px 14px", borderRadius: 12, border: `1px solid ${C.border}`, marginBottom: 8, cursor: "pointer", background: C.bg }}>
+                      <div style={{ fontWeight: 700, fontSize: 15, color: C.text }}>{c.name}</div>
+                      <div style={{ fontSize: 12, color: C.sub, marginTop: 2 }}>{[c.kana, c.phone].filter(Boolean).join(" / ") || "　"}</div>
+                    </div>
+                  ))}
+                  <button onClick={() => setChangeCustNewForm({ name: changeCustQuery, kana: "", phone: "", birthday: "", gender: "female", notes: "" })}
+                    style={{ ...css.btn("#5a7fb8"), width: "100%", fontSize: 15, marginTop: 6 }}>
+                    ＋ 新しくカルテを作る
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  {[["name","氏名 *","text"],["kana","ふりがな","text"],["phone","電話番号","tel"],["birthday","生年月日","date"]].map(([k,l,t]) => (
+                    <div key={k} style={{ marginBottom: 12 }}>
+                      <label style={css.label}>{l}</label>
+                      {k === "birthday"
+                        ? <input type="tel" inputMode="numeric" maxLength={8} placeholder="例：19900315" value={bdayDigits(changeCustNewForm[k])} onChange={e => setChangeCustNewForm(p => ({...p,[k]:e.target.value.replace(/[^0-9]/g,"").slice(0,8)}))} style={css.input} />
+                        : k === "kana"
+                          ? <input type={t} value={changeCustNewForm[k]} onChange={e => setChangeCustNewForm(p => ({...p,[k]:e.target.value}))} onCompositionEnd={e => { const v = kataToHira(e.target.value); setChangeCustNewForm(p => ({...p,[k]:v})); }} onBlur={e => { const v = kataToHira(e.target.value); setChangeCustNewForm(p => ({...p,[k]:v})); }} style={css.input} />
+                          : <input type={t} value={changeCustNewForm[k]} onChange={e => setChangeCustNewForm(p => ({...p,[k]:e.target.value}))} style={css.input} />}
+                    </div>
+                  ))}
+                  <div style={{ marginBottom: 12 }}>
+                    <label style={css.label}>性別</label>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {[["female","女性"],["male","男性"],["other","その他"]].map(([v,l]) => (
+                        <button key={v} onClick={() => setChangeCustNewForm(p => ({...p,gender:v}))} style={{ ...css.btn(GEN_COLOR[v], changeCustNewForm.gender===v), flex:1, padding:"9px 4px", fontSize:13 }}>{l}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={css.label}>備考・アレルギー等</label>
+                    <textarea value={changeCustNewForm.notes} onChange={e => setChangeCustNewForm(p => ({...p,notes:e.target.value}))} rows={2} style={{...css.input, resize:"vertical"}} />
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => setChangeCustNewForm(null)} style={{ ...css.btn(C.sub, false), flex: 1, fontSize: 14 }}>← 検索に戻る</button>
+                    <button onClick={saveChangeCustNew} style={{ ...css.btn("#5a7fb8"), flex: 2, fontSize: 15 }}>作成してこの方に変更</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Edit form — LiME style full screen ── */}
       {showEdit && (
