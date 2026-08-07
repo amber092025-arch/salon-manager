@@ -36,7 +36,7 @@ function nowTimeStr() {
 
 // ── Supabase client ──
 const SUPABASE_URL = "https://db.salon-amber.jp";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzg2MDYyOTcxLCJleHAiOjE4NDM4MzY5NzF9.WFg5tnC-_1GFn40wKdPTdEUTAsdfzbEPAvXh2ddGzvk";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzg2MDEwNTcxLCJleHAiOjE5NDM2OTA1NzF9.WFg5tnC-_1GFn40wKdPTdEUTAsdfzbEPAvXh2ddGzvk";
 
 const sb = {
   from: (table) => ({
@@ -587,7 +587,7 @@ function App() {
 
   // ── Supabase Realtime（ネイティブWebSocket・他デバイスからの変更をリアルタイム反映） ──
   React.useEffect(() => {
-    const wsUrl = `wss://yvsavbxijdggzihvoram.supabase.co/realtime/v1/websocket?apikey=${SUPABASE_KEY}&vsn=1.0.0`;
+    const wsUrl = `${SUPABASE_URL.replace(/^https:/, "wss:")}/realtime/v1/websocket?apikey=${SUPABASE_KEY}&vsn=1.0.0`;
     let ws = null;
     let ref = 0;
     let heartbeat = null;
@@ -5284,7 +5284,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.07-b"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.07-c"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {

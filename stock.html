@@ -27,7 +27,7 @@ const { useState, useEffect, useMemo, useRef } = React;
 const DEFAULT_PIN = "0000";
 
 const SUPABASE_URL = "https://db.salon-amber.jp";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzg2MDYyOTcxLCJleHAiOjE4NDM4MzY5NzF9.WFg5tnC-_1GFn40wKdPTdEUTAsdfzbEPAvXh2ddGzvk";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzg2MDEwNTcxLCJleHAiOjE5NDM2OTA1NzF9.WFg5tnC-_1GFn40wKdPTdEUTAsdfzbEPAvXh2ddGzvk";
 const HDRS = { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY, "Content-Type": "application/json", "Prefer": "return=representation" };
 
 const C = { bg:"#faf8f4", card:"#ffffff", border:"#ece7df", text:"#2a2218", sub:"#9a9088", accent:"#7a6848", red:"#ff3b30", orange:"#e8924a", green:"#6aaa7a" };
@@ -176,7 +176,7 @@ const css = {
   label: { fontSize:12, color:C.sub, fontWeight:700, marginBottom:6 },
 };
 
-const STOCK_VERSION = "v2026.08.07-a"; // このファイルのバージョン(ヘッダーに表示、アップロード反映確認用)
+const STOCK_VERSION = "v2026.08.07-c"; // このファイルのバージョン(ヘッダーに表示、アップロード反映確認用)
 
 function App() {
   const [authed, setAuthed] = useState(localStorage.getItem("stock_auth") === "1");
