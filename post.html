@@ -28,11 +28,11 @@
 
 const { useState, useRef, useCallback, useEffect, useMemo } = React;
 
-const POST_VERSION = "v2026.08.05-b"; // このアプリのバージョン(反映確認用)
+const POST_VERSION = "v2026.08.07-a"; // このアプリのバージョン(反映確認用)
 
 // ── Supabase client ──
-const SUPABASE_URL = "https://yvsavbxijdggzihvoram.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2c2F2YnhpamRnZ3ppaHZvcmFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NTkyNTEsImV4cCI6MjA5NTUzNTI1MX0.v_5yFWKizgOSUHifx10vSm7OEafy6fZhjy5cff-QHQw";
+const SUPABASE_URL = "https://db.salon-amber.jp";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzg2MDYyOTcxLCJleHAiOjE4NDM4MzY5NzF9.WFg5tnC-_1GFn40wKdPTdEUTAsdfzbEPAvXh2ddGzvk";
 
 const sb = {
   from: (table) => ({

@@ -37,8 +37,8 @@
 const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
 // ── Supabase接続(index.htmlと同じ設定・同じsbラッパーを踏襲) ──
-const SUPABASE_URL = "https://yvsavbxijdggzihvoram.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2c2F2YnhpamRnZ3ppaHZvcmFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NTkyNTEsImV4cCI6MjA5NTUzNTI1MX0.v_5yFWKizgOSUHifx10vSm7OEafy6fZhjy5cff-QHQw";
+const SUPABASE_URL = "https://db.salon-amber.jp";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzg2MDYyOTcxLCJleHAiOjE4NDM4MzY5NzF9.WFg5tnC-_1GFn40wKdPTdEUTAsdfzbEPAvXh2ddGzvk";
 
 const sb = {
   from: (table) => ({
@@ -76,7 +76,7 @@ const sb = {
 };
 
 const C = { bg:"#faf8f4", card:"#ffffff", border:"#ece7df", text:"#2a2218", sub:"#9a9088", accent:"#7a6848", red:"#c0392b", green:"#3fb98a", orange:"#e8924a" };
-const REPORT_VERSION = "v2026.08.06-c"; // このアプリのバージョン(反映確認用)
+const REPORT_VERSION = "v2026.08.07-a"; // このアプリのバージョン(反映確認用)
 
 // ═══════════════════════════════════════════
 // HPBサロンレポートPDF 解析ロジック

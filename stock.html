@@ -26,8 +26,8 @@ const { useState, useEffect, useMemo, useRef } = React;
 // 初期パスコード（アプリ本体の「その他 > 経費ページ パスコード」と共通）
 const DEFAULT_PIN = "0000";
 
-const SUPABASE_URL = "https://yvsavbxijdggzihvoram.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl2c2F2YnhpamRnZ3ppaHZvcmFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NTkyNTEsImV4cCI6MjA5NTUzNTI1MX0.v_5yFWKizgOSUHifx10vSm7OEafy6fZhjy5cff-QHQw";
+const SUPABASE_URL = "https://db.salon-amber.jp";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzg2MDYyOTcxLCJleHAiOjE4NDM4MzY5NzF9.WFg5tnC-_1GFn40wKdPTdEUTAsdfzbEPAvXh2ddGzvk";
 const HDRS = { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY, "Content-Type": "application/json", "Prefer": "return=representation" };
 
 const C = { bg:"#faf8f4", card:"#ffffff", border:"#ece7df", text:"#2a2218", sub:"#9a9088", accent:"#7a6848", red:"#ff3b30", orange:"#e8924a", green:"#6aaa7a" };
@@ -176,7 +176,7 @@ const css = {
   label: { fontSize:12, color:C.sub, fontWeight:700, marginBottom:6 },
 };
 
-const STOCK_VERSION = "v2026.08.05-a"; // このファイルのバージョン(ヘッダーに表示、アップロード反映確認用)
+const STOCK_VERSION = "v2026.08.07-a"; // このファイルのバージョン(ヘッダーに表示、アップロード反映確認用)
 
 function App() {
   const [authed, setAuthed] = useState(localStorage.getItem("stock_auth") === "1");
