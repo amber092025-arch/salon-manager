@@ -1057,6 +1057,7 @@ function App() {
         {tab === "mergeCustomers" && <MergeCustomersTab setTab={setTab} notify={notify} customers={customers} setCustomers={setCustomers} setVisits={setVisits} setAppointments={setAppointments} />}
         {tab === "styleList" && <StyleListTab setTab={setTab} notify={notify} styles={styles} menus={menus} deleteStyle={deleteStyle} setEditingStyleId={setEditingStyleId} />}
         {tab === "styleForm" && <StyleFormTab setTab={setTab} notify={notify} menus={menus} styles={styles} editingStyleId={editingStyleId} addStyle={addStyle} updateStyle={updateStyle} tagCategories={tagCategories} />}
+        {tab === "siteAdmin" && <SiteAdminTab setTab={setTab} notify={notify} />}
         {tab === "blogList" && <BlogListTab setTab={setTab} notify={notify} blogs={blogs} menus={menus} deleteBlog={deleteBlog} setEditingBlogId={setEditingBlogId} />}
         {tab === "blogForm" && <BlogFormTab setTab={setTab} notify={notify} menus={menus} blogs={blogs} editingBlogId={editingBlogId} addBlog={addBlog} updateBlog={updateBlog} />}
         {tab === "tagSettings" && <TagSettingsTab setTab={setTab} notify={notify} tagCategories={tagCategories} setTagCategories={setTagCategories} />}
@@ -3381,6 +3382,11 @@ function MoreTab({ setTab }) {
       svg: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e8924a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
     },
     {
+      tab: "siteAdmin", label: "サイト管理", sub: "ホームページの文言・写真・クーポン",
+      iconBg: "#eef6f5", iconColor: "#4a9a92",
+      svg: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4a9a92" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+    },
+    {
       tab: "reportAnalysis", href: "report.html", label: "レポート分析", sub: "HPBサロンレポートPDFのPV推移などを見る",
       iconBg: "#fff3e8", iconColor: "#e8924a",
       svg: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e8924a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
@@ -5284,7 +5290,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.07-c"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.20-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -8922,6 +8928,502 @@ function SettingsTab({ menus, setMenus, products, setProducts, notify, setTab })
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// サイト管理（公式ホームページの文言・写真・クーポンを編集する）
+// 対象テーブル: site_contents / site_images / coupons
+// ═══════════════════════════════════════════════════════════
+
+// 文言の項目定義。ここに無いキーは自動で「その他」グループに出す
+const SITE_TEXT_GROUPS = [
+  { name: "トップ・ヒーロー", items: [
+    { k: "hero.title",    label: "大見出し" },
+    { k: "hero.subtitle", label: "小見出し" },
+    { k: "hero.scroll",   label: "スクロール案内の文字" },
+  ]},
+  { name: "トップ・紹介文", items: [
+    { k: "intro.eyebrow", label: "小ラベル" },
+    { k: "intro.title",   label: "見出し", multi: true },
+    { k: "intro.body1",   label: "本文（1つ目）", multi: true },
+    { k: "intro.body2",   label: "本文（2つ目）", multi: true },
+    { k: "intro.link",    label: "リンクの文字" },
+  ]},
+  { name: "セクション見出し", items: [
+    { k: "section.style.heading",   label: "スタイル" },
+    { k: "section.coupon.heading",  label: "クーポン" },
+    { k: "section.product.heading", label: "商品" },
+    { k: "section.journal.heading", label: "ジャーナル" },
+  ]},
+  { name: "下層ページの説明文", items: [
+    { k: "page.style.lead",   label: "スタイル一覧", multi: true },
+    { k: "page.coupon.lead",  label: "クーポン一覧", multi: true },
+    { k: "page.product.lead", label: "商品一覧",     multi: true },
+    { k: "page.journal.lead", label: "ジャーナル一覧", multi: true },
+  ]},
+  { name: "店舗情報", items: [
+    { k: "shop.name",      label: "店名" },
+    { k: "shop.address",   label: "住所" },
+    { k: "shop.tel",       label: "電話番号" },
+    { k: "shop.hours",     label: "営業時間" },
+    { k: "shop.holiday",   label: "定休日" },
+    { k: "shop.line_url",  label: "LINEのURL" },
+    { k: "shop.instagram", label: "InstagramのURL" },
+  ]},
+  { name: "フッター", items: [
+    { k: "footer.cta",  label: "呼びかけの文" },
+    { k: "footer.copy", label: "コピーライト" },
+  ]},
+  { name: "SEO・計測", items: [
+    { k: "seo.title",       label: "ページタイトル", max: 60 },
+    { k: "seo.description", label: "ページの説明文", multi: true, max: 120 },
+    { k: "seo.ga_id",       label: "Google Analytics 測定ID（G-から始まる）" },
+  ]},
+];
+
+const SITE_IMAGE_ITEMS = [
+  { k: "hero.photo",   label: "トップの大きな写真" },
+  { k: "intro.photo1", label: "紹介写真 1枚目" },
+  { k: "intro.photo2", label: "紹介写真 2枚目" },
+  { k: "intro.photo3", label: "紹介写真 3枚目" },
+];
+
+// 写真をStorageの site バケットへ送る。返り値は公開URL
+async function siteUploadImage(file, keyName) {
+  const blob = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const im = new Image();
+      im.onload = () => {
+        const MAX = 1600;
+        const scale = Math.min(1, MAX / Math.max(im.width, im.height));
+        const c = document.createElement("canvas");
+        c.width = Math.round(im.width * scale);
+        c.height = Math.round(im.height * scale);
+        c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+        c.toBlob((b) => b ? resolve(b) : reject(new Error("画像の変換に失敗しました")), "image/jpeg", 0.85);
+      };
+      im.onerror = () => reject(new Error("画像を読み込めませんでした"));
+      im.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error("ファイルを読み込めませんでした"));
+    reader.readAsDataURL(file);
+  });
+
+  const name = keyName.replace(/\./g, "-") + "-" + Date.now() + ".jpg";
+  const res = await fetch(SUPABASE_URL + "/storage/v1/object/site/" + name, {
+    method: "POST",
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": "Bearer " + SUPABASE_KEY,
+      "Content-Type": "image/jpeg",
+      "x-upsert": "true",
+    },
+    body: blob,
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return SUPABASE_URL + "/storage/v1/object/public/site/" + name;
+}
+
+function SiteAdminTab({ setTab, notify }) {
+  const [sub, setSub] = useState("text"); // text / image / coupon
+
+  return (
+    <div style={{ background: C.bg, minHeight: "100vh" }}>
+      <div style={{ background: "#fff", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.border}` }}>
+        <button onClick={() => setTab("more")} style={{ background: "none", border: "none", color: "#7a6848", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>← メニュー</button>
+        <div style={{ fontWeight: 800, fontSize: 16 }}>サイト管理</div>
+        <div style={{ width: 60 }} />
+      </div>
+
+      <div style={{ background: "#fff", display: "flex", borderBottom: `1px solid ${C.border}` }}>
+        {[["text", "文言"], ["image", "写真"], ["coupon", "クーポン"]].map(([id, label]) => (
+          <div key={id} onClick={() => setSub(id)}
+            style={{ flex: 1, textAlign: "center", padding: "11px 0", fontSize: 14, fontWeight: 700, cursor: "pointer",
+              color: sub === id ? C.accent : C.sub,
+              borderBottom: sub === id ? `2px solid ${C.accent}` : "2px solid transparent" }}>
+            {label}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ padding: 16 }}>
+        {sub === "text" && <SiteTextPanel notify={notify} />}
+        {sub === "image" && <SiteImagePanel notify={notify} />}
+        {sub === "coupon" && <SiteCouponPanel notify={notify} />}
+      </div>
+    </div>
+  );
+}
+
+// ── 文言 ───────────────────────────────────────────────
+function SiteTextPanel({ notify }) {
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [vals, setVals] = useState({});       // 編集中の値
+  const [orig, setOrig] = useState({});       // 読み込み時の値（変更判定用）
+  const [extraKeys, setExtraKeys] = useState([]); // 定義に無いキー
+  const [open, setOpen] = useState({ "トップ・ヒーロー": true });
+  const [saving, setSaving] = useState(false);
+
+  const load = async () => {
+    setFailed(false);
+    const r = await sbRetry(() => sb.from("site_contents").select("key,value"));
+    if (r.error || !r.data) { setFailed(true); return; }
+    const map = {};
+    r.data.forEach(row => { map[row.key] = row.value == null ? "" : String(row.value); });
+    const known = new Set();
+    SITE_TEXT_GROUPS.forEach(g => g.items.forEach(it => known.add(it.k)));
+    setExtraKeys(Object.keys(map).filter(k => !known.has(k)).sort());
+    setVals(map);
+    setOrig(map);
+    setLoaded(true);
+  };
+  useEffect(() => { load(); }, []);
+
+  const changed = Object.keys(vals).filter(k => (vals[k] || "") !== (orig[k] || ""));
+
+  const save = async () => {
+    if (!loaded || saving || changed.length === 0) return;
+    setSaving(true);
+    const rows = changed.map(k => ({ key: k, value: vals[k] }));
+    const r = await sbRetry(() => sb.from("site_contents").upsert(rows));
+    setSaving(false);
+    if (r.error) { notify("保存に失敗しました", "error"); return; }
+    setOrig({ ...vals });
+    notify(changed.length + "件を保存しました ✓");
+  };
+
+  if (failed) return (
+    <div style={{ ...css.card, textAlign: "center" }}>
+      <div style={{ fontSize: 14, color: C.red, marginBottom: 12 }}>文言を読み込めませんでした</div>
+      <button onClick={load} style={css.btn(C.accent, false)}>もう一度読み込む</button>
+    </div>
+  );
+  if (!loaded) return <div style={{ ...css.card, textAlign: "center", color: C.sub, fontSize: 14 }}>読み込み中...</div>;
+
+  const groups = extraKeys.length
+    ? [...SITE_TEXT_GROUPS, { name: "その他", items: extraKeys.map(k => ({ k, label: k, multi: true })) }]
+    : SITE_TEXT_GROUPS;
+
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: C.sub, marginBottom: 12, lineHeight: 1.6 }}>
+        ここで直すとホームページの表示がすぐ変わります。反映まで最大15分かかることがあります。
+      </div>
+
+      {groups.map(g => {
+        const isOpen = !!open[g.name];
+        const dirtyCount = g.items.filter(it => (vals[it.k] || "") !== (orig[it.k] || "")).length;
+        return (
+          <div key={g.name} style={{ background: C.card, borderRadius: 14, border: `1px solid ${C.border}`, marginBottom: 10, overflow: "hidden" }}>
+            <div onClick={() => setOpen({ ...open, [g.name]: !isOpen })}
+              style={{ padding: "13px 14px", display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+              <div style={{ flex: 1, fontWeight: 700, fontSize: 14, color: C.text }}>{g.name}</div>
+              {dirtyCount > 0 && <Badge color={C.orange}>未保存 {dirtyCount}</Badge>}
+              <div style={{ fontSize: 14, color: "#d0c8be" }}>{isOpen ? "▾" : "›"}</div>
+            </div>
+            {isOpen && (
+              <div style={{ padding: "0 14px 14px" }}>
+                {g.items.map(it => {
+                  const v = vals[it.k] || "";
+                  const dirty = v !== (orig[it.k] || "");
+                  const over = it.max && v.length > it.max;
+                  return (
+                    <div key={it.k} style={{ marginBottom: 14 }}>
+                      <label style={{ ...css.label, display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ flex: 1 }}>{it.label}</span>
+                        {it.max && <span style={{ fontSize: 11, color: over ? C.red : C.sub }}>{v.length} / {it.max}</span>}
+                        {dirty && <span style={{ fontSize: 11, color: C.orange, fontWeight: 700 }}>●</span>}
+                      </label>
+                      {it.multi
+                        ? <textarea value={v} rows={3} onChange={e => setVals({ ...vals, [it.k]: e.target.value })}
+                            style={{ ...css.input, resize: "vertical", lineHeight: 1.6 }} />
+                        : <input value={v} onChange={e => setVals({ ...vals, [it.k]: e.target.value })} style={css.input} />}
+                      <div style={{ fontSize: 10, color: C.sub, opacity: 0.7, marginTop: 3 }}>{it.k}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      <div style={{ position: "sticky", bottom: 0, background: C.bg, paddingTop: 10, paddingBottom: 6 }}>
+        <button onClick={save} disabled={saving || changed.length === 0}
+          style={{ ...css.btn(changed.length ? C.accent : C.sub), width: "100%", opacity: changed.length ? 1 : 0.5 }}>
+          {saving ? "保存中..." : changed.length ? `変更した${changed.length}件を保存` : "変更はありません"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── 写真 ───────────────────────────────────────────────
+function SiteImagePanel({ notify }) {
+  const [loaded, setLoaded] = useState(false);   // 読み込み完了まで操作を封鎖する
+  const [failed, setFailed] = useState(false);
+  const [urls, setUrls] = useState({});
+  const [busyKey, setBusyKey] = useState(null);
+  const fileRefs = useRef({});
+
+  const load = async () => {
+    setFailed(false);
+    const r = await sbRetry(() => sb.from("site_images").select("key,url"));
+    if (r.error || !r.data) { setFailed(true); return; }
+    const map = {};
+    r.data.forEach(row => { map[row.key] = row.url || ""; });
+    setUrls(map);
+    setLoaded(true);
+  };
+  useEffect(() => { load(); }, []);
+
+  const pick = (k) => {
+    if (!loaded || busyKey) return;   // 読み込み前は差し替えさせない
+    const el = fileRefs.current[k];
+    if (el) { el.value = ""; el.click(); }
+  };
+
+  const onFile = async (k, file) => {
+    if (!file || !loaded) return;
+    setBusyKey(k);
+    try {
+      const url = await siteUploadImage(file, k);
+      const r = await sbRetry(() => sb.from("site_images").upsert([{ key: k, url }]));
+      if (r.error) throw new Error("URLの保存に失敗しました");
+      setUrls(prev => ({ ...prev, [k]: url }));
+      notify("写真を差し替えました ✓");
+    } catch (e) {
+      console.error("site image upload:", e);
+      notify("写真の差し替えに失敗しました", "error");
+    }
+    setBusyKey(null);
+  };
+
+  if (failed) return (
+    <div style={{ ...css.card, textAlign: "center" }}>
+      <div style={{ fontSize: 14, color: C.red, marginBottom: 12 }}>写真を読み込めませんでした</div>
+      <div style={{ fontSize: 12, color: C.sub, marginBottom: 12 }}>読み込めていない状態での差し替えは、事故を防ぐため止めています。</div>
+      <button onClick={load} style={css.btn(C.accent, false)}>もう一度読み込む</button>
+    </div>
+  );
+  if (!loaded) return <div style={{ ...css.card, textAlign: "center", color: C.sub, fontSize: 14 }}>読み込み中...</div>;
+
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: C.sub, marginBottom: 12, lineHeight: 1.6 }}>
+        選んだ写真は自動で横1600pxに縮めて保存します。差し替えると前の写真には戻せません。
+      </div>
+      {SITE_IMAGE_ITEMS.map(it => {
+        const url = urls[it.k] || "";
+        const busy = busyKey === it.k;
+        return (
+          <div key={it.k} style={{ ...css.card, padding: 14 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, color: C.text, marginBottom: 10 }}>{it.label}</div>
+            <div style={{ width: "100%", aspectRatio: "4 / 3", borderRadius: 10, overflow: "hidden", background: "#f2efe9", border: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 10 }}>
+              {url
+                ? <img src={url} alt={it.label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                : <span style={{ fontSize: 12, color: C.sub }}>未登録（予備の写真が表示されます）</span>}
+            </div>
+            <input type="file" accept="image/*" ref={el => { fileRefs.current[it.k] = el; }}
+              onChange={e => onFile(it.k, e.target.files && e.target.files[0])} style={{ display: "none" }} />
+            <button onClick={() => pick(it.k)} disabled={busy || !!busyKey}
+              style={{ ...css.btn(C.accent, false), width: "100%", opacity: busy || busyKey ? 0.5 : 1 }}>
+              {busy ? "送信中..." : "写真を差し替える"}
+            </button>
+            <div style={{ fontSize: 10, color: C.sub, opacity: 0.7, marginTop: 6, wordBreak: "break-all" }}>{it.k}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── クーポン ────────────────────────────────────────────
+function SiteCouponPanel({ notify }) {
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [rows, setRows] = useState([]);
+  const [editing, setEditing] = useState(null); // 編集中の1件（フル取得したもの）
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    setFailed(false);
+    const r = await sbRetry(() => sb.from("coupons").select("*").order("sort_order", { ascending: true }));
+    if (r.error || !r.data) { setFailed(true); return; }
+    setRows(r.data);
+    setLoaded(true);
+  };
+  useEffect(() => { load(); }, []);
+
+  // 編集を開く時は対象1件を取り直す（一覧の値を初期値に流用しない）
+  const openEdit = async (id) => {
+    if (busy) return;
+    setBusy(true);
+    const r = await sbRetry(() => sb.from("coupons").select("*").eq("id", id));
+    setBusy(false);
+    if (r.error || !r.data || !r.data.length) { notify("クーポンを読み込めませんでした", "error"); return; }
+    setEditing({ ...r.data[0] });
+  };
+
+  const openNew = () => {
+    const maxOrder = rows.reduce((m, r) => Math.max(m, Number(r.sort_order) || 0), 0);
+    setEditing({ id: null, title: "", target: "", price_before: "", price_after: "", note: "", is_published: true, sort_order: maxOrder + 10 });
+  };
+
+  const saveEdit = async () => {
+    if (busy || !editing) return;
+    if (!String(editing.title || "").trim()) { notify("クーポン名を入れてください", "error"); return; }
+    setBusy(true);
+    const body = {
+      title: editing.title,
+      target: editing.target || null,
+      price_before: editing.price_before === "" || editing.price_before == null ? null : Number(editing.price_before),
+      price_after: editing.price_after === "" || editing.price_after == null ? null : Number(editing.price_after),
+      note: editing.note || null,
+      is_published: !!editing.is_published,
+      sort_order: Number(editing.sort_order) || 0,
+    };
+    const r = editing.id
+      ? await sbRetry(() => sb.from("coupons").update(body).eq("id", editing.id))
+      : await sbRetry(() => sb.from("coupons").insert([body]));
+    setBusy(false);
+    if (r.error) { notify("保存に失敗しました", "error"); return; }
+    setEditing(null);
+    await load();
+    notify("保存しました ✓");
+  };
+
+  const remove = async (row) => {
+    if (busy) return;
+    if (!window.confirm(`「${row.title}」を削除します。よろしいですか？`)) return;
+    setBusy(true);
+    const r = await sbRetry(() => sb.from("coupons").delete().eq("id", row.id));
+    setBusy(false);
+    if (r.error) { notify("削除に失敗しました", "error"); return; }
+    await load();
+    notify("削除しました");
+  };
+
+  // 並び替えは sort_order だけを明示的に更新する
+  const move = async (idx, dir) => {
+    const to = idx + dir;
+    if (busy || to < 0 || to >= rows.length) return;
+    const a = rows[idx], b = rows[to];
+    setBusy(true);
+    const ra = await sbRetry(() => sb.from("coupons").update({ sort_order: Number(b.sort_order) || 0 }).eq("id", a.id));
+    const rb = await sbRetry(() => sb.from("coupons").update({ sort_order: Number(a.sort_order) || 0 }).eq("id", b.id));
+    setBusy(false);
+    if (ra.error || rb.error) { notify("並び替えに失敗しました", "error"); await load(); return; }
+    await load();
+  };
+
+  const togglePublish = async (row) => {
+    if (busy) return;
+    setBusy(true);
+    const r = await sbRetry(() => sb.from("coupons").update({ is_published: !row.is_published }).eq("id", row.id));
+    setBusy(false);
+    if (r.error) { notify("切り替えに失敗しました", "error"); return; }
+    await load();
+  };
+
+  if (failed) return (
+    <div style={{ ...css.card, textAlign: "center" }}>
+      <div style={{ fontSize: 14, color: C.red, marginBottom: 12 }}>クーポンを読み込めませんでした</div>
+      <button onClick={load} style={css.btn(C.accent, false)}>もう一度読み込む</button>
+    </div>
+  );
+  if (!loaded) return <div style={{ ...css.card, textAlign: "center", color: C.sub, fontSize: 14 }}>読み込み中...</div>;
+
+  if (editing) {
+    const f = (k, v) => setEditing({ ...editing, [k]: v });
+    return (
+      <div>
+        <div style={{ ...css.card }}>
+          <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 14 }}>{editing.id ? "クーポンを編集" : "クーポンを追加"}</div>
+
+          <label style={css.label}>クーポン名</label>
+          <input value={editing.title || ""} onChange={e => f("title", e.target.value)} style={{ ...css.input, marginBottom: 12 }} placeholder="例：新規のお客様限定 カット＋カラー" />
+
+          <label style={css.label}>対象</label>
+          <input value={editing.target || ""} onChange={e => f("target", e.target.value)} style={{ ...css.input, marginBottom: 12 }} placeholder="例：新規の方" />
+
+          <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}>
+              <label style={css.label}>通常価格（円）</label>
+              <input type="number" inputMode="numeric" value={editing.price_before == null ? "" : editing.price_before}
+                onChange={e => f("price_before", e.target.value)} style={css.input} placeholder="空欄で非表示" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={css.label}>クーポン価格（円）</label>
+              <input type="number" inputMode="numeric" value={editing.price_after == null ? "" : editing.price_after}
+                onChange={e => f("price_after", e.target.value)} style={css.input} />
+            </div>
+          </div>
+
+          <label style={css.label}>注意書き</label>
+          <textarea value={editing.note || ""} rows={2} onChange={e => f("note", e.target.value)} style={{ ...css.input, resize: "vertical", marginBottom: 12 }} placeholder="例：他券との併用不可" />
+
+          <div onClick={() => f("is_published", !editing.is_published)}
+            style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", cursor: "pointer" }}>
+            <div style={{ width: 22, height: 22, borderRadius: 6, border: `1.5px solid ${editing.is_published ? C.accent : C.border}`, background: editing.is_published ? C.accent : "#fff", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700 }}>
+              {editing.is_published ? "✓" : ""}
+            </div>
+            <span style={{ fontSize: 14, color: C.text }}>ホームページに掲載する</span>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={() => setEditing(null)} disabled={busy} style={{ ...css.btn(C.sub, false), flex: 1 }}>やめる</button>
+          <button onClick={saveEdit} disabled={busy} style={{ ...css.btn(C.accent), flex: 2, opacity: busy ? 0.5 : 1 }}>{busy ? "保存中..." : "保存する"}</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <button onClick={openNew} disabled={busy} style={{ ...css.btn(C.accent), width: "100%", marginBottom: 14 }}>＋ クーポンを追加</button>
+
+      {rows.length === 0 && (
+        <div style={{ ...css.card, textAlign: "center", color: C.sub, fontSize: 14 }}>クーポンがまだありません</div>
+      )}
+
+      {rows.map((row, i) => (
+        <div key={row.id} style={{ ...css.card, padding: 14, opacity: row.is_published ? 1 : 0.55 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: C.text, marginBottom: 4 }}>{row.title}</div>
+              <div style={{ fontSize: 12, color: C.sub }}>
+                {row.target ? row.target + "　" : ""}
+                {row.price_before ? <span style={{ textDecoration: "line-through", marginRight: 6 }}>¥{Number(row.price_before).toLocaleString()}</span> : null}
+                {row.price_after != null ? <span style={{ color: C.accent, fontWeight: 700 }}>¥{Number(row.price_after).toLocaleString()}</span> : null}
+              </div>
+              {row.note && <div style={{ fontSize: 11, color: C.sub, marginTop: 4 }}>{row.note}</div>}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <button onClick={() => move(i, -1)} disabled={busy || i === 0}
+                style={{ ...css.btn(C.sub, false), padding: "4px 10px", fontSize: 13, opacity: i === 0 ? 0.3 : 1 }}>↑</button>
+              <button onClick={() => move(i, 1)} disabled={busy || i === rows.length - 1}
+                style={{ ...css.btn(C.sub, false), padding: "4px 10px", fontSize: 13, opacity: i === rows.length - 1 ? 0.3 : 1 }}>↓</button>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}>
+            <Badge color={row.is_published ? C.green : C.sub}>{row.is_published ? "掲載中" : "非掲載"}</Badge>
+            <div style={{ flex: 1 }} />
+            <button onClick={() => togglePublish(row)} disabled={busy} style={{ ...css.btn(C.sub, false), padding: "6px 12px", fontSize: 12 }}>
+              {row.is_published ? "下げる" : "掲載する"}
+            </button>
+            <button onClick={() => openEdit(row.id)} disabled={busy} style={{ ...css.btn(C.accent, false), padding: "6px 12px", fontSize: 12 }}>編集</button>
+            <button onClick={() => remove(row)} disabled={busy} style={{ ...css.btn(C.red, false), padding: "6px 12px", fontSize: 12 }}>削除</button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
