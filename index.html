@@ -5453,7 +5453,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.26-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.26-b"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -5790,16 +5790,41 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
   };
 
   const handleEditSave = async () => {
-    await sb.from("appointments").update(toDb.appointment(showEdit)).eq("id", showEdit.id);
+    const r1 = await sbRetry(() => sb.from("appointments").update(toDb.appointment(showEdit)).eq("id", showEdit.id));
+    if (r1.error) { notify("予約の更新に失敗しました", "error"); return; }
     setAppointments(p => p.map(a => a.id === showEdit.id ? { ...showEdit } : a));
+
     const linkedVisit = visits.find(v => v.appointmentId === showEdit.id);
+    let movedDate = null;
     if (linkedVisit) {
       const newMenus = (showEdit.menuIds||[]).map(id => { const m = menus.find(x => x.id === id); return m ? { menuId: m.id, name: m.name, price: m.price } : null; }).filter(Boolean);
-      await sb.from("visits").update({ menus: newMenus }).eq("id", linkedVisit.id);
-      setVisits(p => p.map(v => v.id === linkedVisit.id ? { ...v, menus: newMenus } : v));
+      // 予約の日時を変えたら、紐づくカルテの日時も必ず合わせる。
+      // （合わせないと予約表と分析・日別表がズレる。対象カラムだけ明示的に更新する）
+      const patch = { menus: newMenus };
+      const local = { menus: newMenus };
+      if (showEdit.date && showEdit.date !== linkedVisit.date) {
+        patch.date = showEdit.date; local.date = showEdit.date;
+        movedDate = { from: linkedVisit.date, to: showEdit.date, paid: !!linkedVisit.paid };
+      }
+      const newTime = showEdit.time || "";
+      if (newTime !== (linkedVisit.time || "")) { patch.time = newTime || null; local.time = newTime; }
+      const newDur = Number(showEdit.duration) || 60;
+      if (newDur !== (Number(linkedVisit.duration) || 60)) { patch.duration = newDur; local.duration = newDur; }
+
+      const r2 = await sbRetry(() => sb.from("visits").update(patch).eq("id", linkedVisit.id));
+      if (r2.error) {
+        notify("予約は更新しましたが、カルテ側の日時を合わせられませんでした。もう一度保存してください", "error");
+        return;
+      }
+      setVisits(p => p.map(v => v.id === linkedVisit.id ? { ...v, ...local } : v));
     }
     setShowEdit(null);
-    notify("予約を更新しました ✓");
+    if (movedDate && movedDate.paid) {
+      const md = (d) => { const t = (d||"").split("-"); return t.length === 3 ? `${Number(t[1])}/${Number(t[2])}` : d; };
+      notify(`予約を更新しました。会計済のため売上も ${md(movedDate.from)} → ${md(movedDate.to)} に移りました`);
+    } else {
+      notify("予約を更新しました ✓");
+    }
   };
 
   const longPressTimer = useRef(null);
