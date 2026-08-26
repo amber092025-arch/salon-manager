@@ -97,14 +97,14 @@ const sbRetry = async (buildQuery, tries = 3) => {
 };
 
 // visitsの軽量カラム（写真base64のphoto_data/imagesを除外。写真は後追いで取得）
-const VISIT_LIGHT_COLS = "id,customer_id,date,time,menus,products,drug_cost,payment_method,total,notes,customer_type,hpb_point,paid,duration,appointment_id,tags,style_name,style_comment,is_public,paid_at";
+const VISIT_LIGHT_COLS = "id,customer_id,date,time,menus,products,payment_method,total,notes,customer_type,hpb_point,paid,duration,appointment_id,tags,style_name,style_comment,is_public,paid_at";
 
 // ── DB helpers ──
 const toDb = {
   customer: (c) => ({ name:c.name, kana:c.kana||null, phone:c.phone||null, birthday:c.birthday||null, gender:c.gender||"female", notes:c.notes||null, join_date:c.joinDate||null }),
   menu: (m) => ({ name:m.name, price:m.price||0, category:m.category||null, duration:m.duration||60, show_tilde:m.showTilde||false, tags:m.tags||[], sort_order:m.sortOrder||Date.now() }),
   product: (p) => ({ name:p.name, price:p.price||0, cost:p.cost||0, stock:p.stock||0, min_stock:p.minStock||3, category:p.category||null, sub_category:p.subCategory||null, placeholder:p.placeholder||false, photos:p.photos||[], description:p.description||null, is_public:p.isPublic||false, sort_order:p.sortOrder||Date.now() }),
-  visit: (v) => ({ customer_id:v.customerId, date:v.date, time:v.time||null, menus:v.menus||[], products:v.products||[], drug_cost:v.drugCost||0, payment_method:v.paymentMethod||"cash", total:v.total||0, notes:v.notes||null, images:v.images||[], customer_type:v.customerType||"existing", hpb_point:v.hpbPoint||0, paid:v.paid||false, duration:v.duration||60, appointment_id:v.appointmentId||null, tags:v.tags||[], style_name:v.styleName||null, style_comment:v.styleComment||null, is_public:v.isPublic||false, paid_at:v.paidAt||null }),
+  visit: (v) => ({ customer_id:v.customerId, date:v.date, time:v.time||null, menus:v.menus||[], products:v.products||[], drug_cost:0, /* 薬剤代は廃止。列が残っているため0固定 */ payment_method:v.paymentMethod||"cash", total:v.total||0, notes:v.notes||null, images:v.images||[], customer_type:v.customerType||"existing", hpb_point:v.hpbPoint||0, paid:v.paid||false, duration:v.duration||60, appointment_id:v.appointmentId||null, tags:v.tags||[], style_name:v.styleName||null, style_comment:v.styleComment||null, is_public:v.isPublic||false, paid_at:v.paidAt||null }),
   style: (s) => ({ images:s.images||[], cover_image:s.coverImage||null, category:s.category||"ladies", length:s.length||"", stylist_name:s.stylistName||"", stylist_comment:s.stylistComment||"", style_name:s.styleName||"", menu_flags:s.menuFlags||[], menu_text:s.menuText||"", coupon_menu_id:s.couponMenuId||null, hashtags:s.hashtags||[], tags:s.tags||[], model_volume:s.modelVolume||"", model_texture:s.modelTexture||"", model_thickness:s.modelThickness||"", model_curl:s.modelCurl||"", model_face:s.modelFace||"", model_age:s.modelAge||"", sort_order:s.sortOrder||Date.now() }),
   blog: (b) => ({ images:b.images||[], cover_image:b.coverImage||null, category:b.category||"", title:b.title||"", body:b.body||"", body_blocks:b.bodyBlocks||[], coupon_menu_id:b.couponMenuId||null, author_name:b.authorName||"", sort_order:b.sortOrder||Date.now() }),
   appointment: (a) => ({ customer_id:a.customerId, date:a.date, time:a.time||null, end_time:a.endTime||null, duration:a.duration||60, menu_ids:a.menuIds||[], notes:a.notes||null, color:a.color||"#00b4a6", paid:a.paid||false, shimeika:a.shimeika||"shimeika", customer_type:a.customerType||"existing" }),
@@ -114,7 +114,7 @@ const fromDb = {
   customer: (r) => ({ id:r.id, name:r.name, kana:r.kana||"", phone:r.phone||"", birthday:r.birthday||"", gender:r.gender||"female", notes:r.notes||"", joinDate:r.join_date||"", lineUserId:r.line_user_id||"" }),
   menu: (r) => ({ id:r.id, name:r.name, price:r.price||0, category:r.category||"", duration:r.duration||60, showTilde:r.show_tilde||false, tags:r.tags||[], sortOrder:r.sort_order||0, menuKind:r.menu_kind||"menu", targetCustomer:r.target_customer||"all", isBookable:r.is_bookable!==false }),
   product: (r) => ({ id:r.id, name:r.name, price:r.price||0, cost:r.cost||0, stock:r.stock||0, minStock:r.min_stock||3, category:r.category||"", subCategory:r.sub_category||"", placeholder:r.placeholder||false, photos:r.photos||[], description:r.description||"", isPublic:r.is_public||false, sortOrder:r.sort_order||0 }),
-  visit: (r) => { var pd={}; try{pd=r.photo_data?JSON.parse(r.photo_data):{};}catch(e){} return { id:r.id, customerId:r.customer_id, date:r.date, time:r.time||"", menus:r.menus||[], products:r.products||[], drugCost:r.drug_cost||0, paymentMethod:r.payment_method||"cash", total:r.total||0, notes:r.notes||"", images:r.images||[], beforeImgs:pd.before||[], afterImgs:pd.after||[], otherImgs:pd.other||[], customerType:r.customer_type||"existing", hpbPoint:r.hpb_point||0, paid:r.paid||false, duration:r.duration||60, appointmentId:r.appointment_id||null, tags:r.tags||[], styleName:r.style_name||"", styleComment:r.style_comment||"", isPublic:r.is_public||false, paidAt:r.paid_at||null }; },
+  visit: (r) => { var pd={}; try{pd=r.photo_data?JSON.parse(r.photo_data):{};}catch(e){} return { id:r.id, customerId:r.customer_id, date:r.date, time:r.time||"", menus:r.menus||[], products:r.products||[], paymentMethod:r.payment_method||"cash", total:r.total||0, notes:r.notes||"", images:r.images||[], beforeImgs:pd.before||[], afterImgs:pd.after||[], otherImgs:pd.other||[], customerType:r.customer_type||"existing", hpbPoint:r.hpb_point||0, paid:r.paid||false, duration:r.duration||60, appointmentId:r.appointment_id||null, tags:r.tags||[], styleName:r.style_name||"", styleComment:r.style_comment||"", isPublic:r.is_public||false, paidAt:r.paid_at||null }; },
   style: (r) => ({ id:r.id, images:r.images||[], coverImage:r.cover_image||null, category:r.category||"ladies", length:r.length||"", stylistName:r.stylist_name||"", stylistComment:r.stylist_comment||"", styleName:r.style_name||"", menuFlags:r.menu_flags||[], menuText:r.menu_text||"", couponMenuId:r.coupon_menu_id||null, hashtags:r.hashtags||[], tags:r.tags||[], modelVolume:r.model_volume||"", modelTexture:r.model_texture||"", modelThickness:r.model_thickness||"", modelCurl:r.model_curl||"", modelFace:r.model_face||"", modelAge:r.model_age||"", sortOrder:r.sort_order||0, createdAt:r.created_at||null }),
   blog: (r) => ({ id:r.id, images:r.images||[], coverImage:r.cover_image||null, category:r.category||"", title:r.title||"", body:r.body||"", bodyBlocks:r.body_blocks||[], couponMenuId:r.coupon_menu_id||null, authorName:r.author_name||"", sortOrder:r.sort_order||0, createdAt:r.created_at||null }),
   appointment: (r) => ({ id:r.id, customerId:r.customer_id, date:r.date, time:r.time||"", endTime:r.end_time||"", duration:r.duration||60, menuIds:r.menu_ids||[], notes:r.notes||"", color:r.color||"#00b4a6", paid:r.paid||false, shimeika:r.shimeika||"shimeika", customerType:r.customer_type||"existing", hpbPoint:r.hpb_point||0, bookingStatus:r.booking_status||"confirmed" }),
@@ -168,14 +168,14 @@ const SEED_CUSTOMERS = [
   { id: 3, name: "山田 美咲", kana: "ヤマダ ミサキ", phone: "070-5555-1234", birthday: "1995-07-03", gender: "female", notes: "", joinDate: "2024-06-01" },
 ];
 const SEED_VISITS = [
-  { id: 1, customerId: 1, date: "2025-10-12", time: "10:00", menus: [{ menuId: 1, name: "カット", price: 4500 }, { menuId: 2, name: "カラー", price: 8000 }], products: [{ productId: 1, name: "シャンプー Premium", price: 2800, qty: 1 }], drugCost: 1200, paymentMethod: "card", total: 16300, notes: "赤みを抑えたカラー", images: [] },
-  { id: 2, customerId: 2, date: "2025-11-05", time: "14:00", menus: [{ menuId: 1, name: "カット", price: 4500 }], products: [], drugCost: 0, paymentMethod: "cash", total: 4500, notes: "", images: [] },
-  { id: 3, customerId: 1, date: "2025-12-20", time: "11:00", menus: [{ menuId: 1, name: "カット", price: 4500 }, { menuId: 4, name: "トリートメント", price: 3000 }], products: [{ productId: 2, name: "トリートメント Silk", price: 3200, qty: 1 }], drugCost: 500, paymentMethod: "qr", total: 11200, notes: "艶出し重視", images: [] },
-  { id: 4, customerId: 3, date: "2026-01-08", time: "13:00", menus: [{ menuId: 3, name: "パーマ", price: 10000 }], products: [], drugCost: 2000, paymentMethod: "cash", total: 12000, notes: "", images: [] },
-  { id: 5, customerId: 2, date: "2026-02-14", time: "15:00", menus: [{ menuId: 1, name: "カット", price: 4500 }, { menuId: 5, name: "ヘッドスパ", price: 4000 }], products: [{ productId: 3, name: "スタイリング剤 Wax", price: 2200, qty: 1 }], drugCost: 0, paymentMethod: "card", total: 10700, notes: "", images: [] },
-  { id: 6, customerId: 1, date: "2026-03-10", time: "10:30", menus: [{ menuId: 2, name: "カラー", price: 8000 }, { menuId: 4, name: "トリートメント", price: 3000 }], products: [{ productId: 4, name: "ヘアオイル Glow", price: 3600, qty: 1 }], drugCost: 1500, paymentMethod: "card", total: 16100, notes: "ハイライト追加", images: [] },
-  { id: 7, customerId: 3, date: "2026-04-22", time: "14:00", menus: [{ menuId: 1, name: "カット", price: 4500 }], products: [], drugCost: 0, paymentMethod: "cash", total: 4500, notes: "", images: [] },
-  { id: 8, customerId: 2, date: "2026-05-10", time: "11:00", menus: [{ menuId: 1, name: "カット", price: 4500 }, { menuId: 2, name: "カラー", price: 8000 }], products: [{ productId: 1, name: "シャンプー Premium", price: 2800, qty: 1 }], drugCost: 1000, paymentMethod: "qr", total: 16300, notes: "", images: [] },
+  { id: 1, customerId: 1, date: "2025-10-12", time: "10:00", menus: [{ menuId: 1, name: "カット", price: 4500 }, { menuId: 2, name: "カラー", price: 8000 }], products: [{ productId: 1, name: "シャンプー Premium", price: 2800, qty: 1 }], paymentMethod: "card", total: 16300, notes: "赤みを抑えたカラー", images: [] },
+  { id: 2, customerId: 2, date: "2025-11-05", time: "14:00", menus: [{ menuId: 1, name: "カット", price: 4500 }], products: [], paymentMethod: "cash", total: 4500, notes: "", images: [] },
+  { id: 3, customerId: 1, date: "2025-12-20", time: "11:00", menus: [{ menuId: 1, name: "カット", price: 4500 }, { menuId: 4, name: "トリートメント", price: 3000 }], products: [{ productId: 2, name: "トリートメント Silk", price: 3200, qty: 1 }], paymentMethod: "qr", total: 11200, notes: "艶出し重視", images: [] },
+  { id: 4, customerId: 3, date: "2026-01-08", time: "13:00", menus: [{ menuId: 3, name: "パーマ", price: 10000 }], products: [], paymentMethod: "cash", total: 12000, notes: "", images: [] },
+  { id: 5, customerId: 2, date: "2026-02-14", time: "15:00", menus: [{ menuId: 1, name: "カット", price: 4500 }, { menuId: 5, name: "ヘッドスパ", price: 4000 }], products: [{ productId: 3, name: "スタイリング剤 Wax", price: 2200, qty: 1 }], paymentMethod: "card", total: 10700, notes: "", images: [] },
+  { id: 6, customerId: 1, date: "2026-03-10", time: "10:30", menus: [{ menuId: 2, name: "カラー", price: 8000 }, { menuId: 4, name: "トリートメント", price: 3000 }], products: [{ productId: 4, name: "ヘアオイル Glow", price: 3600, qty: 1 }], paymentMethod: "card", total: 16100, notes: "ハイライト追加", images: [] },
+  { id: 7, customerId: 3, date: "2026-04-22", time: "14:00", menus: [{ menuId: 1, name: "カット", price: 4500 }], products: [], paymentMethod: "cash", total: 4500, notes: "", images: [] },
+  { id: 8, customerId: 2, date: "2026-05-10", time: "11:00", menus: [{ menuId: 1, name: "カット", price: 4500 }, { menuId: 2, name: "カラー", price: 8000 }], products: [{ productId: 1, name: "シャンプー Premium", price: 2800, qty: 1 }], paymentMethod: "qr", total: 16300, notes: "", images: [] },
 ];
 const SEED_APPOINTMENTS = [
   { id: 1, customerId: 1, date: "2026-05-27", time: "10:00", menuIds: [1, 2], notes: "カラーリタッチ希望", color: "#00b4a6", duration: 120, paid: true },
@@ -1131,8 +1131,7 @@ function HomeTab({ visits, customers, appointments, menus, setTab, products, pur
   const mvPaid = mv.filter(v => !(!v.paid && (v.total||0) === 0));
   const newCount = mvPaid.filter(v => v.customerType === "new").length;
   const paidCount = mvPaid.length;
-  const drugCostTotal = mv.reduce((s, v) => s + (v.drugCost||0), 0);
-  const techRev = rev - shopRev - drugCostTotal;
+  const techRev = rev - shopRev;
   const techAvg = paidCount ? Math.round(techRev / paidCount) : 0;
 
   // 今月の仕入れ（材料費・総経費）
@@ -1702,7 +1701,7 @@ function CheckoutPage({ visit: v, customer: c, menus: allMenus, products: allPro
 
   const menuTotal = editMenus.reduce((s, m) => s + (parseInt(m.price) || 0), 0);
   const prodTotal = editProds.reduce((s, p) => s + (parseInt(p.price) || 0) * (p.qty || 1), 0);
-  const subTotal = menuTotal + prodTotal + (v.drugCost || 0);
+  const subTotal = menuTotal + prodTotal;
   const pointDisc = parseInt(hpbPoint) || 0;
   const grand = Math.max(0, subTotal - pointDisc);
   const change = Math.max(0, (parseInt(cashReceived) || 0) - (parseInt(payCash) || 0));
@@ -2623,6 +2622,103 @@ function PastVisitsPanel({ visits: pv }) {
 }
 
 
+// ── 日別表（スプレッドシート風の一覧） ──
+function DailyTable({ rows, total, onPickDate }) {
+  const [copied, setCopied] = useState(false);
+
+  const COLS = [
+    { k: "count", label: "客数", plain: true },
+    { k: "cash",  label: "現金" },
+    { k: "card",  label: "カード" },
+    { k: "qr",    label: "QR決済" },
+    { k: "point", label: "ポイント" },
+    { k: "total", label: "日計", strong: true },
+    { k: "shop",  label: "店販" },
+    { k: "tech",  label: "技術売上", strong: true },
+  ];
+
+  const mdLabel = (d) => {
+    const p = d.split("-");
+    return p.length === 3 ? `${Number(p[1])}/${Number(p[2])}` : d;
+  };
+
+  const copyTsv = () => {
+    const head = ["日付", ...COLS.map(c => c.label)].join("\t");
+    const body = rows.map(r => [mdLabel(r.date), ...COLS.map(c => r[c.k])].join("\t"));
+    const foot = ["合計", ...COLS.map(c => total[c.k])].join("\t");
+    const tsv = [head, ...body, foot].join("\n");
+    const done = () => { setCopied(true); setTimeout(() => setCopied(false), 1800); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(tsv).then(done).catch(() => {});
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = tsv; document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); done(); } catch (e) {}
+      document.body.removeChild(ta);
+    }
+  };
+
+  if (!rows.length) return (
+    <div style={{ ...css.card, textAlign: "center", color: C.sub, fontSize: 14, padding: "28px 16px" }}>
+      この期間に会計の記録がありません
+    </div>
+  );
+
+  const cell = { padding: "8px 10px", fontSize: 12, textAlign: "right", whiteSpace: "nowrap", borderBottom: `1px solid ${C.border}` };
+  const headCell = { ...cell, fontSize: 11, fontWeight: 700, color: C.sub, background: "#faf8f5", position: "sticky", top: 0, zIndex: 2 };
+  const firstCol = { position: "sticky", left: 0, background: "#fff", textAlign: "left", fontWeight: 700, zIndex: 1 };
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <div style={{ flex: 1, fontSize: 12, color: C.sub }}>
+          {rows.length}日分 ／ 日付をタップするとその日の分析へ
+        </div>
+        <button onClick={copyTsv}
+          style={{ ...css.btn(copied ? C.green : C.accent, false), padding: "6px 12px", fontSize: 12 }}>
+          {copied ? "コピーしました ✓" : "表をコピー"}
+        </button>
+      </div>
+
+      <div style={{ background: "#fff", borderRadius: 14, border: `1px solid ${C.border}`, overflow: "auto", maxHeight: "70vh" }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 620 }}>
+          <thead>
+            <tr>
+              <th style={{ ...headCell, ...firstCol, background: "#faf8f5", textAlign: "left" }}>日付</th>
+              {COLS.map(c => <th key={c.k} style={headCell}>{c.label}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.date}>
+                <td onClick={() => onPickDate(r.date)}
+                  style={{ ...cell, ...firstCol, color: C.accent, cursor: "pointer" }}>{mdLabel(r.date)}</td>
+                {COLS.map(c => (
+                  <td key={c.k} style={{ ...cell, fontWeight: c.strong ? 700 : 400, color: r[c.k] ? C.text : "#c9c1b8" }}>
+                    {c.plain ? r[c.k] : (r[c.k] ? r[c.k].toLocaleString() : 0)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+            <tr>
+              <td style={{ ...cell, ...firstCol, background: "#faf8f5", borderBottom: "none" }}>合計</td>
+              {COLS.map(c => (
+                <td key={c.k} style={{ ...cell, background: "#faf8f5", fontWeight: 800, color: C.text, borderBottom: "none" }}>
+                  {c.plain ? total[c.k] : total[c.k].toLocaleString()}
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ fontSize: 11, color: C.sub, marginTop: 8, lineHeight: 1.6 }}>
+        日計 ＝ 現金＋カード＋QR決済＋ポイント　／　技術売上 ＝ 日計 − 店販
+      </div>
+    </div>
+  );
+}
+
 function AnalyticsTab({ visits, customers, menus, products, appointments, purchaseCosts, purchaseCategories }) {
   const [period, setPeriod] = useState("month");
   const [subTab, setSubTab] = useState("sales");
@@ -2673,14 +2769,13 @@ function AnalyticsTab({ visits, customers, menus, products, appointments, purcha
   })();
 
   // 売上集計
-  const { totalRev, shopRev, drugCostTotal, techRev, avg, techAvg } = useMemo(() => {
+  const { totalRev, shopRev, techRev, avg, techAvg } = useMemo(() => {
     const totalRev = fv.reduce((s, v) => s + v.total, 0);
     const shopRev = fv.reduce((s, v) => s + (v.products||[]).reduce((ss, p) => ss + p.price * p.qty, 0), 0);
-    const drugCostTotal = fv.reduce((s, v) => s + (v.drugCost || 0), 0);
-    const techRev = totalRev - shopRev - drugCostTotal;
+    const techRev = totalRev - shopRev;
     const avg = fv.length ? Math.round(totalRev / fv.length) : 0;
     const techAvg = fv.length ? Math.round(techRev / fv.length) : 0;
-    return { totalRev, shopRev, drugCostTotal, techRev, avg, techAvg };
+    return { totalRev, shopRev, techRev, avg, techAvg };
   }, [fv]);
 
   // 指名・フリー集計
@@ -2840,7 +2935,54 @@ function AnalyticsTab({ visits, customers, menus, products, appointments, purcha
     </div>
   );
 
-  const SUBTABS = [["sales", "売上"], ["menu", "メニュー"], ["customer", "顧客"], ["product", "店販"]];
+  const SUBTABS = [["sales", "売上"], ["daily", "日別表"], ["menu", "メニュー"], ["customer", "顧客"], ["product", "店販"]];
+
+  // カレンダー用：現在の対象日／対象月を "YYYY-MM-DD" / "YYYY-MM" で表す
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const dayTargetValue = (() => {
+    const t = new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset);
+    return `${t.getFullYear()}-${pad2(t.getMonth()+1)}-${pad2(t.getDate())}`;
+  })();
+  const monthTargetValue = (() => {
+    const t = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
+    return `${t.getFullYear()}-${pad2(t.getMonth()+1)}`;
+  })();
+  // 選んだ日付から offset を計算し直す（既存の集計ロジックはそのまま使う）
+  const pickDay = (val) => {
+    if (!val) return;
+    const picked = new Date(val + "T00:00:00");
+    if (isNaN(picked)) return;
+    const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    setDayOffset(Math.round((picked - base) / 86400000));
+  };
+  const pickMonth = (val) => {
+    if (!val) return;
+    const [y, m] = val.split("-").map(Number);
+    if (!y || !m) return;
+    setMonthOffset((y - now.getFullYear()) * 12 + (m - 1 - now.getMonth()));
+  };
+
+  // 日別表：日付ごとに集計（技術 = 日計 − 店販）
+  const dailyRows = useMemo(() => {
+    const map = {};
+    fv.forEach(v => {
+      const d = v.date;
+      if (!map[d]) map[d] = { date: d, count: 0, cash: 0, card: 0, qr: 0, point: 0, total: 0, shop: 0 };
+      const r = map[d];
+      r.count += 1;
+      r.total += v.total || 0;
+      r.shop += (v.products || []).reduce((ss, p) => ss + p.price * p.qty, 0);
+      const pm = v.paymentMethod || "cash";
+      if (r[pm] !== undefined) r[pm] += v.total || 0;
+    });
+    return Object.values(map).sort((a, b) => a.date < b.date ? -1 : 1)
+      .map(r => ({ ...r, tech: r.total - r.shop }));
+  }, [fv]);
+
+  const dailyTotal = useMemo(() => dailyRows.reduce((a, r) => ({
+    count: a.count + r.count, cash: a.cash + r.cash, card: a.card + r.card, qr: a.qr + r.qr,
+    point: a.point + r.point, total: a.total + r.total, shop: a.shop + r.shop, tech: a.tech + r.tech,
+  }), { count:0, cash:0, card:0, qr:0, point:0, total:0, shop:0, tech:0 }), [dailyRows]);
 
   return (
     <div style={{ background: C.bg, minHeight: "100vh", paddingTop: (period === "day" || period === "month") ? 110 : 62 }}>
@@ -2859,7 +3001,14 @@ function AnalyticsTab({ visits, customers, menus, products, appointments, purcha
               style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "5px 12px", fontWeight: 700, cursor: "pointer", fontSize: 13, color: C.text }}>＜</button>
             <button onClick={() => period === "day" ? setDayOffset(0) : setMonthOffset(0)}
               style={{ background: "#E8DCC3", border: "none", borderRadius: 8, padding: "5px 12px", fontWeight: 700, cursor: "pointer", fontSize: 12, color: "#2a2218" }}>今日</button>
-            <div style={{ fontWeight: 700, fontSize: 14, color: C.text, flex: 1, textAlign: "center" }}>{periodLabel}</div>
+            <label style={{ flex: 1, textAlign: "center", position: "relative", cursor: "pointer" }}>
+              <span style={{ fontWeight: 700, fontSize: 14, color: C.text, borderBottom: `1px dashed ${C.border}`, paddingBottom: 1 }}>{periodLabel} ▾</span>
+              <input
+                type={period === "day" ? "date" : "month"}
+                value={period === "day" ? dayTargetValue : monthTargetValue}
+                onChange={e => period === "day" ? pickDay(e.target.value) : pickMonth(e.target.value)}
+                style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, border: "none", padding: 0, cursor: "pointer" }} />
+            </label>
             <button onClick={() => period === "day" ? setDayOffset(o => o+1) : setMonthOffset(o => o+1)}
               style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "5px 12px", fontWeight: 700, cursor: "pointer", fontSize: 13, color: C.text }}>＞</button>
           </div>
@@ -3009,8 +3158,7 @@ function AnalyticsTab({ visits, customers, menus, products, appointments, purcha
               const prevRev = prevFv.reduce((s,v2)=>s+v2.total,0);
               const prevCount = prevFv.length;
               const prevShopRev = prevFv.reduce((s,v2)=>s+(v2.products||[]).reduce((ss,p)=>ss+p.price*p.qty,0),0);
-              const prevDrugCost = prevFv.reduce((s,v2)=>s+(v2.drugCost||0),0);
-              const prevAvg = prevCount?Math.round((prevRev-prevShopRev-prevDrugCost)/prevCount):0;
+              const prevAvg = prevCount?Math.round((prevRev-prevShopRev)/prevCount):0;
 
               // メニュー別TOP5
               const menuMap = {};
@@ -3125,6 +3273,10 @@ function AnalyticsTab({ visits, customers, menus, products, appointments, purcha
         )}
 
         {/* ── メニューサブタブ ── */}
+        {subTab === "daily" && (
+          <DailyTable rows={dailyRows} total={dailyTotal} onPickDate={(d) => { setPeriod("day"); pickDay(d); }} />
+        )}
+
         {subTab === "menu" && (
           <>
             <div style={css.card}>
@@ -5290,7 +5442,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.20-b"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.20-c"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -5565,7 +5717,7 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
     const noPhotos = (v.beforeImgs||[]).length === 0 && (v.afterImgs||[]).length === 0 && (v.otherImgs||[]).length === 0;
     const noProducts = (v.products||[]).length === 0;
     const noNotes = !(v.notes||"").trim();
-    return (v.total||0) === 0 && noPhotos && noProducts && noNotes && !v.paidAt && !v.paid && (v.drugCost||0) === 0;
+    return (v.total||0) === 0 && noPhotos && noProducts && noNotes && !v.paidAt && !v.paid;
   };
 
   const openChangeCustomer = (a) => {
@@ -6093,7 +6245,6 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
             ? realVisit.menus
             : (am.length > 0 ? am.map(m => ({ menuId: m.id, name: m.name, price: m.price })) : (realVisit ? (realVisit.menus||[]) : [])),
           products: realVisit ? (realVisit.products||[]) : [],
-          drugCost: 0,
           total: isPaid ? (realVisit ? realVisit.total||0 : 0) : am.reduce((s,m)=>s+m.price,0),
           paymentMethod: realVisit ? (realVisit.paymentMethod||"cash") : "cash",
           paid: isPaid,
