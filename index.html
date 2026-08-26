@@ -5290,7 +5290,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.20-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.20-b"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -8938,6 +8938,9 @@ function SettingsTab({ menus, setMenus, products, setProducts, notify, setTab })
 // 対象テーブル: site_contents / site_images / coupons
 // ═══════════════════════════════════════════════════════════
 
+// 公式ホームページのURL
+const SITE_URL = "https://amber-site-brown.vercel.app";
+
 // 文言の項目定義。ここに無いキーは自動で「その他」グループに出す
 const SITE_TEXT_GROUPS = [
   { name: "トップ・ヒーロー", items: [
@@ -9036,7 +9039,12 @@ function SiteAdminTab({ setTab, notify }) {
       <div style={{ background: "#fff", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.border}` }}>
         <button onClick={() => setTab("more")} style={{ background: "none", border: "none", color: "#7a6848", fontSize: 15, fontWeight: 700, cursor: "pointer" }}>← メニュー</button>
         <div style={{ fontWeight: 800, fontSize: 16 }}>サイト管理</div>
-        <div style={{ width: 60 }} />
+        <a href={SITE_URL + (sub === "coupon" ? "/coupon" : "/") + "?t=" + Date.now()}
+           target="_blank" rel="noopener noreferrer"
+           style={{ color: "#4a9a92", fontSize: 13, fontWeight: 700, textDecoration: "none", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4 }}>
+          ページを見る
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4a9a92" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        </a>
       </div>
 
       <div style={{ background: "#fff", display: "flex", borderBottom: `1px solid ${C.border}` }}>
@@ -9112,7 +9120,7 @@ function SiteTextPanel({ notify }) {
   return (
     <div>
       <div style={{ fontSize: 12, color: C.sub, marginBottom: 12, lineHeight: 1.6 }}>
-        ここで直すとホームページの表示がすぐ変わります。反映まで最大15分かかることがあります。
+        保存するとホームページに反映されます。右上の「ページを見る」から、最新の状態で確認できます。
       </div>
 
       {groups.map(g => {
