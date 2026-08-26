@@ -1931,6 +1931,9 @@ function CheckoutPage({ visit: v, customer: c, menus: allMenus, products: allPro
           }}
           onClose={() => setShowMenuPicker(false)}
           visits={[]}
+          customerId={c ? c.id : null}
+          allVisits={allVisits || []}
+          excludeVisitId={v.id}
         />
       )}
       {/* Product picker sheet */}
@@ -2436,6 +2439,9 @@ function KarteDetail({ visit: v, customer: c, menus: allMenus, products: allProd
           }}
           onClose={() => setShowMenuPicker(false)}
           visits={allVisits || []}
+          customerId={c ? c.id : null}
+          allVisits={allVisits || []}
+          excludeVisitId={v.id}
         />
       )}
 
@@ -2504,7 +2510,7 @@ const MENU_CATEGORY_SVG = {
   "セット": (c) => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>,
 };
 
-function MenuPickerSheet({ menus, selectedIds, onToggle, onClose, visits }) {
+function MenuPickerSheet({ menus, selectedIds, onToggle, onClose, visits, customerId, allVisits, excludeVisitId }) {
   const [openCats, setOpenCats] = useState({});
 
   // "よく使う" = top 5 by frequency in visits
@@ -2515,6 +2521,36 @@ function MenuPickerSheet({ menus, selectedIds, onToggle, onClose, visits }) {
   const popular = [...menus]
     .sort((a, b) => (menuFreq[b.id] || 0) - (menuFreq[a.id] || 0))
     .slice(0, 5);
+
+  // ── 前回来店時のメニュー ──
+  // 対象のお客様の来店のうち、編集中の1件を除いた最新の来店から拾う
+  const lastVisit = useMemo(() => {
+    if (!customerId) return null;
+    const src = (allVisits && allVisits.length ? allVisits : (visits || []));
+    const mine = src
+      .filter(v => v.customerId === customerId)
+      .filter(v => !excludeVisitId || v.id !== excludeVisitId)
+      .filter(v => (v.menus || []).length > 0)
+      .sort((a, b) => {
+        if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+        return (b.time || "") > (a.time || "") ? 1 : -1;
+      });
+    return mine[0] || null;
+  }, [customerId, allVisits, visits, excludeVisitId]);
+
+  // 前回のメニューのうち、今もメニュー表に残っているものだけ出す
+  const lastMenus = useMemo(() => {
+    if (!lastVisit) return [];
+    const seen = {};
+    return (lastVisit.menus || [])
+      .map(lm => menus.find(m => m.id === lm.menuId))
+      .filter(m => m && !seen[m.id] && (seen[m.id] = true));
+  }, [lastVisit, menus]);
+
+  const lastDateLabel = lastVisit ? (() => {
+    const t = (lastVisit.date || "").split("-");
+    return t.length === 3 ? `${Number(t[1])}/${Number(t[2])}` : lastVisit.date;
+  })() : "";
 
   const cats = {};
   menus.forEach(m => {
@@ -2541,6 +2577,20 @@ function MenuPickerSheet({ menus, selectedIds, onToggle, onClose, visits }) {
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 950, display: "flex", alignItems: "flex-end" }}>
       <div style={{ background: C.bg, borderRadius: "20px 20px 0 0", width: "100%", maxWidth: 480, margin: "0 auto", maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
         <div style={{ background: "#fff", overflowY: "auto", flex: 1 }}>
+          {/* 前回来店時のメニュー */}
+          {lastMenus.length > 0 && (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: "#f3efe6", borderBottom: `1px solid ${C.border}` }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: "#f3efe6", border: `1px solid #ddd2bf`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#b8906a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
+                </div>
+                <span style={{ fontWeight: 700, fontSize: 15, flex: 1 }}>前回のメニュー</span>
+                <span style={{ fontSize: 12, color: C.sub }}>{lastDateLabel}</span>
+              </div>
+              {lastMenus.map(m => <MenuRow key={"last_" + m.id} m={m} />)}
+            </>
+          )}
+
           {/* よく使うメニュー */}
           {popular.length > 0 && (
             <>
@@ -5525,7 +5575,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.26-c"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.26-d"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -6825,6 +6875,8 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
           }}
           onClose={() => setShowEditMenuPicker(false)}
           visits={[]}
+          customerId={showEdit.customerId || null}
+          allVisits={visits || []}
         />
       )}
 
@@ -7117,6 +7169,8 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
           }}
           onClose={() => setShowFormMenuPicker(false)}
           visits={visits || []}
+          customerId={form.customerId || null}
+          allVisits={visits || []}
         />
       )}
     </div>
