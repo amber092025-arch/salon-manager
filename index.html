@@ -960,11 +960,13 @@ function App() {
   const [pendingCustomerId, setPendingCustomerId] = React.useState(null);
   const [karteDetailCustomer, setKarteDetailCustomer] = React.useState(null);
   const [karteDetailBackTab, setKarteDetailBackTab] = React.useState("customers");
+  const [karteDetailStartCheckout, setKarteDetailStartCheckout] = React.useState(false);
 
-  const openKarteDetail = React.useCallback((visit, customer, backTab) => {
+  const openKarteDetail = React.useCallback((visit, customer, backTab, startCheckout) => {
     setKarteDetailVisit(visit);
     setKarteDetailCustomer(customer);
     setKarteDetailBackTab(backTab || "customers");
+    setKarteDetailStartCheckout(!!startCheckout);
     setTab("karteDetail");
     // この1件分の写真だけを単発取得（軽量・確実）→ 詳細画面と一覧の両方に反映
     (async () => {
@@ -1046,7 +1048,7 @@ function App() {
         {tab === "home" && <HomeTab visits={visits} customers={customers} appointments={appointments} menus={menus} setTab={setTab} products={products} purchaseCosts={purchaseCosts} purchaseCategories={purchaseCategories} monthlyGoals={monthlyGoals} bizHours={bizHours} closedDaysOfWeek={closedDaysOfWeek} personalHolidays={personalHolidays} openKarteDetail={openKarteDetail} />}
         {tab === "customers" && <CustomersTab customers={customers} setCustomers={setCustomers} visits={visits} setVisits={setVisitsW} menus={menus} products={products} notify={notify} addCustomer={addCustomer} openKarteDetail={openKarteDetail} setTab={setTab} setPendingCustomerId={setPendingCustomerId} />}
         {tab === "visit" && <VisitTab customers={customers} menus={menus} products={products} visits={visits} setVisits={setVisitsW} setProducts={setProductsW} notify={notify} setTab={setTab} setCustomers={setCustomers} />}
-        {tab === "analytics" && <AnalyticsTab visits={visits} customers={customers} menus={menus} products={products} appointments={appointments} purchaseCosts={purchaseCosts} purchaseCategories={purchaseCategories} />}
+        {tab === "analytics" && <AnalyticsTab visits={visits} customers={customers} menus={menus} products={products} appointments={appointments} purchaseCosts={purchaseCosts} purchaseCategories={purchaseCategories} openKarteDetail={openKarteDetail} />}
         {tab === "more" && <MoreTab setTab={setTab} />}
         {tab === "blogPrompt" && <BlogPromptTab setTab={setTab} notify={notify} />}
         {tab === "stylupPrompt" && <StylupPromptTab setTab={setTab} notify={notify} />}
@@ -1084,7 +1086,7 @@ function App() {
             setPendingCustomerId={setPendingCustomerId}
           />;
         })()}
-        {tab === "karteDetail" && karteDetailVisit && <KarteDetail visit={karteDetailVisit} customer={karteDetailCustomer} menus={menus} products={products} visits={visits} appointments={appointments} updateVisit={updateVisit} updateAppointment={updateAppointment} setVisits={setVisitsW} setVisitsRaw={setVisits} setAppointments={setAppointmentsW} setAppointmentsRaw={setAppointments} tagCategories={tagCategories} shopCategoryList={shopCategoryList} onBack={(updated) => {
+        {tab === "karteDetail" && karteDetailVisit && <KarteDetail key={karteDetailVisit.id + (karteDetailStartCheckout ? "-c" : "")} startCheckout={karteDetailStartCheckout} visit={karteDetailVisit} customer={karteDetailCustomer} menus={menus} products={products} visits={visits} appointments={appointments} updateVisit={updateVisit} updateAppointment={updateAppointment} setVisits={setVisitsW} setVisitsRaw={setVisits} setAppointments={setAppointmentsW} setAppointmentsRaw={setAppointments} tagCategories={tagCategories} shopCategoryList={shopCategoryList} onBack={(updated) => {
           if (updated) updateVisit(karteDetailVisit.id, updated);
           setTab(karteDetailBackTab);
         }} notify={notify} onDeleteVisit={async (id) => { await deleteVisit(id); setTab(karteDetailBackTab); }} />}
@@ -1972,7 +1974,7 @@ function CheckoutPage({ visit: v, customer: c, menus: allMenus, products: allPro
   );
 }
 
-function KarteDetail({ visit: v, customer: c, menus: allMenus, products: allProducts, visits: allVisits, onBack, notify, onDeleteVisit, appointments, updateVisit, updateAppointment, setVisits, setVisitsRaw, setAppointments, setAppointmentsRaw, tagCategories, shopCategoryList }) {
+function KarteDetail({ visit: v, customer: c, menus: allMenus, products: allProducts, visits: allVisits, onBack, notify, onDeleteVisit, appointments, updateVisit, updateAppointment, setVisits, setVisitsRaw, setAppointments, setAppointmentsRaw, tagCategories, shopCategoryList, startCheckout }) {
   const beforeRef = useRef();
   const afterRef = useRef();
   const otherRef = useRef();
@@ -1995,7 +1997,7 @@ function KarteDetail({ visit: v, customer: c, menus: allMenus, products: allProd
   const [editMemo, setEditMemo] = useState(false);
   const [showMemoPage, setShowMemoPage] = useState(false);
   const [showPastMemos, setShowPastMemos] = useState(false);
-  const [showCheckout, setShowCheckout] = useState(false);
+  const [showCheckout, setShowCheckout] = useState(!!startCheckout); // 日別表などから会計画面を直接開く場合はtrue
   const [karteMenus, setKarteMenus] = useState(v.menus || []);
   const [karteProds, setKarteProds] = useState(v.products || []);
   const [showMenuPicker, setShowMenuPicker] = useState(false);
@@ -2623,8 +2625,31 @@ function PastVisitsPanel({ visits: pv }) {
 
 
 // ── 日別表（スプレッドシート風の一覧） ──
-function DailyTable({ rows, total, onPickDate }) {
+function DailyTable({ rows, total, visits, customers, openKarteDetail, onPickDate }) {
   const [copied, setCopied] = useState(false);
+  const [detail, setDetail] = useState(null); // { date, colKey, label }
+
+  // 押された数字に対応する来店を絞り込む
+  const detailVisits = useMemo(() => {
+    if (!detail) return [];
+    const list = (visits || []).filter(v => v.date === detail.date);
+    const k = detail.colKey;
+    if (k === "cash")  return list.filter(v => !["card","qr","point"].includes(v.paymentMethod || "cash"));
+    if (k === "card")  return list.filter(v => v.paymentMethod === "card");
+    if (k === "qr")    return list.filter(v => v.paymentMethod === "qr");
+    if (k === "point") return list.filter(v => (v.hpbPoint || 0) > 0 || v.paymentMethod === "point");
+    if (k === "shop")  return list.filter(v => (v.products || []).length > 0);
+    return list; // 客数・日計・技術売上は全件
+  }, [detail, visits]);
+
+  const amountOf = (v) => {
+    if (!detail) return v.total || 0;
+    if (detail.colKey === "point") return v.hpbPoint || 0;
+    if (detail.colKey === "shop") return (v.products || []).reduce((s, p) => s + p.price * p.qty, 0);
+    if (detail.colKey === "total") return (v.total || 0) + (v.hpbPoint || 0);
+    if (detail.colKey === "tech") return (v.total || 0) + (v.hpbPoint || 0) - (v.products || []).reduce((s, p) => s + p.price * p.qty, 0);
+    return v.total || 0;
+  };
 
   const COLS = [
     { k: "count", label: "客数", plain: true },
@@ -2658,6 +2683,51 @@ function DailyTable({ rows, total, onPickDate }) {
     }
   };
 
+  // ── 数字をタップした時に出る一覧 ──
+  if (detail) {
+    const dLabel = (() => { const t = detail.date.split("-"); return `${Number(t[1])}/${Number(t[2])}`; })();
+    return (
+      <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <button onClick={() => setDetail(null)}
+            style={{ background: "none", border: "none", color: "#7a6848", fontSize: 15, fontWeight: 700, cursor: "pointer", padding: 0 }}>← 日別表</button>
+          <div style={{ flex: 1, fontWeight: 800, fontSize: 15, color: C.text }}>{dLabel}　{detail.label}</div>
+        </div>
+
+        {detailVisits.length === 0 && (
+          <div style={{ ...css.card, textAlign: "center", color: C.sub, fontSize: 14 }}>該当する会計がありません</div>
+        )}
+
+        {detailVisits.map(v => {
+          const c = (customers || []).find(x => x.id === v.customerId);
+          const menuNames = (v.menus || []).map(m => m.name).join("・");
+          return (
+            <div key={v.id} style={{ ...css.card, padding: 14 }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: C.text }}>{c ? c.name : "不明なお客様"}</div>
+                  <div style={{ fontSize: 12, color: C.sub, marginTop: 3 }}>
+                    {v.time || "時刻なし"}{menuNames ? "　" + menuNames : ""}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <div style={{ fontWeight: 800, fontSize: 16, color: C.accent }}>¥{amountOf(v).toLocaleString()}</div>
+                  <Badge color={v.paid ? C.green : C.orange}>{v.paid ? "会計済" : "未会計"}</Badge>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <button onClick={() => openKarteDetail && openKarteDetail(v, c || { id: v.customerId, name: "不明なお客様", gender: "other" }, "analytics")}
+                  style={{ ...css.btn(C.sub, false), flex: 1, padding: "8px 0", fontSize: 13 }}>カルテを見る</button>
+                <button onClick={() => openKarteDetail && openKarteDetail(v, c || { id: v.customerId, name: "不明なお客様", gender: "other" }, "analytics", true)}
+                  style={{ ...css.btn(C.accent), flex: 1, padding: "8px 0", fontSize: 13 }}>会計画面へ</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
   if (!rows.length) return (
     <div style={{ ...css.card, textAlign: "center", color: C.sub, fontSize: 14, padding: "28px 16px" }}>
       この期間に会計の記録がありません
@@ -2672,7 +2742,7 @@ function DailyTable({ rows, total, onPickDate }) {
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <div style={{ flex: 1, fontSize: 12, color: C.sub }}>
-          {rows.length}日分 ／ 日付をタップするとその日の分析へ
+          {rows.length}日分 ／ 日付でその日の分析、数字で内訳の一覧へ
         </div>
         <button onClick={copyTsv}
           style={{ ...css.btn(copied ? C.green : C.accent, false), padding: "6px 12px", fontSize: 12 }}>
@@ -2694,7 +2764,9 @@ function DailyTable({ rows, total, onPickDate }) {
                 <td onClick={() => onPickDate(r.date)}
                   style={{ ...cell, ...firstCol, color: C.accent, cursor: "pointer" }}>{mdLabel(r.date)}</td>
                 {COLS.map(c => (
-                  <td key={c.k} style={{ ...cell, fontWeight: c.strong ? 700 : 400, color: r[c.k] ? C.text : "#c9c1b8" }}>
+                  <td key={c.k}
+                    onClick={() => r[c.k] ? setDetail({ date: r.date, colKey: c.k, label: c.label }) : null}
+                    style={{ ...cell, fontWeight: c.strong ? 700 : 400, color: r[c.k] ? C.text : "#c9c1b8", cursor: r[c.k] ? "pointer" : "default" }}>
                     {c.plain ? r[c.k] : (r[c.k] ? r[c.k].toLocaleString() : 0)}
                   </td>
                 ))}
@@ -2720,7 +2792,7 @@ function DailyTable({ rows, total, onPickDate }) {
   );
 }
 
-function AnalyticsTab({ visits, customers, menus, products, appointments, purchaseCosts, purchaseCategories }) {
+function AnalyticsTab({ visits, customers, menus, products, appointments, purchaseCosts, purchaseCategories, openKarteDetail }) {
   const [period, setPeriod] = useState("month");
   const [subTab, setSubTab] = useState("sales");
   // 日・月モード用オフセット
@@ -3285,7 +3357,7 @@ function AnalyticsTab({ visits, customers, menus, products, appointments, purcha
 
         {/* ── メニューサブタブ ── */}
         {subTab === "daily" && (
-          <DailyTable rows={dailyRows} total={dailyTotal} onPickDate={(d) => { setPeriod("day"); pickDay(d); }} />
+          <DailyTable rows={dailyRows} total={dailyTotal} visits={fv} customers={customers} openKarteDetail={openKarteDetail} onPickDate={(d) => { setPeriod("day"); pickDay(d); }} />
         )}
 
         {subTab === "menu" && (
@@ -5453,7 +5525,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.26-b"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.26-c"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
