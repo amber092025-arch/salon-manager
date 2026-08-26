@@ -2713,7 +2713,8 @@ function DailyTable({ rows, total, onPickDate }) {
       </div>
 
       <div style={{ fontSize: 11, color: C.sub, marginTop: 8, lineHeight: 1.6 }}>
-        日計 ＝ 現金＋カード＋QR決済＋ポイント　／　技術売上 ＝ 日計 − 店販
+        日計 ＝ 現金＋カード＋QR決済＋ポイント　／　技術売上 ＝ 日計 − 店販<br />
+        ポイントはホットペッパーの値引き分です。日計は値引き前の金額のため、上の「総売上」より大きくなります。
       </div>
     </div>
   );
@@ -2962,21 +2963,31 @@ function AnalyticsTab({ visits, customers, menus, products, appointments, purcha
     setMonthOffset((y - now.getFullYear()) * 12 + (m - 1 - now.getMonth()));
   };
 
-  // 日別表：日付ごとに集計（技術 = 日計 − 店販）
+  // 日別表：日付ごとに集計
+  // ポイントは支払方法ではなく「値引き」として hpbPoint に入っている。
+  // スプレッドシートに合わせ、日計はポイント値引き前の金額とする。
   const dailyRows = useMemo(() => {
     const map = {};
     fv.forEach(v => {
       const d = v.date;
-      if (!map[d]) map[d] = { date: d, count: 0, cash: 0, card: 0, qr: 0, point: 0, total: 0, shop: 0 };
+      if (!map[d]) map[d] = { date: d, count: 0, cash: 0, card: 0, qr: 0, point: 0, shop: 0 };
       const r = map[d];
+      const paid = v.total || 0;
       r.count += 1;
-      r.total += v.total || 0;
       r.shop += (v.products || []).reduce((ss, p) => ss + p.price * p.qty, 0);
+      // 実際に受け取った額を支払方法ごとに振り分ける
       const pm = v.paymentMethod || "cash";
-      if (r[pm] !== undefined) r[pm] += v.total || 0;
+      if (pm === "card" || pm === "qr") r[pm] += paid;
+      else if (pm === "point") r.point += paid;
+      else r.cash += paid;
+      // ポイント値引き分を上乗せ
+      r.point += v.hpbPoint || 0;
     });
     return Object.values(map).sort((a, b) => a.date < b.date ? -1 : 1)
-      .map(r => ({ ...r, tech: r.total - r.shop }));
+      .map(r => {
+        const total = r.cash + r.card + r.qr + r.point;
+        return { ...r, total, tech: total - r.shop };
+      });
   }, [fv]);
 
   const dailyTotal = useMemo(() => dailyRows.reduce((a, r) => ({
@@ -5442,7 +5453,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.20-c"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.26-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
