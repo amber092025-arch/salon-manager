@@ -1685,7 +1685,7 @@ function CustomerDetail({ c, visits, menus, products, onBack, notify, setCustome
   );
 }
 
-function CheckoutPage({ visit: v, customer: c, menus: allMenus, products: allProducts, shopCategoryList, onBack, notify, onPaid, onDeleted, onDraftSaved }) {
+function CheckoutPage({ visit: v, customer: c, menus: allMenus, products: allProducts, shopCategoryList, onBack, notify, onPaid, onDeleted, onDraftSaved, allVisits }) {
   const [editMenus, setEditMenus] = useState((v.menus||[]).map(m => ({ ...m })));
   const [editProds, setEditProds] = useState((v.products||[]).map(p => ({ ...p })));
   const [showMenuPicker, setShowMenuPicker] = useState(false);
@@ -2088,7 +2088,7 @@ function KarteDetail({ visit: v, customer: c, menus: allMenus, products: allProd
     });
   };
 
-  if (showCheckout) return <CheckoutPage visit={{...v, menus: karteMenus, products: karteProds}} customer={c} menus={allMenus} products={allProducts} shopCategoryList={shopCategoryList||[]} onBack={() => setShowCheckout(false)} notify={notify} onPaid={async (result) => {
+  if (showCheckout) return <CheckoutPage visit={{...v, menus: karteMenus, products: karteProds}} customer={c} menus={allMenus} products={allProducts} allVisits={allVisits||[]} shopCategoryList={shopCategoryList||[]} onBack={() => setShowCheckout(false)} notify={notify} onPaid={async (result) => {
     setPaid(true);
     if (updateVisit) await updateVisit(v.id, { paid: true, menus: result.menus, products: result.products, total: result.total, paymentMethod: result.paymentMethod, paidAt: nowTimeStr(), hpbPoint: result.hpbPoint||0 });
     if (v.appointmentId && updateAppointment) await updateAppointment(v.appointmentId, { paid: true });
@@ -5575,7 +5575,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.26-d"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.26-e"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -6413,7 +6413,7 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
         };
         return (
           <div style={{ position:"fixed", inset:0, zIndex:800, background:C.bg, overflowY:"auto" }}>
-            <CheckoutPage visit={synthVisit} customer={cust||{name:"不明",gender:"other"}} menus={menus} products={products} shopCategoryList={shopCategoryList||[]} onBack={() => setShowCheckoutAppt(null)} notify={notify} onPaid={async (result) => {
+            <CheckoutPage visit={synthVisit} customer={cust||{name:"不明",gender:"other"}} menus={menus} products={products} allVisits={visits||[]} shopCategoryList={shopCategoryList||[]} onBack={() => setShowCheckoutAppt(null)} notify={notify} onPaid={async (result) => {
               const confirmedMenuIds = result.menus.map(m => m.menuId).filter(Boolean);
               await sb.from("appointments").update({ paid: true, menu_ids: confirmedMenuIds }).eq("id", a.id);
               setAppointments(p => p.map(ap => ap.id === a.id ? {...ap, paid:true, menuIds: confirmedMenuIds} : ap));
