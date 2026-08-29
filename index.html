@@ -731,19 +731,31 @@ function App() {
     await sb.from("visits").delete().eq("id", id);
     setVisits(p => p.filter(v => v.id !== id));
     if (target) {
-      const matched = appointments.filter(a =>
-        a.customerId === target.customerId &&
-        a.date === target.date &&
-        a.time === target.time
-      );
-      for (const a of matched) {
+      // 予約との正式な紐付け(appointmentId)を最優先する。
+      // 紐付けが無い古いデータの時だけ、同一人物・同日時の予約を「1件だけ」消す。
+      // （同じ時間に重複予約がある場合に、無関係な予約まで巻き添えで消さないため）
+      let victims = [];
+      if (target.appointmentId) {
+        const a = appointments.find(x => x.id === target.appointmentId);
+        if (a) victims = [a];
+      } else {
+        // 他のカルテに紐づいている予約は対象から外す
+        const linkedIds = new Set(
+          visits.filter(v => v.id !== id && v.appointmentId).map(v => v.appointmentId)
+        );
+        const cand = appointments.filter(a =>
+          !linkedIds.has(a.id) &&
+          a.customerId === target.customerId &&
+          a.date === target.date &&
+          a.time === target.time
+        );
+        victims = cand.slice(0, 1);
+      }
+      for (const a of victims) {
         await sb.from("appointments").delete().eq("id", a.id);
       }
-      setAppointments(p => p.filter(a => !(
-        a.customerId === target.customerId &&
-        a.date === target.date &&
-        a.time === target.time
-      )));
+      const victimIds = new Set(victims.map(a => a.id));
+      if (victimIds.size) setAppointments(p => p.filter(a => !victimIds.has(a.id)));
     }
     notify("カルテを削除しました");
   }, [visits, appointments]);
@@ -833,13 +845,24 @@ function App() {
     await sb.from("appointments").delete().eq("id", id);
     setAppointments(p => p.filter(a => a.id !== id));
     if (appt) {
-      const toDelete = visits.filter(v =>
-        v.appointmentId
-          ? v.appointmentId === id
-          : (v.customerId === appt.customerId && v.date === appt.date && v.time === appt.time)
-      );
+      // 紐付いたカルテを優先。紐付けが無い場合だけ、同一人物・同日時の
+      // 「空のカルテ」を1件だけ消す。会計済・金額入りのカルテは絶対に消さない。
+      let toDelete = visits.filter(v => v.appointmentId === id);
+      if (!toDelete.length) {
+        const cand = visits.filter(v =>
+          !v.appointmentId &&
+          v.customerId === appt.customerId &&
+          v.date === appt.date &&
+          v.time === appt.time &&
+          !v.paid && (v.total || 0) === 0
+        );
+        toDelete = cand.slice(0, 1);
+      } else {
+        toDelete = toDelete.filter(v => !v.paid);
+      }
       for (const v of toDelete) await sb.from("visits").delete().eq("id", v.id);
-      setVisits(p => p.filter(v => !toDelete.find(d => d.id === v.id)));
+      const delIds = new Set(toDelete.map(v => v.id));
+      if (delIds.size) setVisits(p => p.filter(v => !delIds.has(v.id)));
     }
   }, [appointments, visits]);
 
@@ -5575,7 +5598,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.26-e"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.08.26-f"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -5734,9 +5757,18 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
     const newPaid = !appt.paid;
     await sb.from("appointments").update({ paid: newPaid }).eq("id", appt.id);
     setAppointments(p => p.map(a => a.id === appt.id ? { ...a, paid: newPaid } : a));
-    const matchedVisit = visits ? visits.filter(v => v.customerId === appt.customerId && v.date === appt.date && v.time === appt.time) : [];
+    // 紐付いたカルテだけを切り替える。紐付けが無い場合のみ同一人物・同日時を1件。
+    const all = visits || [];
+    let matchedVisit = all.filter(v => v.appointmentId === appt.id);
+    if (!matchedVisit.length) {
+      matchedVisit = all.filter(v =>
+        !v.appointmentId &&
+        v.customerId === appt.customerId && v.date === appt.date && v.time === appt.time
+      ).slice(0, 1);
+    }
     for (const v of matchedVisit) { await sb.from("visits").update({ paid: newPaid }).eq("id", v.id); }
-    if (setVisits) setVisits(p => p.map(v => v.customerId === appt.customerId && v.date === appt.date && v.time === appt.time ? { ...v, paid: newPaid } : v));
+    const mIds = new Set(matchedVisit.map(v => v.id));
+    if (setVisits && mIds.size) setVisits(p => p.map(v => mIds.has(v.id) ? { ...v, paid: newPaid } : v));
     notify(appt.paid ? "会計を取り消しました" : "会計済にしました ✓");
     closeTapMenu();
   };
