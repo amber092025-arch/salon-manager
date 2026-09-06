@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>カルテ登録 | Amber</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style>
+  :root{
+    --cream:#faf8f5; --ink:#3d3833; --amber:#c8a97e; --amber-deep:#a8865a;
+    --border:#e8e2da; --muted:#8a8278; --closed:#f1ece4; --white:#fff;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{background:var(--cream);color:var(--ink);
+    font-family:'Noto Sans JP',sans-serif;font-size:14px;line-height:1.6}
+  .serif{font-family:'Cormorant Garamond',serif}
+  button{font-family:inherit;border:none;background:none;cursor:pointer;color:inherit}
+  button:disabled{opacity:.4}
+  input,select{font-family:inherit;font-size:16px;width:100%;padding:12px 14px;
+    border:1px solid var(--border);border-radius:10px;background:var(--white);color:var(--ink)}
+  input:focus,select:focus{outline:2px solid var(--amber-deep);outline-offset:-1px}
+  button:focus-visible,a:focus-visible{outline:2px solid var(--amber-deep);outline-offset:2px}
+  @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect } = React;
+
+const token = (() => {
+  const sp = new URLSearchParams(location.search);
+  let t = sp.get("t");
+  if (!t && sp.get("liff.state")) {
+    const ls = sp.get("liff.state");
+    t = new URLSearchParams(ls.startsWith("?") ? ls.slice(1) : ls).get("t");
+  }
+  return t || "";
+})();
+
+function Header() {
+  return (
+    <header style={{padding:"22px 16px 6px", textAlign:"center"}}>
+      <div className="serif" style={{fontSize:28, fontWeight:600, letterSpacing:"0.12em"}}>Amber</div>
+      <div style={{fontSize:12, color:"var(--muted)", marginTop:4, letterSpacing:"0.08em"}}>カルテ登録</div>
+    </header>
+  );
+}
+
+function Card({ children }) {
+  return (
+    <div style={{background:"var(--white)", border:"1px solid var(--border)",
+      borderRadius:16, padding:20, margin:"14px 16px"}}>{children}</div>
+  );
+}
+
+function Field({ label, required, hint, children }) {
+  return (
+    <div style={{marginBottom:18}}>
+      <label style={{display:"flex", alignItems:"center", gap:6, fontSize:13,
+        fontWeight:700, marginBottom:7}}>
+        <span>{label}</span>
+        {required && <span style={{fontSize:10, color:"#c0392b", fontWeight:700}}>必須</span>}
+      </label>
+      {children}
+      {hint && <div style={{fontSize:11, color:"var(--muted)", marginTop:5}}>{hint}</div>}
+    </div>
+  );
+}
+
+function Message({ title, body }) {
+  return (
+    <div>
+      <Header />
+      <Card>
+        <div style={{fontSize:16, fontWeight:700, marginBottom:10}}>{title}</div>
+        <div style={{fontSize:14, color:"var(--muted)", lineHeight:1.8}}>{body}</div>
+      </Card>
+    </div>
+  );
+}
+
+function App() {
+  const [phase, setPhase] = useState("loading"); // loading / form / done / expired / error
+  const [result, setResult] = useState(null);
+  const [sending, setSending] = useState(false);
+  const [err, setErr] = useState("");
+  const [f, setF] = useState({ name:"", kana:"", phone:"", birthday:"", gender:"female" });
+
+  useEffect(() => {
+    if (!token) { setPhase("expired"); return; }
+    fetch(`/api/register-customer?t=${token}`)
+      .then(r => r.json())
+      .then(d => {
+        if (!d.ok) { setPhase("expired"); return; }
+        if (d.already) { setResult({ status:"already", name:d.already.name }); setPhase("done"); return; }
+        setPhase("form");
+      })
+      .catch(() => setPhase("error"));
+  }, []);
+
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+
+  const submit = () => {
+    if (sending) return;
+    const phone = f.phone.replace(/[^0-9]/g, "");
+    if (!f.name.trim()) { setErr("お名前をご入力ください"); return; }
+    if (!/^0\d{9,10}$/.test(phone)) { setErr("お電話番号は0から始まる10〜11桁でご入力ください"); return; }
+    setErr("");
+    setSending(true);
+    fetch("/api/register-customer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, ...f, phone }),
+    })
+      .then(r => r.json())
+      .then(d => {
+        setSending(false);
+        if (!d.ok) {
+          if (d.error === "expired") { setPhase("expired"); return; }
+          setErr("送信できませんでした。時間をおいてお試しください。");
+          return;
+        }
+        setResult(d);
+        setPhase("done");
+      })
+      .catch(() => { setSending(false); setErr("通信に失敗しました。電波の良い場所でお試しください。"); });
+  };
+
+  if (phase === "loading") return <Message title="読み込み中です" body="少々お待ちください。" />;
+
+  if (phase === "expired") return (
+    <Message title="このページは期限切れです"
+      body="お手数ですが、LINEのトークに戻って「登録」と送信し、新しく開き直してください。（安全のため30分で期限切れになります）" />
+  );
+
+  if (phase === "error") return (
+    <Message title="読み込めませんでした"
+      body="電波の良い場所でもう一度お試しください。解決しない場合はサロンまでご連絡ください。" />
+  );
+
+  if (phase === "done") {
+    const s = result && result.status;
+    const nm = result && result.name;
+    if (s === "manual") return (
+      <Message title="確認させていただきます"
+        body="ご入力ありがとうございました。内容を確認のうえ、こちらから改めてご連絡いたします。" />
+    );
+    if (s === "already") return (
+      <Message title="登録済みです"
+        body={`${nm ? nm + "様の" : ""}お客様情報はすでに登録されています。ご予約はLINEのトークからどうぞ。`} />
+    );
+    if (s === "linked") return (
+      <Message title="登録が完了しました"
+        body={`${nm ? nm + "様、" : ""}ありがとうございます。以前のご来店の記録と紐づけました。ご予約やお知らせがLINEに届くようになります。`} />
+    );
+    return (
+      <Message title="登録が完了しました"
+        body={`${nm ? nm + "様、" : ""}ありがとうございます。ご来店を心よりお待ちしております。`} />
+    );
+  }
+
+  return (
+    <div style={{paddingBottom:40}}>
+      <Header />
+      <div style={{fontSize:13, color:"var(--muted)", padding:"6px 20px 0", lineHeight:1.8}}>
+        ご来店にあたり、お客様情報をご登録ください。
+      </div>
+
+      <Card>
+        <Field label="お名前" required>
+          <input value={f.name} onChange={set("name")} placeholder="山田 花子" autoComplete="name" />
+        </Field>
+
+        <Field label="ふりがな" hint="ひらがなでご入力ください">
+          <input value={f.kana} onChange={set("kana")} placeholder="やまだ はなこ" />
+        </Field>
+
+        <Field label="お電話番号" required hint="以前ご来店いただいた方は、その際のお電話番号をご入力ください">
+          <input value={f.phone} onChange={set("phone")} inputMode="tel"
+            placeholder="09012345678" autoComplete="tel" />
+        </Field>
+
+        <Field label="生年月日" hint="お誕生日のご案内に使わせていただきます">
+          <input type="date" value={f.birthday} onChange={set("birthday")} />
+        </Field>
+
+        <Field label="性別">
+          <select value={f.gender} onChange={set("gender")}>
+            <option value="female">女性</option>
+            <option value="male">男性</option>
+            <option value="other">その他・答えない</option>
+          </select>
+        </Field>
+
+        {err && (
+          <div style={{fontSize:13, color:"#c0392b", fontWeight:700, marginBottom:12}}>{err}</div>
+        )}
+
+        <button onClick={submit} disabled={sending}
+          style={{width:"100%", padding:"15px 0", borderRadius:12,
+            background:"var(--amber-deep)", color:"#fff", fontWeight:700, fontSize:15}}>
+          {sending ? "送信中..." : "登録する"}
+        </button>
+      </Card>
+
+      <div style={{fontSize:11, color:"var(--muted)", padding:"0 20px", lineHeight:1.8}}>
+        ご登録いただいた情報は、ご予約とご連絡のためにのみ使用いたします。
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
