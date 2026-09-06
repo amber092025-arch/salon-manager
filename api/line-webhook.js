@@ -135,6 +135,19 @@ async function handleEvent(event) {
 
   // 友だち追加
   if (event.type === "follow") {
+    // 未登録の方にはカルテ登録を先にご案内する
+    let known = false;
+    try { known = await B.isKnownUser(userId); } catch (e) {}
+    if (!known) {
+      return reply(event.replyToken, [
+        {
+          ...text(
+            `友だち追加ありがとうございます✂️\n${SALON_NAME}です。\n\nはじめに「カルテ登録」からお客様情報をご登録ください。以前ご来店の方は、その際のお電話番号で記録と紐づきます。`
+          ),
+          quickReply: qr([msgItem("カルテ登録", "登録"), msgItem("予約する", "予約")]),
+        },
+      ]);
+    }
     return reply(event.replyToken, [
       {
         ...text(
@@ -152,6 +165,11 @@ async function handleEvent(event) {
     // オーナー用: 自分のuserIdを確認するコマンド（OWNER_LINE_USER_ID設定用）
     if (/^(id|myid|ＩＤ)$/i.test(t)) {
       return reply(event.replyToken, [text(`あなたのLINE userId:\n${userId}`)]);
+    }
+
+    // カルテ登録の開始トリガー
+    if (/^(登録|カルテ登録|とうろく|会員登録)[!！。、]*$/.test(t)) {
+      return startRegisterFlow(event.replyToken, userId);
     }
 
     // 電話番号らしきメッセージ(全角数字・ハイフン・空白を正規化し、0始まり10〜11桁の数字のみ) → LINE連携を試みる
@@ -197,7 +215,7 @@ async function handleEvent(event) {
         ...text(
           `メッセージありがとうございます。\nスタッフが確認して対応いたします。\n\nご予約は下のボタンからどうぞ。お急ぎの場合はお電話ください${PHONE_NOTE}。`
         ),
-        quickReply: qr([msgItem("予約する", "予約")]),
+        quickReply: qr([msgItem("予約する", "予約"), msgItem("カルテ登録", "登録")]),
       },
     ]);
   }
@@ -221,6 +239,66 @@ async function handleEvent(event) {
     }
   }
   // それ以外のイベント（スタンプ等）は無応答でOK
+}
+
+// ---------- カルテ登録フロー ----------
+// 本人専用の一時リンク(30分)を発行して register.html を開いてもらう。
+// 予約の受付停止スイッチとは独立して動く（登録は常に受け付ける）。
+async function startRegisterFlow(replyToken, userId) {
+  // 既に連携済みなら案内だけ返す
+  let known = false;
+  try { known = await B.isKnownUser(userId); } catch (e) {}
+  if (known) {
+    return reply(replyToken, [
+      {
+        ...text("お客様情報はすでにご登録いただいております。\nご予約は下のボタンからどうぞ。"),
+        quickReply: qr([msgItem("予約する", "予約")]),
+      },
+    ]);
+  }
+
+  const webToken = crypto.randomBytes(16).toString("hex");
+  await B.saveSession(userId, {
+    step: "register",
+    webToken,
+    webTokenExp: Date.now() + 30 * 60 * 1000,
+  });
+  const base = (process.env.REGISTER_URL || "https://salon-manager-sigma.vercel.app/register.html").trim();
+  const url = `${base}?t=${webToken}`;
+
+  return reply(replyToken, [
+    {
+      type: "flex",
+      altText: "カルテ登録のご案内",
+      contents: {
+        type: "bubble",
+        body: {
+          type: "box",
+          layout: "vertical",
+          backgroundColor: "#FAF8F5",
+          paddingAll: "24px",
+          contents: [
+            { type: "text", text: "Amber", weight: "bold", size: "xl", color: "#A8865A", align: "center" },
+            { type: "text", text: "カルテ登録", size: "sm", color: "#8A8278", align: "center", margin: "sm" },
+            {
+              type: "text",
+              text: "お名前とお電話番号をご登録ください。以前ご来店の方は、その際のお電話番号で記録と紐づきます。",
+              size: "sm", color: "#3D3833", wrap: true, margin: "lg",
+            },
+            {
+              type: "button",
+              style: "primary",
+              color: "#A8865A",
+              margin: "xl",
+              height: "sm",
+              action: { type: "uri", label: "登録ページを開く", uri: url },
+            },
+            { type: "text", text: "※このリンクは30分間有効です", size: "xxs", color: "#8A8278", align: "center", margin: "md" },
+          ],
+        },
+      },
+    },
+  ]);
 }
 
 // ---------- 会話フロー ----------
