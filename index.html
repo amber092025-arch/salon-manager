@@ -2018,6 +2018,7 @@ function KarteDetail({ visit: v, customer: c, menus: allMenus, products: allProd
     setOtherImgs(v.otherImgs || []);
   }, [v.beforeImgs, v.afterImgs, v.otherImgs]);
   const [photoTab, setPhotoTab] = useState("after");
+  const [photoBusy, setPhotoBusy] = useState(false); // 写真の変換・保存中
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [memo, setMemo] = useState(v.notes || "");
   const [editMemo, setEditMemo] = useState(false);
@@ -2053,17 +2054,33 @@ function KarteDetail({ visit: v, customer: c, menus: allMenus, products: allProd
   ];
   const curTab = tabDefs.find(function(t){ return t.key === photoTab; });
 
-  const compressImg = function(url, cb) {
+  // 失敗時に必ず onFail を呼ぶ。以前は onerror もタイムアウトも無く、
+  // 画像が復号できないと永久に止まったまま（通知も出ない）になっていた。
+  const compressImg = function(url, cb, onFail) {
     var img = new Image();
-    img.onload = function() {
-      var canvas = document.createElement("canvas");
-      var MAX = 800;
-      var ratio = Math.min(MAX/img.width, MAX/img.height, 1);
-      canvas.width = img.width * ratio;
-      canvas.height = img.height * ratio;
-      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-      cb(canvas.toDataURL("image/jpeg", 0.6));
+    var done = false;
+    var fail = function(reason) {
+      if (done) return; done = true; clearTimeout(timer);
+      console.error("compressImg failed:", reason);
+      if (onFail) onFail(reason);
     };
+    var timer = setTimeout(function(){ fail("時間切れ"); }, 20000);
+    img.onload = function() {
+      if (done) return;
+      try {
+        var canvas = document.createElement("canvas");
+        var MAX = 800;
+        var ratio = Math.min(MAX/img.width, MAX/img.height, 1);
+        canvas.width = Math.max(1, Math.round(img.width * ratio));
+        canvas.height = Math.max(1, Math.round(img.height * ratio));
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        var out = canvas.toDataURL("image/jpeg", 0.6);
+        if (!out || out.length < 100) { fail("変換結果が空"); return; }
+        done = true; clearTimeout(timer);
+        cb(out);
+      } catch (err) { fail("canvas: " + String(err).slice(0, 80)); }
+    };
+    img.onerror = function() { fail("画像を読み込めない形式"); };
     img.src = url;
   };
 
@@ -2071,7 +2088,17 @@ function KarteDetail({ visit: v, customer: c, menus: allMenus, products: allProd
     // 【最終防壁】写真の読み込み完了が確認できていない状態では絶対にphoto_dataを書き込まない
     if (!v.photosLoaded) { if (notify) notify("写真の読み込みが完了していないため保存できません", "error"); return; }
     var photoData = JSON.stringify({ before: before, after: after, other: other });
-    fetch(SUPABASE_URL + "/rest/v1/visits?id=eq." + v.id, { method: "PATCH", headers: { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY, "Content-Type": "application/json" }, body: JSON.stringify({ photo_data: photoData }) });
+    fetch(SUPABASE_URL + "/rest/v1/visits?id=eq." + v.id, { method: "PATCH", headers: { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY, "Content-Type": "application/json" }, body: JSON.stringify({ photo_data: photoData }) })
+      .then(function(r){
+        if (!r.ok) return r.text().then(function(t){
+          console.error("savePhotos", r.status, t);
+          if (notify) notify("写真をサーバーに保存できませんでした（" + r.status + "）", "error");
+        });
+      })
+      .catch(function(err){
+        console.error("savePhotos", err);
+        if (notify) notify("写真の保存で通信に失敗しました", "error");
+      });
     var vSetter = setVisitsRaw || setVisits;
     if (vSetter) vSetter(function(p) { return p.map(function(x) { return x.id === v.id ? {...x, beforeImgs: before, afterImgs: after, otherImgs: other} : x; }); });
   };
@@ -2090,25 +2117,48 @@ function KarteDetail({ visit: v, customer: c, menus: allMenus, products: allProd
   };
 
   const handleAddCatImg = function(setImgs, cat, e) {
-    if (!photosReady) { if (notify) notify("写真を読み込み中です。少し待ってから追加してください", "error"); e.target.value = ""; return; }
+    var files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!files.length) return;
+    if (!photosReady) { if (notify) notify("写真を読み込み中です。少し待ってから追加してください", "error"); return; }
+    if (photoBusy) { if (notify) notify("前の写真を処理中です", "error"); return; }
+
+    var current = cat === "before" ? beforeImgs : cat === "after" ? afterImgs : otherImgs;
+    var room = 3 - current.length;
+    if (room <= 0) { if (notify) notify("このタブは3枚までです。削除してから追加してください", "error"); return; }
+    var targets = files.slice(0, room);
+    if (files.length > room) { if (notify) notify("3枚までのため" + room + "枚だけ追加します"); }
+
+    setPhotoBusy(true);
     photosDirty.current = true;
-    Array.from(e.target.files).forEach(function(f) {
+    var acc = current.slice();
+    var i = 0;
+    var stop = function(msg) { setPhotoBusy(false); if (notify) notify(msg, "error"); };
+
+    var step = function() {
+      if (i >= targets.length) {
+        var nb = cat === "before" ? acc : beforeImgs;
+        var na = cat === "after"  ? acc : afterImgs;
+        var no = cat === "other"  ? acc : otherImgs;
+        setImgs(acc);        // 副作用を状態更新の外に出す
+        savePhotos(nb, na, no);
+        setPhotoBusy(false);
+        return;
+      }
+      var f = targets[i++];
       var reader = new FileReader();
+      reader.onerror = function() { stop("写真を読み込めませんでした（" + (f.name || "画像") + "）"); };
       reader.onload = function(ev) {
-        compressImg(ev.target.result, function(compressed) {
-          setImgs(function(p) {
-            if (p.length >= 3) return p;
-            var next = [...p, { name: f.name, url: compressed }];
-            var nb = cat==="before"?next:beforeImgs;
-            var na = cat==="after"?next:afterImgs;
-            var no = cat==="other"?next:otherImgs;
-            savePhotos(nb, na, no);
-            return next;
-          });
-        });
+        compressImg(
+          ev.target.result,
+          function(compressed) { acc = [...acc, { name: f.name, url: compressed }]; step(); },
+          function(reason) { stop("写真を変換できませんでした（" + reason + "）"); }
+        );
       };
-      reader.readAsDataURL(f);
-    });
+      try { reader.readAsDataURL(f); }
+      catch (err) { stop("写真を開けませんでした"); }
+    };
+    step();
   };
 
   if (showCheckout) return <CheckoutPage visit={{...v, menus: karteMenus, products: karteProds}} customer={c} menus={allMenus} products={allProducts} allVisits={allVisits||[]} shopCategoryList={shopCategoryList||[]} onBack={() => setShowCheckout(false)} notify={notify} onPaid={async (result) => {
@@ -2219,7 +2269,12 @@ function KarteDetail({ visit: v, customer: c, menus: allMenus, products: allProd
               </div>
             );
           })}
-          {photosReady && curTab.imgs.length < 3 && (
+          {photosReady && photoBusy && (
+            <div style={{ width:72, height:72, flexShrink:0, background:"#e8e2da", display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <span style={{ fontSize:10, color:C.sub }}>処理中…</span>
+            </div>
+          )}
+          {photosReady && !photoBusy && curTab.imgs.length < 3 && (
             <div onClick={() => curTab.ref.current.click()} style={{ width:72, height:72, flexShrink:0, background:curTab.color, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:"pointer", gap:2 }}>
               <span style={{ fontSize:22, color:"#fff", fontWeight:300 }}>+</span>
               <span style={{ fontSize:9, color:"#fff" }}>{curTab.label}</span>
@@ -5598,7 +5653,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.08.26-f"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.09.06-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
