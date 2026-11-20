@@ -985,11 +985,15 @@ function App() {
   const [karteDetailCustomer, setKarteDetailCustomer] = React.useState(null);
   const [karteDetailBackTab, setKarteDetailBackTab] = React.useState("customers");
   const [karteDetailStartCheckout, setKarteDetailStartCheckout] = React.useState(false);
+  // カルテタブで開いているお客様。カルテ詳細から戻った時に顧客ページへ戻れるよう、タブの外で保持する
+  const [customerDetailId, setCustomerDetailId] = React.useState(null);
 
   const openKarteDetail = React.useCallback((visit, customer, backTab, startCheckout) => {
     setKarteDetailVisit(visit);
     setKarteDetailCustomer(customer);
     setKarteDetailBackTab(backTab || "customers");
+    // カルテ一覧経由で開いた場合、戻った時に同じお客様のページへ戻れるようにする
+    if ((backTab || "customers") === "customers" && customer && customer.id) setCustomerDetailId(customer.id);
     setKarteDetailStartCheckout(!!startCheckout);
     setTab("karteDetail");
     // この1件分の写真だけを単発取得（軽量・確実）→ 詳細画面と一覧の両方に反映
@@ -1070,7 +1074,7 @@ function App() {
       {/* Content（このアプリの唯一のスクロール領域。下部ナビをposition:fixedにせず、フレックスの通常フローで常に最下部に来るようにする） */}
       <div style={{ padding: "0 0 8px", flex: 1, minHeight: 0, overflowY: "auto" }}>
         {tab === "home" && <HomeTab visits={visits} customers={customers} appointments={appointments} menus={menus} setTab={setTab} products={products} purchaseCosts={purchaseCosts} purchaseCategories={purchaseCategories} monthlyGoals={monthlyGoals} bizHours={bizHours} closedDaysOfWeek={closedDaysOfWeek} personalHolidays={personalHolidays} openKarteDetail={openKarteDetail} />}
-        {tab === "customers" && <CustomersTab customers={customers} setCustomers={setCustomers} visits={visits} setVisits={setVisitsW} menus={menus} products={products} notify={notify} addCustomer={addCustomer} openKarteDetail={openKarteDetail} setTab={setTab} setPendingCustomerId={setPendingCustomerId} />}
+        {tab === "customers" && <CustomersTab customers={customers} setCustomers={setCustomers} visits={visits} setVisits={setVisitsW} menus={menus} products={products} notify={notify} addCustomer={addCustomer} openKarteDetail={openKarteDetail} setTab={setTab} setPendingCustomerId={setPendingCustomerId} detailId={customerDetailId} setDetailId={setCustomerDetailId} />}
         {tab === "visit" && <VisitTab customers={customers} menus={menus} products={products} visits={visits} setVisits={setVisitsW} setProducts={setProductsW} notify={notify} setTab={setTab} setCustomers={setCustomers} />}
         {tab === "analytics" && <AnalyticsTab visits={visits} customers={customers} menus={menus} products={products} appointments={appointments} purchaseCosts={purchaseCosts} purchaseCategories={purchaseCategories} openKarteDetail={openKarteDetail} />}
         {tab === "more" && <MoreTab setTab={setTab} />}
@@ -1120,6 +1124,8 @@ function App() {
       <div style={{ background: C.card, borderTop: `1px solid ${C.border}`, display: "flex", flexShrink: 0 }}>
         {TABS.map(t => (
           <button key={t.id} onClick={() => {
+    // 下部ナビで「カルテ」を押した時は一覧に戻す（開きっぱなしの顧客ページを閉じる）
+    if (t.id === "customers") setCustomerDetailId(null);
     setTab(t.id);
             }} style={{
             flex: 1, padding: "10px 4px 12px", border: "none", background: "transparent",
@@ -1359,11 +1365,16 @@ function kanaGroup(kana) {
 
 const SORT_OPTIONS = ["50音順","最終来店日","平均予算","来店年数"];
 
-function CustomersTab({ customers, setCustomers, visits, setVisits, menus, products, notify, addCustomer, openKarteDetail, setTab, setPendingCustomerId }) {
+function CustomersTab({ customers, setCustomers, visits, setVisits, menus, products, notify, addCustomer, openKarteDetail, setTab, setPendingCustomerId, detailId, setDetailId }) {
   const [q, setQ] = useState("");
   const voiceSearch = useVoiceInput(setQ);
   const [sort, setSort] = useState("50音順");
-  const [detail, setDetail] = useState(null);
+  // 開いているお客様は親(App)で保持する。タブを離れて戻っても顧客ページが維持されるようにするため
+  const [detailLocal, setDetailLocal] = useState(null);
+  const detail = setDetailId
+    ? (detailId ? (customers.find(c => c.id === detailId) || null) : null)
+    : detailLocal;
+  const setDetail = (c) => { if (setDetailId) setDetailId(c ? c.id : null); else setDetailLocal(c); };
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ name: "", kana: "", phone: "", birthday: "", gender: "female", notes: "", customerType: "new" });
 
@@ -5654,7 +5665,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.11.18-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.11.20-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
