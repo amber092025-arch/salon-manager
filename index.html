@@ -840,7 +840,8 @@ function App() {
     setAppointments(p => p.map(a => a.id === id ? {...a,...changes} : a));
   }, [appointments]);
 
-  const deleteAppointment = useCallback(async (id) => {
+  // opts.deletePaidVisit = true のときは、会計済のカルテも一緒に削除する(予約表とカルテを1対1に保つため)
+  const deleteAppointment = useCallback(async (id, opts = {}) => {
     const appt = appointments.find(a => a.id === id);
     await sb.from("appointments").delete().eq("id", id);
     setAppointments(p => p.filter(a => a.id !== id));
@@ -857,7 +858,7 @@ function App() {
           !v.paid && (v.total || 0) === 0
         );
         toDelete = cand.slice(0, 1);
-      } else {
+      } else if (!opts.deletePaidVisit) {
         toDelete = toDelete.filter(v => !v.paid);
       }
       for (const v of toDelete) await sb.from("visits").delete().eq("id", v.id);
@@ -5653,7 +5654,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.09.06-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.11.18-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
@@ -5709,6 +5710,7 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
   const [peEditId, setPeEditId] = useState(null); // 編集中のプライベート予定id（null=新規作成）
   const [peForm, setPeForm] = useState({ title: "", date: todayStr(), time: "10:00", endTime: "11:00", memo: "", color: PE_COLORS[0], isShared: false, recurrence: "none", recurrenceUntil: "" });
   const [tapPe, setTapPe] = useState(null); // タップ中のプライベート予定（編集/削除メニュー用）
+  const [deleteConfirm, setDeleteConfirm] = useState(null); // 会計済カルテが紐づく予約の削除確認（{ appt, visitCount, total }）
 
   // プライベート予定が指定日に発生するか（繰り返し設定を考慮）
   const privateEventOccursOn = (e, dateStr) => {
@@ -5827,14 +5829,31 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
     notify(appt.paid ? "会計を取り消しました" : "会計済にしました ✓");
     closeTapMenu();
   };
-  const handleDelete = async (id) => {
+  // 予約を実際に削除する。opts.deletePaidVisit=true で会計済カルテも一緒に消す
+  const runDeleteAppointment = async (id, opts = {}) => {
     if (typeof deleteAppointment === "function") {
-      await deleteAppointment(id);
+      await deleteAppointment(id, opts);
     } else {
       setAppointments(p => p.filter(a => a.id !== id));
     }
-    notify("予約を削除しました");
+    notify(opts.deletePaidVisit ? "予約とカルテを削除しました" : "予約を削除しました");
     closeTapMenu();
+  };
+  const handleDelete = async (id) => {
+    // 会計済のカルテが紐づいている場合は、カルテだけ残ると予約表と食い違うため選ばせる
+    const paidLinked = (visits || []).filter(v => v.appointmentId === id && v.paid);
+    if (paidLinked.length) {
+      const appt = appointments.find(a => a.id === id) || null;
+      setDeleteConfirm({
+        apptId: id,
+        appt,
+        visitCount: paidLinked.length,
+        total: paidLinked.reduce((s, v) => s + (v.total || 0), 0),
+      });
+      closeTapMenu();
+      return;
+    }
+    await runDeleteAppointment(id, {});
   };
   const handleEditOpen = (appt) => {
     setShowEdit({ ...appt, menuIds: appt.menuIds || [] });
@@ -6680,6 +6699,41 @@ function AppointmentsTab({ appointments, setAppointments, customers, setCustomer
           </div>
         </div>
       )}
+
+      {/* ── 予約削除の確認（会計済カルテが紐づいている場合のみ） ── */}
+      {deleteConfirm && (() => {
+        const dcCust = customers.find(c => c.id === deleteConfirm.appt?.customerId);
+        const closeDc = () => setDeleteConfirm(null);
+        return (
+          <div style={{ position: "fixed", inset: 0, zIndex: 960, display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px", boxSizing: "border-box" }} onClick={closeDc}>
+            <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.55)" }} />
+            <div style={{ position: "relative", zIndex: 1, background: "#fff", borderRadius: 16, padding: "20px", width: 300, boxShadow: "0 4px 20px rgba(0,0,0,0.15)" }} onClick={e => e.stopPropagation()}>
+              <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>この予約には会計済のカルテがあります</div>
+              <div style={{ fontSize: 13, color: C.sub, marginBottom: 4 }}>
+                {dcCust?.name || "お客様"} 様　{deleteConfirm.appt?.date || ""} {deleteConfirm.appt?.time || ""}
+              </div>
+              <div style={{ fontSize: 13, color: C.sub, marginBottom: 16 }}>
+                カルテ {deleteConfirm.visitCount}件・売上 ¥{(deleteConfirm.total || 0).toLocaleString()}
+              </div>
+              <button
+                onClick={async () => { const id = deleteConfirm.apptId; closeDc(); await runDeleteAppointment(id, {}); }}
+                style={{ width: "100%", padding: "12px", borderRadius: 10, border: "none", background: "#f5ede0", color: "#7a6848", fontWeight: 700, fontSize: 14, cursor: "pointer", marginBottom: 8 }}>
+                予約だけ削除（売上は残す）
+              </button>
+              <button
+                onClick={async () => { const id = deleteConfirm.apptId; closeDc(); await runDeleteAppointment(id, { deletePaidVisit: true }); }}
+                style={{ width: "100%", padding: "12px", borderRadius: 10, border: "none", background: "#fff0ee", color: "#ff3b30", fontWeight: 700, fontSize: 14, cursor: "pointer", marginBottom: 8 }}>
+                両方削除（間違い登録はこちら）
+              </button>
+              <button
+                onClick={closeDc}
+                style={{ width: "100%", padding: "12px", borderRadius: 10, border: "none", background: "#f2f0ec", color: C.sub, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                やめる
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── 来店確定 → お客様情報入力(アプリ内にカルテが無い方のみ) ── */}
       {confirmForm && (
