@@ -48,6 +48,7 @@ const sb = {
     delete: function() { this._method = "DELETE"; this._filters = []; return this; },
     eq: function(col, val) { this._filters = [...(this._filters||[]), `${col}=eq.${val}`]; return this; },
     order: function(col, opts={}) { this._order = `${col}.${opts.ascending===false?"desc":"asc"}`; return this; },
+    range: function(from, to) { this._range = [from, to]; return this; }, // ページ分割取得用（from〜to行目、0始まり・両端含む）
     then: async function(resolve, reject) {
       try {
         const base = `${SUPABASE_URL}/rest/v1/${this._table}`;
@@ -61,7 +62,16 @@ const sb = {
         const params = [];
         if (this._cols && !this._method) params.push(`select=${this._cols}`);
         if (this._filters) this._filters.forEach(f => params.push(f));
-        if (this._order) params.push(`order=${this._order}`);
+        if (this._order) {
+          // ページ分割時は同順位の並びを安定させるため、idを第2キーに加える
+          params.push(`order=${this._order}` + (this._range && !this._method ? ",id.asc" : ""));
+        } else if (this._range && !this._method) {
+          params.push("order=id.asc");
+        }
+        if (this._range && !this._method) {
+          params.push(`offset=${this._range[0]}`);
+          params.push(`limit=${this._range[1] - this._range[0] + 1}`);
+        }
         if (params.length) url += "?" + params.join("&");
 
         const method = this._method || "GET";
@@ -94,6 +104,29 @@ const sbRetry = async (buildQuery, tries = 3) => {
     if (i < tries - 1) await new Promise(res => setTimeout(res, 1000 * (i + 1)));
   }
   return last;
+};
+
+// ── 全件取得ヘルパー（Supabaseの1回1,000件上限を、1,000件ずつ読み直して全件取得する） ──
+const SB_PAGE_SIZE = 1000;
+const sbFetchAll = async (buildQuery) => {
+  const all = [];
+  const seen = new Set();
+  let from = 0;
+  while (true) {
+    const r = await sbRetry(() => buildQuery().range(from, from + SB_PAGE_SIZE - 1));
+    if (r.error) return r;
+    const rows = r.data || [];
+    if (rows.length === 0) break;
+    rows.forEach(row => {
+      if (row && row.id !== undefined && row.id !== null) {
+        if (seen.has(row.id)) return;
+        seen.add(row.id);
+      }
+      all.push(row);
+    });
+    from += rows.length;
+  }
+  return { data: all, error: null };
 };
 
 // visitsの軽量カラム（写真base64のphoto_data/imagesを除外。写真は後追いで取得）
@@ -494,18 +527,18 @@ function App() {
         setSalonLogo(null);
       }
 
-      // ② 残りのデータを並列取得（各クエリ最大3回リトライ。visitsは写真カラム除外の軽量版）
+      // ② 残りのデータを並列取得（各クエリ最大3回リトライ。件数が増える表はsbFetchAllで1,000件ずつ全件取得）
       const [c, m, p, v, a, tc, ti, st, bg, pe] = await Promise.all([
-        sbRetry(() => sb.from("customers").select().order("name")),
+        sbFetchAll(() => sb.from("customers").select().order("name")),
         sbRetry(() => sb.from("menus").select("id,name,price,duration,category,tags,show_tilde,sort_order,menu_kind,target_customer,is_bookable").order("sort_order")),
         sbRetry(() => sb.from("products").select("id,name,price,cost,stock,min_stock,category,sub_category,placeholder,description,is_public,sort_order").order("sort_order")),
-        sbRetry(() => sb.from("visits").select(VISIT_LIGHT_COLS).order("date", {ascending:false})),
-        sbRetry(() => sb.from("appointments").select().order("date")),
+        sbFetchAll(() => sb.from("visits").select(VISIT_LIGHT_COLS).order("date", {ascending:false})),
+        sbFetchAll(() => sb.from("appointments").select().order("date")),
         sbRetry(() => sb.from("tag_categories").select().order("sort_order")),
         sbRetry(() => sb.from("tag_items").select().order("sort_order")),
         sbRetry(() => sb.from("styles").select("id,style_name,category,length,coupon_menu_id,hashtags,tags,sort_order,created_at,cover_image,stylist_name").order("created_at", {ascending:false})),
         sbRetry(() => sb.from("blogs").select("id,title,category,coupon_menu_id,sort_order,created_at,cover_image,author_name").order("created_at", {ascending:false})),
-        sbRetry(() => sb.from("private_events").select().order("date")),
+        sbFetchAll(() => sb.from("private_events").select().order("date")),
       ]);
       // 重要データ（顧客・来店・予約・メニュー）が1つでも読めなかったらバナー表示
       if (c.error || v.error || a.error || m.error) {
@@ -652,9 +685,9 @@ function App() {
           // 再接続前に最新データを再取得
           try {
             const [a, v, c] = await Promise.all([
-              sbRetry(() => sb.from("appointments").select("*").order("date").order("time")),
-              sbRetry(() => sb.from("visits").select(VISIT_LIGHT_COLS).order("date")),
-              sbRetry(() => sb.from("customers").select().order("name")),
+              sbFetchAll(() => sb.from("appointments").select("*").order("date").order("time")),
+              sbFetchAll(() => sb.from("visits").select(VISIT_LIGHT_COLS).order("date")),
+              sbFetchAll(() => sb.from("customers").select().order("name")),
             ]);
             if (a.data) setAppointments(a.data.map(fromDb.appointment));
             if (v.data) setVisits(prev => {
@@ -5665,7 +5698,7 @@ const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const HOUR_START = 6;
 const HOUR_END = 23;
 const CELL_H = 60;
-const APP_VERSION = "v2026.11.20-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
+const APP_VERSION = "v2026.11.27-a"; // アプリのバージョン（起動画面とホーム最下部に表示）
 
 // Get business open/close hours for a date
 function getBizForDate(date, bizHours, closedDaysOfWeek, personalHolidays) {
